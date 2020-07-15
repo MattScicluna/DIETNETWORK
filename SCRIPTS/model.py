@@ -72,9 +72,13 @@ class Discrim_net2(nn.Module):
     Does not have weights for first layer; 
     Uses F.linear with passed weights instead
     """
-    def __init__(self, n_feats,
-                 n_hidden1_u, n_hidden2_u, n_targets,
-                 input_dropout = 0.):
+    def __init__(self, 
+                 n_feats,
+                 n_hidden1_u, 
+                 n_hidden2_u, 
+                 n_targets,
+                 input_dropout=0.,
+                 incl_bias=False):
         super(Discrim_net2, self).__init__()
         # Dropout on input layer
         self.input_dropout = nn.Dropout(p=input_dropout)
@@ -90,6 +94,11 @@ class Discrim_net2(nn.Module):
         self.out = nn.Linear(n_hidden2_u, n_targets)
         nn.init.xavier_uniform_(self.out.weight)
         nn.init.zeros_(self.out.bias)
+
+        if incl_bias:
+            self.fat_bias = nn.Parameter(data=torch.rand(n_hidden1_u), requires_grad=True)
+        else:
+            self.fat_bias = None
         # Dropout
         self.dropout = nn.Dropout()
     def forward(self, x, fatLayer_weights):
@@ -97,7 +106,7 @@ class Discrim_net2(nn.Module):
         # weight = comes from feat embedding net
         # now ^^^ is passed with forward
         x = self.input_dropout(x)
-        z1 = F.linear(x, fatLayer_weights, bias=None)
+        z1 = F.linear(x, fatLayer_weights, bias=self.fat_bias)
         #z1 = self.hidden_1(x)
         a1 = torch.relu(z1)
         a1 = self.bn1(a1)
@@ -118,7 +127,8 @@ class CombinedModel(nn.Module):
                  n_hidden1_u, 
                  n_hidden2_u, 
                  n_targets,
-                 input_dropout=0.):
+                 input_dropout=0.,
+                 incl_bias=True):
         super(CombinedModel, self).__init__()
         #  Initialize feat. embedding and discriminative networks
         self.feat_emb = Feat_emb_net(n_feats, n_hidden_u)
@@ -126,7 +136,8 @@ class CombinedModel(nn.Module):
                                      n_hidden1_u, 
                                      n_hidden2_u, 
                                      n_targets, 
-                                     input_dropout)
+                                     input_dropout,
+                                     incl_bias)
     def forward(self, emb, x_batch):
         # Forward pass in auxilliary net
         feat_emb_model_out = self.feat_emb(emb)
