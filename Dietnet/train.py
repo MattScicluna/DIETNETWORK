@@ -9,7 +9,10 @@ import h5py
 
 import numpy as np
 
-from comet_ml import Experiment, Optimizer
+try:
+    from comet_ml import Experiment, Optimizer
+except:
+    Experiment, Optimizer = None, None
 
 import torch
 import torch.nn as nn
