@@ -162,6 +162,20 @@ dietnet predict --model ./my_packages \
                 --seeds 42 43 --folds 0 1
 ```
 
+## Label file format
+
+- Tab-delimited (TSV) with a header row and exactly two columns:
+  1) `Sample` — must match the PLINK FAM `iid`
+  2) `Population` (or your label name)
+- Example:
+  ```
+  Sample	Population
+  NA21144	GIH
+  NA21143	GIH
+  NA21090	CEU
+  ```
+- No commas, quotes, or extra columns. UTF-8 text. This file is required for PLINK stratified partitioning and for training/predicting with labels.
+
 ## Training from Scratch (legacy HDF5 path)
 
 ### Complete workflow

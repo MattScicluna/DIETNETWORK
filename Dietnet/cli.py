@@ -57,16 +57,16 @@ def main():
 @click.option(
     '--seeds',
     type=int,
-    multiple=True,
+    nargs=-1,
     default=None,
-    help='Seeds to train (default: seed from config).'
+    help='Seeds to train (space-separated list; default: seed from config).'
 )
 @click.option(
     '--folds',
     type=int,
-    multiple=True,
+    nargs=-1,
     default=None,
-    help='Folds to train (default: all folds from partition).'
+    help='Folds to train (space-separated list; default: all folds from partition).'
 )
 @click.option(
     '--task',
@@ -542,16 +542,16 @@ def _load_label_mapping(label_file: Path, task: str, du) -> dict:
 @click.option(
     '--seeds',
     type=int,
-    multiple=True,
+    nargs=-1,
     default=None,
-    help='Seeds to use (default: all in model package).'
+    help='Seeds to use (space-separated list; default: all in model package).'
 )
 @click.option(
     '--folds',
     type=int,
-    multiple=True,
+    nargs=-1,
     default=None,
-    help='Folds to use (default: all in model package).'
+    help='Folds to use (space-separated list; default: all in model package).'
 )
 @click.option(
     '--batch-size',
