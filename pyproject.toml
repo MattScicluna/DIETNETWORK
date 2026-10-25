@@ -92,7 +92,8 @@ known_first_party = ["dietnet"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["tests"]
+# tests/ for `support`, the root for `scripts` (the sensitive-files check).
+pythonpath = ["tests", "."]
 addopts = "-v --tb=short --strict-markers"
 markers = [
     "slow: long-running (full 1KGP data, published-model reproduction)",
