@@ -22,13 +22,15 @@ set -euo pipefail
 
 : "${TRAIN_PREFIX:?}" "${TRAIN_LABELS:?}" "${TEST_PREFIX:?}" "${DIETNET_VENV:?}" "${RUN_DIR:?}"
 DIETNET="$DIETNET_VENV/bin/dietnet"
+# GNU time (for peak memory); not always at /usr/bin/time (Alliance clusters: CVMFS).
+TIME="$(type -P time)"
 mkdir -p "$RUN_DIR"
 cd "$RUN_DIR"
 
 step() {
     local name="$1"; shift
     echo "== $name"
-    /usr/bin/time -v "$@" > "$name.log" 2> "$name.time"
+    "$TIME" -v "$@" > "$name.log" 2> "$name.time"
     grep -E "Elapsed \(wall|Maximum resident" "$name.time" | sed 's/^\s*/   /'
 }
 
