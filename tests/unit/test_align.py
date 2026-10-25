@@ -41,8 +41,13 @@ def raw_bim(prefix):
     return pd.read_csv(f"{prefix}.bim", sep="\t", header=None)
 
 
+# Small enough that every fixture is written in many sample blocks, the last
+# one partial: the path a biobank takes.
+SMALL_BLOCKS = 37_000
+
+
 def matched(tmp_path, model_snps, cohort):
-    out = align.write_matched(cohort, model_snps, tmp_path / "matched.h5")
+    out = align.write_matched(cohort, model_snps, tmp_path / "matched.h5", block_bytes=SMALL_BLOCKS)
     with h5py.File(out) as f:
         return np.array(f["inputs"]), float(f["scale"][0])
 
@@ -121,11 +126,14 @@ def test_cohort_order_and_extra_snps_do_not_matter(tmp_path, model, kgp_mini):
     np.testing.assert_array_equal(inputs, genotypes)
 
 
-def test_bed_reader_matches_pyplink(kgp_mini):
-    """The vectorised .bed decoder against pyplink, on arbitrary SNP rows."""
+@pytest.mark.parametrize("block_bytes", [SMALL_BLOCKS, 2**32])
+def test_bed_reader_matches_pyplink(kgp_mini, block_bytes):
+    """The vectorised .bed decoder against pyplink: arbitrary SNP rows, any block size."""
     bed = Bed.open(kgp_mini.plink_prefix)
-    rows = [5, 0, 1999, 17]
+    rows = [5, 0, 1999, 17, 5]
     with PyPlink(str(kgp_mini.plink_prefix)) as reference:
         names = read_bim(kgp_mini.plink_prefix)["snp"].to_numpy()[rows]
         expected = np.stack([reference.get_geno_marker(n) for n in names], axis=1)
-    np.testing.assert_array_equal(bed.read_snps(rows), expected)
+    blocks = list(bed.sample_blocks(rows, block_bytes))
+    assert [start for start, _ in blocks] == list(range(0, bed.n_samples, len(blocks[0][1])))
+    np.testing.assert_array_equal(np.concatenate([b for _, b in blocks]), expected)

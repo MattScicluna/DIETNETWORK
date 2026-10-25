@@ -2,9 +2,9 @@
 
 Dosages count the .bim A1 allele (0, 1, 2) with -1 for a missing call: what
 ``plink --recode A`` writes, and so what upstream's HDF5 datasets hold
-(tests/parity checks it). The .bed is decoded in blocks of SNPs with a lookup
-table, so a biobank-sized file never needs more than one block of scratch
-memory beyond the output.
+(tests/parity checks it). The .bed is decoded in blocks of samples with a lookup
+table, so a biobank-sized file is read in bounded memory and written out
+sample-major, one contiguous run of rows per block.
 """
 
 from __future__ import annotations
@@ -19,7 +19,10 @@ import pandas as pd
 MAGIC = (0x6C, 0x1B, 0x01)  # SNP-major
 # Two bits per genotype, low bits first: 00 hom A1, 01 missing, 10 het, 11 hom A2.
 CODES = np.array([2, -1, 1, 0], dtype=np.int8)
-BLOCK = 4096
+# A block of samples holds at most this many dosages (int8 bytes), decoded a
+# chunk of SNPs at a time.
+BLOCK_BYTES = 2**32
+SNP_CHUNK = 8192
 
 
 def _prefix(prefix) -> str:
@@ -84,26 +87,31 @@ class Bed:
         raw = np.memmap(f"{self.prefix}.bed", dtype=np.uint8, mode="r", offset=3)
         return raw.reshape(self.n_snps, self.bytes_per_snp)
 
-    def _decode(self, packed_rows: np.ndarray) -> np.ndarray:
-        """Packed SNP rows -> samples x SNPs int8 dosages."""
-        codes = np.stack([(packed_rows >> shift) & 3 for shift in (0, 2, 4, 6)], axis=-1)
-        dosages = CODES[codes].reshape(len(packed_rows), -1)[:, : self.n_samples]
-        return np.ascontiguousarray(dosages.T)
+    def sample_blocks(
+        self, rows=None, block_bytes: int = BLOCK_BYTES
+    ) -> Iterator[tuple[int, np.ndarray]]:
+        """(first sample, samples x len(rows) int8 dosages) for consecutive blocks of samples.
 
-    def snp_blocks(self, block: int = BLOCK) -> Iterator[tuple[int, np.ndarray]]:
-        """(first SNP, samples x block int8 dosages) for consecutive SNP blocks."""
+        ``rows`` are .bim rows in the order wanted (default: all, in order). The
+        output is sample-major, like upstream's ``inputs``, so each block is
+        written as one contiguous run of rows. A block of samples is a narrow
+        band of bytes in every SNP's row of the SNP-major .bed, so only those
+        bytes are read, and a block never holds more than about ``block_bytes``.
+        """
         packed = self._packed()
-        for start in range(0, self.n_snps, block):
-            yield start, self._decode(np.asarray(packed[start : start + block]))
+        rows = np.arange(self.n_snps) if rows is None else np.asarray(rows, dtype=np.int64)
+        order = np.argsort(rows, kind="stable")  # read in file order, place in requested order
+        ordered = rows[order]
+        # Four samples per byte: blocks start on a byte boundary.
+        per_block = max(4, block_bytes // max(len(rows), 1) // 4 * 4)
 
-    def read_snps(self, indices) -> np.ndarray:
-        """samples x len(indices) dosages for SNPs at arbitrary .bim rows, in that order."""
-        indices = np.asarray(indices, dtype=np.int64)
-        return self._decode(np.asarray(self._packed()[indices]))
-
-    def read(self) -> np.ndarray:
-        """The whole samples x SNPs int8 matrix."""
-        out = np.empty((self.n_samples, self.n_snps), dtype=np.int8)
-        for start, block in self.snp_blocks():
-            out[:, start : start + block.shape[1]] = block
-        return out
+        for s0 in range(0, self.n_samples, per_block):
+            s1 = min(s0 + per_block, self.n_samples)
+            b0, b1 = s0 // 4, (s1 + 3) // 4
+            out = np.empty((s1 - s0, len(rows)), dtype=np.int8)
+            for c0 in range(0, len(rows), SNP_CHUNK):
+                chunk = np.asarray(packed[ordered[c0 : c0 + SNP_CHUNK], b0:b1])
+                codes = np.stack([(chunk >> shift) & 3 for shift in (0, 2, 4, 6)], axis=-1)
+                dosages = CODES[codes].reshape(len(chunk), -1)[:, : s1 - s0]
+                out[:, order[c0 : c0 + len(chunk)]] = dosages.T
+            yield s0, out

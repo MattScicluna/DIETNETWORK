@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 
 from dietnet import __version__
-from dietnet.plink import Bed, read_bim, read_fam
+from dietnet.plink import BLOCK_BYTES, Bed, read_bim, read_fam
 
 
 def read_labels(path) -> pd.Series:
@@ -77,7 +77,7 @@ def build(
     out,
     class_labels=None,
     regression_labels=None,
-    snp_block: int = 4096,
+    block_bytes: int = BLOCK_BYTES,
 ) -> Path:
     """Write ``out`` (upstream's HDF5 schema) from a PLINK fileset."""
     bed = Bed.open(plink_prefix)
@@ -90,8 +90,8 @@ def build(
     tmp = out.with_name(out.name + ".partial")
     with h5py.File(tmp, "w") as f:
         inputs = f.create_dataset("inputs", shape=(bed.n_samples, bed.n_snps), dtype=np.int8)
-        for start, block in bed.snp_blocks(snp_block):
-            inputs[:, start : start + block.shape[1]] = block
+        for start, block in bed.sample_blocks(block_bytes=block_bytes):
+            inputs[start : start + len(block)] = block
 
         names = (bim["snp"] + "_" + bim["a1"]).to_numpy()
         f.create_dataset("snp_names", data=names.astype("S"))

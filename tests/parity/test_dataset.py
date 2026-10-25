@@ -15,15 +15,20 @@ import pytest
 
 from dietnet import dataset as ds
 
-UPSTREAM_KEYS = ("inputs", "samples", "snp_names", "class_labels", "class_label_names")
 
-
-@pytest.fixture
-def built(tmp_path, dataset):
+@pytest.fixture(params=[2**32, 37_000], ids=["one-block", "many-blocks"])
+def built(tmp_path, dataset, request):
+    """Built in one sample block, and in many with a partial last one."""
     extra = {}
     if dataset.name == "synthetic":
         extra["regression_labels"] = dataset.labels.with_name("synthetic_trait.tsv")
-    return ds.build(dataset.plink_prefix, tmp_path / "d.h5", class_labels=dataset.labels, **extra)
+    return ds.build(
+        dataset.plink_prefix,
+        tmp_path / "d.h5",
+        class_labels=dataset.labels,
+        block_bytes=request.param,
+        **extra,
+    )
 
 
 def test_every_upstream_dataset_is_identical(built, dataset):

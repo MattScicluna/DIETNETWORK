@@ -37,10 +37,9 @@ import h5py
 import numpy as np
 import pandas as pd
 
-from dietnet.plink import Bed, read_bim, read_fam
+from dietnet.plink import BLOCK_BYTES, Bed, read_bim, read_fam
 
 COMPLEMENT = str.maketrans("ACGT", "TGCA")
-COLUMN_BLOCK = 4096
 
 
 def _complement(alleles: pd.Series) -> pd.Series:
@@ -153,35 +152,31 @@ def fingerprint(model_snps: pd.DataFrame, cohort_prefix) -> str:
     return digest.hexdigest()[:16]
 
 
-def write_matched(cohort_prefix, model_snps: pd.DataFrame, out, alignment=None) -> Path:
-    """Write the cohort on the model's SNPs, in upstream's matched-dataset schema."""
+def write_matched(
+    cohort_prefix, model_snps: pd.DataFrame, out, alignment=None, block_bytes: int = BLOCK_BYTES
+) -> Path:
+    """Write the cohort on the model's SNPs, in upstream's matched-dataset schema.
+
+    Built a block of samples at a time and written as contiguous runs of rows:
+    a biobank cohort is matched in bounded memory and with sequential writes.
+    """
     alignment = alignment or align(model_snps, cohort_prefix)
     bed = Bed.open(cohort_prefix)
     samples = read_fam(cohort_prefix)["iid"].to_numpy()
+    present = np.flatnonzero(alignment.source >= 0)
+    flipped = alignment.flip[present]
 
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(out.name + ".partial")
     with h5py.File(tmp, "w") as f:
         inputs = f.create_dataset("inputs", shape=(bed.n_samples, alignment.n_model), dtype=np.int8)
-        for start in range(0, alignment.n_model, COLUMN_BLOCK):
-            cols = slice(start, min(start + COLUMN_BLOCK, alignment.n_model))
-            source, flip = alignment.source[cols], alignment.flip[cols]
-            block = np.full((bed.n_samples, len(source)), -1, dtype=np.int8)
-            present = np.flatnonzero(source >= 0)
-            if len(present):
-                rows = source[present]
-                # Read in .bim order (sequential on disk), then put back in model order.
-                order = np.argsort(rows)
-                dosages = np.empty((bed.n_samples, len(rows)), dtype=np.int8)
-                dosages[:, order] = bed.read_snps(rows[order])
-                flipped = flip[present]
-                observed = dosages >= 0
-                dosages[:, flipped] = np.where(
-                    observed[:, flipped], 2 - dosages[:, flipped], dosages[:, flipped]
-                )
-                block[:, present] = dosages
-            inputs[:, cols] = block
+        for start, dosages in bed.sample_blocks(alignment.source[present], block_bytes):
+            swapped = dosages[:, flipped]
+            dosages[:, flipped] = np.where(swapped >= 0, 2 - swapped, swapped)
+            block = np.full((len(dosages), alignment.n_model), -1, dtype=np.int8)
+            block[:, present] = dosages
+            inputs[start : start + len(block)] = block
 
         f.create_dataset("samples", data=samples.astype("S"))
         f.create_dataset("snp_names", data=model_snps["name"].to_numpy().astype("S"))
