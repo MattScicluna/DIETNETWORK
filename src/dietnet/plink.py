@@ -19,10 +19,14 @@ import pandas as pd
 MAGIC = (0x6C, 0x1B, 0x01)  # SNP-major
 # Two bits per genotype, low bits first: 00 hom A1, 01 missing, 10 het, 11 hom A2.
 CODES = np.array([2, -1, 1, 0], dtype=np.int8)
+# Every byte value -> its four samples' dosages: one table lookup per byte.
+BYTE_TO_DOSAGES = CODES[np.stack([(np.arange(256) >> s) & 3 for s in (0, 2, 4, 6)], axis=-1)]
 # A block of samples holds at most this many dosages (int8 bytes), decoded a
 # chunk of SNPs at a time.
 BLOCK_BYTES = 2**32
 SNP_CHUNK = 8192
+# Packed .bed files up to this size are read into memory once (see Bed._packed).
+LOAD_BYTES = 64 * 2**30
 
 
 def _prefix(prefix) -> str:
@@ -83,22 +87,33 @@ class Bed:
     def bytes_per_snp(self) -> int:
         return (self.n_samples + 3) // 4
 
-    def _packed(self) -> np.ndarray:
-        raw = np.memmap(f"{self.prefix}.bed", dtype=np.uint8, mode="r", offset=3)
+    def _packed(self, load_bytes: int) -> np.ndarray:
+        """The packed genotypes, SNPs x bytes: read into memory if they fit
+        ``load_bytes``, else memory-mapped.
+
+        Every block of samples needs a band of bytes from every SNP's row, so a
+        memory map re-reads the file (in scattered pages) once per block; on a
+        shared filesystem that was 2 h for UK Biobank. Read once, sequentially,
+        the same .bed is a quarter of the decoded matrix.
+        """
+        path = f"{self.prefix}.bed"
+        if self.n_snps * self.bytes_per_snp <= load_bytes:
+            raw = np.fromfile(path, dtype=np.uint8, offset=3)
+        else:
+            raw = np.memmap(path, dtype=np.uint8, mode="r", offset=3)
         return raw.reshape(self.n_snps, self.bytes_per_snp)
 
     def sample_blocks(
-        self, rows=None, block_bytes: int = BLOCK_BYTES
+        self, rows=None, block_bytes: int = BLOCK_BYTES, load_bytes: int = LOAD_BYTES
     ) -> Iterator[tuple[int, np.ndarray]]:
         """(first sample, samples x len(rows) int8 dosages) for consecutive blocks of samples.
 
         ``rows`` are .bim rows in the order wanted (default: all, in order). The
         output is sample-major, like upstream's ``inputs``, so each block is
-        written as one contiguous run of rows. A block of samples is a narrow
-        band of bytes in every SNP's row of the SNP-major .bed, so only those
-        bytes are read, and a block never holds more than about ``block_bytes``.
+        written as one contiguous run of rows. A block never holds more than
+        about ``block_bytes`` dosages.
         """
-        packed = self._packed()
+        packed = self._packed(load_bytes)
         rows = np.arange(self.n_snps) if rows is None else np.asarray(rows, dtype=np.int64)
         order = np.argsort(rows, kind="stable")  # read in file order, place in requested order
         ordered = rows[order]
@@ -111,7 +126,6 @@ class Bed:
             out = np.empty((s1 - s0, len(rows)), dtype=np.int8)
             for c0 in range(0, len(rows), SNP_CHUNK):
                 chunk = np.asarray(packed[ordered[c0 : c0 + SNP_CHUNK], b0:b1])
-                codes = np.stack([(chunk >> shift) & 3 for shift in (0, 2, 4, 6)], axis=-1)
-                dosages = CODES[codes].reshape(len(chunk), -1)[:, : s1 - s0]
+                dosages = BYTE_TO_DOSAGES[chunk].reshape(len(chunk), -1)[:, : s1 - s0]
                 out[:, order[c0 : c0 + len(chunk)]] = dosages.T
             yield s0, out

@@ -17,6 +17,7 @@ training; ``dietnet info`` shows which upstream commit is running.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -204,8 +205,14 @@ def predict(model_dir, plink_prefix, out, work_dir, seeds, folds, batch_size, de
         raise click.UsageError("no package matches --seeds/--folds")
 
     work_dir = work_dir or out.parent
+    started = time.perf_counter()
     matched = prediction.matched_dataset(packages, plink_prefix, work_dir)
+    matched_at = time.perf_counter()
     result = prediction.predict(packages, matched, batch_size=batch_size, device=device)
+    click.echo(
+        f"matching {matched_at - started:.0f}s, "
+        f"inference {time.perf_counter() - matched_at:.0f}s ({len(packages)} model(s))"
+    )
 
     out.parent.mkdir(parents=True, exist_ok=True)
     result.table().to_csv(out, sep="\t", index=False)

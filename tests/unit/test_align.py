@@ -126,14 +126,15 @@ def test_cohort_order_and_extra_snps_do_not_matter(tmp_path, model, kgp_mini):
     np.testing.assert_array_equal(inputs, genotypes)
 
 
+@pytest.mark.parametrize("load_bytes", [2**36, 0], ids=["in-memory", "memory-mapped"])
 @pytest.mark.parametrize("block_bytes", [SMALL_BLOCKS, 2**32])
-def test_bed_reader_matches_pyplink(kgp_mini, block_bytes):
-    """The vectorised .bed decoder against pyplink: arbitrary SNP rows, any block size."""
+def test_bed_reader_matches_pyplink(kgp_mini, block_bytes, load_bytes):
+    """The .bed decoder against pyplink: arbitrary SNP rows, any block size, either read path."""
     bed = Bed.open(kgp_mini.plink_prefix)
     rows = [5, 0, 1999, 17, 5]
     with PyPlink(str(kgp_mini.plink_prefix)) as reference:
         names = read_bim(kgp_mini.plink_prefix)["snp"].to_numpy()[rows]
         expected = np.stack([reference.get_geno_marker(n) for n in names], axis=1)
-    blocks = list(bed.sample_blocks(rows, block_bytes))
+    blocks = list(bed.sample_blocks(rows, block_bytes, load_bytes))
     assert [start for start, _ in blocks] == list(range(0, bed.n_samples, len(blocks[0][1])))
     np.testing.assert_array_equal(np.concatenate([b for _, b in blocks]), expected)
