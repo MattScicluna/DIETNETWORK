@@ -85,11 +85,54 @@ scaling, an in-memory dataset and attribution models.
 
 | B18 | Without `--temp-dir`, `predict` writes its genotype cache (an `.npy` the size of the int8 matrix: about 77 GiB for UK Biobank) next to the input PLINK files. | `predict_with_plink.py` | Fills, or fails on, shared or read-only cohort directories. The HDF5 intermediate should go to an explicit, user-chosen location. | — |
 
-Open question Q1: the shipped config uses `input_dropout: 0.995`, which drops
-99.5% of SNP inputs per sample per step (`nn.Dropout(p)` takes the *drop*
-probability, here and upstream). It may be deliberate, but nobody has recorded
-which config produced upstream's published 1KGP model. Ask Camille or Raphaël
-before the Phase 1 retrain, so the comparison is like for like.
+Q1 is **resolved** by the published model's Zenodo record (below): its three
+configs are the shipped one with seeds 78, 79 and 80 (`lr_aux 6e-4`,
+`lr_main 3e-4`, `input_dropout 0.995`, `dropout_main 0.1`, batch 138, patience
+2000, annealing 0.99). The paper chose input dropout 0.995 by search ("retaining
+an average of 1,150 SNPs per sample"). Upstream honours `dropout_main`, so the
+published models trained with 0.1. Every model this repository trained used 0.5
+(B1), which makes them a different model from the published one, not a
+re-implementation of it.
+
+### 1.4 What the published paper pins
+
+Rochefort-Boulanger, Scicluna et al., *A Transparent and Generalizable Deep
+Learning Framework for Genomic Ancestry Prediction*, AJHG 2026
+(doi:10.1016/j.ajhg.2026.06.003). It is chapter 4 of the thesis. Weights,
+configs, embeddings and the training HDF5 are on Zenodo:
+doi:10.5281/zenodo.16943452, record 21133813 (`Dietnet_training.tar.gz`: 15
+weight files `model_rep{1,2,3}_fold{0-4}.pt`, `config_rep{1,2,3}models.yaml`,
+`SNPs_embedding.npz` (5 × 229,986 × 72), `normalization_stats.npz`,
+`1KGP_dataset.hdf5`).
+
+- **Data**: 1KGP WGS30x on GRCh38, 2,322 samples in 24 populations (CEU+GBR
+  and ITU+STU merged and downsampled), 229,986 SNPs (GSA ∩ MHI arrays, MAF ≥ 5%,
+  missingness ≤ 10%, LD-pruned, HLA removed, ShapeIT5-imputed). That is the
+  1KGP test set already in `pretrained_models.py`.
+- **Protocol**: 5 folds × 3 seeds, 60/20/20 train/valid/test, labels balanced
+  across splits. That matches `partition --stratify` with the 0.75
+  train/valid ratio. Embedding, means and SDs are per fold, from that fold's
+  training split.
+- **Missing-SNP rescaling is part of the published method.** SNPs absent from a
+  cohort are set to 0 after standardization, and the observed ones are scaled
+  by D/(D − |C|) (D SNPs in the model, |C| missing). This is applied "in all
+  experiments". It is how the paper reaches 76%-missing arrays (CaG Axiom) and
+  All of Us (11% missing). **B8 therefore moves into Phase 1**: without it this
+  repository cannot reproduce the published cross-cohort results.
+- **Ensemble**: the paper reports all 15 per-model labels. It does not combine
+  them. This repository's majority vote and mean probability are a product
+  choice to document, not a reproduction requirement.
+- **Not stated** in the paper: the early-stopping and best-model rule, and
+  whether dropout is active at evaluation time. Upstream's code is the
+  reference for both.
+- **Scale reached**: All of Us, 447,278 people on the GDA array. "Less than
+  three minutes" CPU-only for 17,286 CaG samples from a pre-made HDF5; training
+  takes about 22 minutes per model on an A100.
+
+The Zenodo record also gives Phase 1 its strongest test: load the 15 published
+weight files into this repository's model (via the strict upstream-checkpoint
+loader, B12) and reproduce each fold's published test accuracy on
+`1KGP_dataset.hdf5`. Mark it `slow` and `network`.
 
 ### 1.3 Upstream features absent here
 
@@ -169,14 +212,16 @@ explicit decision. Small PRs into `master`.
 
 ### Phase 1 — correctness fixes, then retrain
 
-One PR per fix, each flipping its xfail: B1, B15, B3, B4 (record
+One PR per fix, each flipping its xfail: B1, B15, B3, B8 (the paper's
+D/(D − |C|) missing-SNP rescaling, §1.4), B4 (record
 `preprocessing: {normalize, scale}` in the package), B2 (explicit
 fold-dependence, see §5), B5 (fix or delete), B12 (+ a strict loader that accepts
 upstream checkpoints), B9, B16 (or reject `--task regression` at `train`
 until Phase 4 gives it an embedding).
 
-Then **retrain 1KGP**: 5 folds × 3 seeds, this repository vs upstream, on the
-same partition and config (after Q1). Report per-fold accuracy, mean ± sd, and
+First, reproduce the published accuracy from the Zenodo weights (§1.4). Then
+**retrain 1KGP**: 5 folds × 3 seeds, this repository vs upstream, on the
+same partition and the published config. Report per-fold accuracy, mean ± sd, and
 against the shipped v1 packages. This answers "did my changes affect core
 functionality" with numbers. Needs the cluster; add a
 `scripts/cluster/retrain_1kgp.sh` with that PR.
