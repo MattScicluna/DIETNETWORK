@@ -1,0 +1,5 @@
+# Commits that only reformat code. GitHub's blame view skips them automatically;
+# locally: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: black and isort over Dietnet/ (no behaviour change)
+0623a1739efddfa79072bdbb6e3a3aee429e9e40
