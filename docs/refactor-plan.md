@@ -98,8 +98,27 @@ runs all 15.
   and because, being contiguous, it can be memory-mapped. That is how
   `predict` serves a biobank without loading it.
 - Chunked or compressed layouts are ruled out for minibatch reads.
-- UK Biobank-scale runs on Narval (486,748 × 169,829) are in
-  `benchmarks/slurm/`; their results go here.
+
+UK Biobank on Narval (486,748 × 169,829; 77 GiB as int8), Lustre scratch, one
+CPU node, repeats 1:
+
+| | `.npy` | HDF5 contiguous |
+|---|---|---|
+| build from the decoded matrix | 58 s | 57 s |
+| full load | 304 s | 96 s |
+| 50 random batches of 138 | 293 s (memmap) | 63 s |
+
+Decoding the `.bed` from Lustre took 370 s, with peak memory 154 GiB (the
+benchmark holds two copies). HDF5 was read second, so some of its advantage
+may be page cache. Either way, at this scale nothing should be loaded more
+than once.
+
+**Write pattern matters more than format.** The first UK Biobank `predict` run
+filled the sample-major matched file a block of SNP *columns* at a time. Every
+write touched all 486,748 rows, and the file was still unfinished after 2 h.
+Both writers now go a block of *samples* at a time (`Bed.sample_blocks`):
+bounded memory (4 GiB per block), and each block is one contiguous run of
+rows. The rerun's timings go here.
 
 ## Phases from here
 
