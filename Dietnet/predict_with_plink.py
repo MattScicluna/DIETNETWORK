@@ -12,6 +12,7 @@ import os
 import sys
 from collections import Counter
 from pathlib import Path
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -21,10 +22,10 @@ from tqdm import tqdm
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from Dietnet.helpers.model_package import ModelPackage, find_model_packages
-from Dietnet.helpers.plink_utils import preprocess_test_data_with_plink, find_plink_binary
-from Dietnet.helpers.dataset_utils import InferenceDataset
 from Dietnet.helpers import model as model_module
+from Dietnet.helpers.dataset_utils import InferenceDataset
+from Dietnet.helpers.model_package import ModelPackage, find_model_packages
+from Dietnet.helpers.plink_utils import find_plink_binary, preprocess_test_data_with_plink
 
 
 def _cache_base_prefix(plink_prefix: str, model_root: Path, temp_dir: Path) -> Path:
@@ -36,18 +37,17 @@ def _cache_base_prefix(plink_prefix: str, model_root: Path, temp_dir: Path) -> P
     plink_abs = os.path.abspath(plink_prefix)
     model_root_abs = os.path.abspath(model_root)
     payload = json.dumps(
-        {"plink": plink_abs, "model_root": model_root_abs},
-        sort_keys=True
+        {"plink": plink_abs, "model_root": model_root_abs}, sort_keys=True
     ).encode()
     digest = hashlib.sha1(payload).hexdigest()[:8]
     return Path(temp_dir) / f"{Path(plink_prefix).name}_{digest}"
 
 
-def load_model_from_package(model_package, device='cpu'):
+def load_model_from_package(model_package, device="cpu"):
     """Load a DietNetwork model from a model package."""
     # Get model configuration
-    config = model_package.metadata['config']
-    n_classes = model_package.metadata['n_classes']
+    config = model_package.metadata["config"]
+    n_classes = model_package.metadata["n_classes"]
 
     # Get embedding to determine input size
     embedding = model_package.embedding
@@ -61,22 +61,22 @@ def load_model_from_package(model_package, device='cpu'):
     # Create model
     combined_model = model_module.CombinedModel(
         n_feats=n_feats_emb,
-        n_hidden_u_aux=config['nb_hidden_u_aux'],
-        n_hidden_u_main=config['nb_hidden_u_aux'][-1:] + config['nb_hidden_u_main'],
+        n_hidden_u_aux=config["nb_hidden_u_aux"],
+        n_hidden_u_main=config["nb_hidden_u_aux"][-1:] + config["nb_hidden_u_main"],
         n_targets=n_classes,
         param_init=None,
-        aux_uniform_init_limit=config.get('uniform_init_limit', 0.02),
-        input_dropout=config.get('input_dropout', 0.995)
+        aux_uniform_init_limit=config.get("uniform_init_limit", 0.02),
+        input_dropout=config.get("input_dropout", 0.995),
     )
 
     # Handle legacy checkpoints (aux_net/main_net) by remapping keys
     def _remap_state_dict(state_dict):
         remapped = {}
         for key, val in state_dict.items():
-            if key.startswith('aux_net.'):
-                new_key = 'feat_emb.' + key[len('aux_net.'):]
-            elif key.startswith('main_net.'):
-                new_key = 'disc_net.' + key[len('main_net.'):]
+            if key.startswith("aux_net."):
+                new_key = "feat_emb." + key[len("aux_net.") :]
+            elif key.startswith("main_net."):
+                new_key = "disc_net." + key[len("main_net.") :]
             else:
                 new_key = key
             remapped[new_key] = val
@@ -84,8 +84,8 @@ def load_model_from_package(model_package, device='cpu'):
 
     # Load state dict
     checkpoint = model_package.load_model_state(device=device)
-    if 'model_state_dict' in checkpoint:
-        state_dict = checkpoint['model_state_dict']
+    if "model_state_dict" in checkpoint:
+        state_dict = checkpoint["model_state_dict"]
     else:
         state_dict = checkpoint
 
@@ -101,7 +101,7 @@ def load_model_from_package(model_package, device='cpu'):
 def predict_single_model(
     model_package,
     plink_prefix,
-    device='cpu',
+    device="cpu",
     batch_size=128,
     num_workers=0,
     plink_bin=None,
@@ -112,7 +112,7 @@ def predict_single_model(
     force_cache_rebuild=False,
     verbose=True,
     return_logits=False,
-    return_hidden=False
+    return_hidden=False,
 ):
     """
     Run inference with a single model using PLINK preprocessing.
@@ -157,7 +157,7 @@ def predict_single_model(
     else:
         # Need to preprocess
         # Check if model has BIM file
-        bim_file = model_package.package_dir / 'allpos.bim'
+        bim_file = model_package.package_dir / "allpos.bim"
         if not bim_file.exists():
             raise FileNotFoundError(
                 f"Model package missing BIM file: {bim_file}\n"
@@ -178,7 +178,7 @@ def predict_single_model(
             model_bim_file=str(bim_file),
             output_prefix=str(preprocess_prefix),
             plink_bin=plink_bin,
-            force=force_preprocess
+            force=force_preprocess,
         )
 
     # Load model
@@ -188,7 +188,7 @@ def predict_single_model(
 
     # Load and normalize embedding
     embedding = torch.from_numpy(model_package.embedding).float().to(device)
-    emb_norm = (embedding ** 2).sum(0) ** 0.5
+    emb_norm = (embedding**2).sum(0) ** 0.5
     embedding = embedding / emb_norm
     if len(embedding.size()) == 1:
         embedding = torch.unsqueeze(embedding, dim=1)
@@ -202,7 +202,7 @@ def predict_single_model(
         use_memmap=True,
         cache_file=str(cache_file),
         force_cache_rebuild=force_cache_rebuild,
-        verbose=verbose
+        verbose=verbose,
     )
 
     # Create data loader
@@ -211,17 +211,16 @@ def predict_single_model(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=(device != 'cpu')
+        pin_memory=(device != "cpu"),
     )
 
     # Run inference
     if verbose:
         print(f"\nRunning inference on {len(dataset)} samples...")
     import warnings
+
     warnings.filterwarnings(
-        "ignore",
-        message="This DataLoader will create .* worker processes",
-        category=UserWarning
+        "ignore", message="This DataLoader will create .* worker processes", category=UserWarning
     )
     all_sample_ids = []
     all_logits = []
@@ -229,10 +228,7 @@ def predict_single_model(
 
     with torch.no_grad():
         for batch_geno, batch_sample_ids in tqdm(
-            loader,
-            desc="Inference",
-            disable=not verbose,
-            leave=False
+            loader, desc="Inference", disable=not verbose, leave=False
         ):
             batch_geno = batch_geno.to(device)
             if return_hidden or return_logits:
@@ -260,7 +256,7 @@ def predict_single_model(
 def predict_ensemble(
     model_packages,
     plink_prefix,
-    device='cpu',
+    device="cpu",
     batch_size=128,
     num_workers=0,
     plink_bin=None,
@@ -270,7 +266,7 @@ def predict_ensemble(
     cache_prefix=None,
     label_mapping=None,
     save_logits=False,
-    save_hidden=False
+    save_hidden=False,
 ):
     """
     Run ensemble inference with multiple models.
@@ -305,7 +301,7 @@ def predict_ensemble(
     else:
         temp_dir = Path(temp_dir)
 
-    model_root = model_packages[0].package_root if model_packages else Path('.')
+    model_root = model_packages[0].package_root if model_packages else Path(".")
     cache_prefix = cache_prefix or _cache_base_prefix(plink_prefix, model_root, temp_dir)
     preprocess_prefix = cache_prefix.with_name(f"{cache_prefix.name}_preprocessed")
     preprocessed_plink = plink_prefix if skip_preprocess else str(preprocess_prefix)
@@ -343,7 +339,7 @@ def predict_ensemble(
             force_cache_rebuild=force_cache_rebuild,
             verbose=(i == 1),
             return_logits=save_logits,
-            return_hidden=save_hidden
+            return_hidden=save_hidden,
         )
 
         if sample_ids is None:
@@ -389,18 +385,20 @@ def predict_ensemble(
 
     # Compute agreement statistics
     agreement_stats = {
-        'mean_agreement': np.mean(agreement_fractions),
-        'min_agreement': np.min(agreement_fractions),
-        'max_agreement': np.max(agreement_fractions),
-        'agreement_fractions': agreement_fractions,
-        'n_models': len(model_packages),
-        'seeds': sorted(set(pkg.seed for pkg in model_packages)),
-        'folds': sorted(set(pkg.fold for pkg in model_packages))
+        "mean_agreement": np.mean(agreement_fractions),
+        "min_agreement": np.min(agreement_fractions),
+        "max_agreement": np.max(agreement_fractions),
+        "agreement_fractions": agreement_fractions,
+        "n_models": len(model_packages),
+        "seeds": sorted(set(pkg.seed for pkg in model_packages)),
+        "folds": sorted(set(pkg.fold for pkg in model_packages)),
     }
 
     print(f"\n✓ Ensemble prediction complete")
     print(f"  Mean agreement: {agreement_stats['mean_agreement']:.2%}")
-    print(f"  Agreement range: {agreement_stats['min_agreement']:.2%} - {agreement_stats['max_agreement']:.2%}")
+    print(
+        f"  Agreement range: {agreement_stats['min_agreement']:.2%} - {agreement_stats['max_agreement']:.2%}"
+    )
 
     return (
         sample_ids,
@@ -410,7 +408,7 @@ def predict_ensemble(
         all_predictions,
         ensemble_logits,
         per_model_logits,
-        per_model_hidden
+        per_model_hidden,
     )
 
 
@@ -421,7 +419,7 @@ def save_predictions(
     probabilities,
     label_mapping,
     agreement_stats=None,
-    individual_predictions=None
+    individual_predictions=None,
 ):
     """
     Save predictions in a compact, human-readable format.
@@ -462,112 +460,82 @@ def save_predictions(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Run DietNetwork inference with PLINK preprocessing'
+        description="Run DietNetwork inference with PLINK preprocessing"
     )
 
     parser.add_argument(
-        '--model-dir',
+        "--model-dir", type=str, required=True, help="Directory containing model package(s)"
+    )
+
+    parser.add_argument(
+        "--plink-prefix", type=str, required=True, help="PLINK file prefix (without .bed/.bim/.fam)"
+    )
+
+    parser.add_argument(
+        "--output", type=str, required=True, help="Output file for predictions (text)"
+    )
+
+    parser.add_argument(
+        "--seeds", type=int, nargs="+", default=None, help="Seeds to use (default: all)"
+    )
+
+    parser.add_argument(
+        "--folds", type=int, nargs="+", default=None, help="Folds to use (default: all)"
+    )
+
+    parser.add_argument("--batch-size", type=int, default=128, help="Batch size (default: 128)")
+
+    parser.add_argument(
+        "--device",
         type=str,
-        required=True,
-        help='Directory containing model package(s)'
+        default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device (default: cuda if available, else cpu)",
     )
 
     parser.add_argument(
-        '--plink-prefix',
-        type=str,
-        required=True,
-        help='PLINK file prefix (without .bed/.bim/.fam)'
+        "--plink-bin", type=str, default=None, help="Path to PLINK binary (default: auto-detect)"
     )
 
     parser.add_argument(
-        '--output',
-        type=str,
-        required=True,
-        help='Output file for predictions (text)'
+        "--num-workers", type=int, default=0, help="Number of data loader workers (default: 0)"
     )
 
     parser.add_argument(
-        '--seeds',
-        type=int,
-        nargs='+',
-        default=None,
-        help='Seeds to use (default: all)'
-    )
-
-    parser.add_argument(
-        '--folds',
-        type=int,
-        nargs='+',
-        default=None,
-        help='Folds to use (default: all)'
-    )
-
-    parser.add_argument(
-        '--batch-size',
-        type=int,
-        default=128,
-        help='Batch size (default: 128)'
-    )
-
-    parser.add_argument(
-        '--device',
-        type=str,
-        default='cuda' if torch.cuda.is_available() else 'cpu',
-        help='Device (default: cuda if available, else cpu)'
-    )
-
-    parser.add_argument(
-        '--plink-bin',
+        "--temp-dir",
         type=str,
         default=None,
-        help='Path to PLINK binary (default: auto-detect)'
+        help="Directory for preprocessed PLINK files and genotype cache (default: alongside --plink-prefix)",
     )
 
     parser.add_argument(
-        '--num-workers',
-        type=int,
-        default=0,
-        help='Number of data loader workers (default: 0)'
+        "--skip-preprocess",
+        action="store_true",
+        help="Skip PLINK preprocessing (use if plink-prefix is already preprocessed)",
     )
 
     parser.add_argument(
-        '--temp-dir',
+        "--force-preprocess",
+        action="store_true",
+        help="Force re-preprocessing even if preprocessed file exists",
+    )
+    parser.add_argument(
+        "--save-logits",
         type=str,
         default=None,
-        help='Directory for preprocessed PLINK files and genotype cache (default: alongside --plink-prefix)'
-    )
-
-    parser.add_argument(
-        '--skip-preprocess',
-        action='store_true',
-        help='Skip PLINK preprocessing (use if plink-prefix is already preprocessed)'
-    )
-
-    parser.add_argument(
-        '--force-preprocess',
-        action='store_true',
-        help='Force re-preprocessing even if preprocessed file exists'
+        help="Optional path to save raw logits/probabilities (.npz)",
     )
     parser.add_argument(
-        '--save-logits',
+        "--save-hidden",
         type=str,
         default=None,
-        help='Optional path to save raw logits/probabilities (.npz)'
-    )
-    parser.add_argument(
-        '--save-hidden',
-        type=str,
-        default=None,
-        help='Optional path to save final hidden representations (.npz)'
+        help="Optional path to save final hidden representations (.npz)",
     )
 
     args = parser.parse_args()
 
     # Find model packages
     model_packages = find_model_packages(
-        root_dir=args.model_dir,
-        seeds=args.seeds,
-        folds=args.folds
+        root_dir=args.model_dir, seeds=args.seeds, folds=args.folds
     )
 
     if not model_packages:
@@ -606,7 +574,7 @@ def main():
             cache_prefix=cache_prefix,
             force_cache_rebuild=args.force_preprocess,
             return_logits=bool(args.save_logits),
-            return_hidden=bool(args.save_hidden)
+            return_hidden=bool(args.save_hidden),
         )
         agreement_stats = None
         agg_logits = raw_logits
@@ -621,7 +589,7 @@ def main():
             individual_preds,
             agg_logits,
             per_model_logits,
-            per_model_hidden
+            per_model_hidden,
         ) = predict_ensemble(
             model_packages=model_packages,
             plink_prefix=args.plink_prefix,
@@ -635,7 +603,7 @@ def main():
             cache_prefix=cache_prefix,
             label_mapping=label_mapping,
             save_logits=bool(args.save_logits),
-            save_hidden=bool(args.save_hidden)
+            save_hidden=bool(args.save_hidden),
         )
 
     # Save predictions
@@ -646,7 +614,7 @@ def main():
         probabilities=probabilities,
         label_mapping=label_mapping,
         agreement_stats=agreement_stats,
-        individual_predictions=individual_preds if len(model_packages) > 1 else None
+        individual_predictions=individual_preds if len(model_packages) > 1 else None,
     )
 
     def save_extra_outputs(path, sample_ids, label_mapping, **arrays):
@@ -655,7 +623,7 @@ def main():
         idx_to_label = {idx: label for label, idx in label_mapping.items()}
         payload = {
             "sample_id": np.array(sample_ids),
-            "label_names": np.array([idx_to_label[i] for i in range(len(idx_to_label))])
+            "label_names": np.array([idx_to_label[i] for i in range(len(idx_to_label))]),
         }
         for key, value in arrays.items():
             if value is not None:
@@ -672,7 +640,7 @@ def main():
             probabilities=probabilities,
             per_model_logits=per_model_logits,
             seeds=seeds,
-            folds=folds
+            folds=folds,
         )
 
     if args.save_hidden:
@@ -683,11 +651,11 @@ def main():
             hidden=per_model_hidden if len(model_packages) == 1 else None,
             per_model_hidden=per_model_hidden if len(model_packages) > 1 else None,
             seeds=seeds,
-            folds=folds
+            folds=folds,
         )
 
     print("\n✓ Inference complete!")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

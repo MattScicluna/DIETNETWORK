@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+env:
+  # Pinned so the uv.lock drift check is deterministic: a lock written by one uv
+  # version can differ from another's for reasons unrelated to the change.
+  UV_VERSION: "0.12.13"
+  # The HussinLab/DIETNETWORK commit the parity tests compare against. Keep in
+  # step with UPSTREAM_SHA in tests/support.py.
+  UPSTREAM_SHA: 5481556e472140c6d3a67363c1286f22109fb1ce
+
+jobs:
+  # Runs before anything expensive: what it guards against cannot be undone once
+  # pushed. Stdlib only, so it needs no environment.
+  leak-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check every tracked file
+        run: python -m scripts.check_sensitive_files --tracked
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Verify uv.lock is up to date
+        run: |
+          uv lock
+          git diff --exit-code uv.lock
+      - name: Install (locked versions, CPU torch; see the test job)
+        run: |
+          uv venv
+          uv export --frozen --extra dev --no-emit-project --no-hashes \
+            | grep -v -E '^(nvidia-|cuda-|triton==)' > requirements-ci.txt
+          uv pip install --torch-backend=cpu -r requirements-ci.txt
+      - run: uv run --no-sync black --check .
+      - run: uv run --no-sync isort --check-only .
+      - run: uv run --no-sync flake8 Dietnet tests scripts benchmarks
+
+  test:
+    # The name is pinned rather than left to the matrix, so that adding a
+    # platform never renames the checks branch protection waits for.
+    name: test (${{ matrix.python-version }})${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+        include:
+          # People run predict on their laptops; the .bed reader and the
+          # genotype cache are the platform-sensitive parts.
+          - os: macos-latest
+            python-version: "3.12"
+            label: " macOS"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
+          restore-keys: uv-${{ runner.os }}-py${{ matrix.python-version }}-
+
+      - name: Install (locked versions, CPU torch)
+        # Every version comes from uv.lock. Only the torch *build* changes: the
+        # locked Linux torch pulls ~3 GB of CUDA libraries a CPU runner cannot
+        # use, so those lines are dropped and torch comes from the CPU index at
+        # the same version.
+        run: |
+          uv venv --python ${{ matrix.python-version }}
+          uv export --frozen --extra dev --no-emit-project --no-hashes \
+            | grep -v -E '^(nvidia-|cuda-|triton==)' > requirements-ci.txt
+          uv pip install --torch-backend=cpu -r requirements-ci.txt
+          uv pip install --no-deps -e .
+
+      - name: Clone upstream at the pinned commit
+        run: |
+          git init -q upstream
+          git -C upstream fetch -q --depth 1 https://github.com/HussinLab/DIETNETWORK.git "$UPSTREAM_SHA"
+          git -C upstream checkout -q FETCH_HEAD
+
+      - name: Run tests
+        env:
+          DIETNET_UPSTREAM_DIR: ${{ github.workspace }}/upstream
+        run: uv run --no-sync pytest -m "not slow and not network" --cov=Dietnet --cov-report=term-missing
+
+      - name: Debug info on failure
+        if: failure()
+        run: |
+          python -V
+          uv --version
+          uv pip freeze

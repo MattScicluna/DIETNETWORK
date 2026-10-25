@@ -1,18 +1,16 @@
 import math
 import os
 
-import numpy as np
-
 import h5py
-
+import numpy as np
 import torch
 
 
 class FoldDataset(torch.utils.data.Dataset):
     # These variables are set in train.py
-    dataset_file = None #path to h5py file
-    label_type = None # Int if classification, float if regression
-    task = None # 'classification' or 'regression'
+    dataset_file = None  # path to h5py file
+    label_type = None  # Int if classification, float if regression
+    task = None  # 'classification' or 'regression'
 
     def __init__(self, set_indexes):
         self.set_indexes = set_indexes
@@ -26,59 +24,60 @@ class FoldDataset(torch.utils.data.Dataset):
         file_index = self.set_indexes[index]
 
         # Input features
-        x = np.array(self.f['inputs'][file_index], dtype=np.int8)
+        x = np.array(self.f["inputs"][file_index], dtype=np.int8)
 
         # Label - use appropriate field based on task type
-        if self.task == 'classification':
+        if self.task == "classification":
             # Try class_labels first (new format), fall back to labels
-            if 'class_labels' in self.f:
-                y = (self.f['class_labels'][file_index]).astype(self.label_type)
+            if "class_labels" in self.f:
+                y = (self.f["class_labels"][file_index]).astype(self.label_type)
             else:
-                y = (self.f['labels'][file_index]).astype(self.label_type)
-        elif self.task == 'regression':
-            if 'regression_labels' in self.f:
-                y = (self.f['regression_labels'][file_index]).astype(self.label_type)
+                y = (self.f["labels"][file_index]).astype(self.label_type)
+        elif self.task == "regression":
+            if "regression_labels" in self.f:
+                y = (self.f["regression_labels"][file_index]).astype(self.label_type)
             else:
-                y = (self.f['labels'][file_index]).astype(self.label_type)
+                y = (self.f["labels"][file_index]).astype(self.label_type)
         else:
             # Default behavior for backward compatibility
-            y = (self.f['labels'][file_index]).astype(self.label_type)
+            y = (self.f["labels"][file_index]).astype(self.label_type)
 
-        sample = (self.f['samples'][file_index]).astype(np.str_)
+        sample = (self.f["samples"][file_index]).astype(np.str_)
         return x, y, sample
 
     def get_samples(self):
         indexes = np.sort(self.set_indexes)
-        samples = (self.f['samples'][indexes]).astype(np.str_)
+        samples = (self.f["samples"][indexes]).astype(np.str_)
 
         return samples
 
 
 class ExternalTestDataset(torch.utils.data.Dataset):
     def __init__(self, dataset_file):
-        self.dataset = h5py.File(dataset_file, 'r')
+        self.dataset = h5py.File(dataset_file, "r")
 
     def __len__(self):
-        return len(self.dataset['samples'])
+        return len(self.dataset["samples"])
 
     def __getitem__(self, index):
-        x = np.array(self.dataset['inputs'][index], dtype=np.int8)
-        sample = (self.dataset['samples'][index]).astype(np.str_)
+        x = np.array(self.dataset["inputs"][index], dtype=np.int8)
+        sample = (self.dataset["samples"][index]).astype(np.str_)
 
         return x, sample
 
 
 class PLINKFoldDataset(torch.utils.data.Dataset):
     """Dataset class for PLINK files. Matches FoldDataset interface."""
+
     # Class variables (set externally like FoldDataset)
-    plink_prefix = None      # Path to .bed/.bim/.fam without extension
-    label_file = None        # Path to label TSV file
-    label_type = None        # int for classification, float for regression
-    task = None              # 'classification' or 'regression'
-    genotype_cache = None    # Shared across all datasets (train/valid/test)
-    fam_data = None          # Shared FAM data
-    bim_data = None          # Shared BIM data
-    ordered_labels = None    # Shared labels
+    plink_prefix = None  # Path to .bed/.bim/.fam without extension
+    label_file = None  # Path to label TSV file
+    label_type = None  # int for classification, float for regression
+    task = None  # 'classification' or 'regression'
+    genotype_cache = None  # Shared across all datasets (train/valid/test)
+    fam_data = None  # Shared FAM data
+    bim_data = None  # Shared BIM data
+    ordered_labels = None  # Shared labels
 
     def __init__(self, set_indexes):
         """
@@ -102,19 +101,20 @@ class PLINKFoldDataset(torch.utils.data.Dataset):
         y = self.ordered_labels[file_index]
 
         # Get sample ID
-        sample = self.fam_data['iid'].values[file_index]
+        sample = self.fam_data["iid"].values[file_index]
 
         return x, y, sample
 
     def get_samples(self):
         """Returns sample IDs for this dataset (matches FoldDataset interface)"""
         indexes = np.sort(self.set_indexes)
-        samples = self.fam_data['iid'].values[indexes]
+        samples = self.fam_data["iid"].values[indexes]
         return samples
 
 
-def load_plink_genotypes(plink_prefix, cache_file=None, use_memmap=True,
-                         force_cache_rebuild=False, verbose=True):
+def load_plink_genotypes(
+    plink_prefix, cache_file=None, use_memmap=True, force_cache_rebuild=False, verbose=True
+):
     """
     Load genotypes from PLINK files with optional memory mapping for scalability.
 
@@ -149,34 +149,31 @@ def load_plink_genotypes(plink_prefix, cache_file=None, use_memmap=True,
         # Decide whether to use memory mapping based on dataset size
         if use_memmap and dataset_size_gb > 2.0:  # Use memmap for datasets > 2GB
             if verbose:
-                print(f'✓ Reusing cached genotypes (memmap): {cache_file}')
-            genotypes = np.load(cache_file, mmap_mode='r')  # Read-only memory map
+                print(f"✓ Reusing cached genotypes (memmap): {cache_file}")
+            genotypes = np.load(cache_file, mmap_mode="r")  # Read-only memory map
         else:
             if verbose:
-                print(f'Loading cached genotypes from {cache_file}')
+                print(f"Loading cached genotypes from {cache_file}")
             genotypes = np.load(cache_file)
         if verbose:
-            print(f'Loaded cached genotypes: {genotypes.shape}')
+            print(f"Loaded cached genotypes: {genotypes.shape}")
         return genotypes, fam_data, bim_data
     elif cache_file and force_cache_rebuild and os.path.exists(cache_file):
         if verbose:
-            print(f'Cache exists but force rebuild requested; regenerating: {cache_file}')
+            print(f"Cache exists but force rebuild requested; regenerating: {cache_file}")
         os.remove(cache_file)
 
     # Load from PLINK files
     if verbose:
-        print(f'Reading {n_markers:,} markers for {n_samples:,} samples into cache (one-time)...')
-        print(f'Dataset size (int8): {dataset_size_gb:.2f}GB')
+        print(f"Reading {n_markers:,} markers for {n_samples:,} samples into cache (one-time)...")
+        print(f"Dataset size (int8): {dataset_size_gb:.2f}GB")
 
     if cache_file and use_memmap and dataset_size_gb > 2.0:
         # Create memory-mapped file for large datasets
         if verbose:
-            print('Creating memory-mapped cache file for scalability')
+            print("Creating memory-mapped cache file for scalability")
         genotypes = np.lib.format.open_memmap(
-            cache_file,
-            mode='w+',
-            dtype=np.int8,
-            shape=(n_samples, n_markers)
+            cache_file, mode="w+", dtype=np.int8, shape=(n_samples, n_markers)
         )
     else:
         # Load into RAM for small datasets
@@ -184,26 +181,20 @@ def load_plink_genotypes(plink_prefix, cache_file=None, use_memmap=True,
 
     # Iterate through markers and fill array with progress bar
     for i, (marker_id, marker_genotypes) in enumerate(
-        tqdm(
-            pedfile,
-            total=n_markers,
-            desc='Loading markers',
-            unit='markers',
-            disable=not verbose
-        )
+        tqdm(pedfile, total=n_markers, desc="Loading markers", unit="markers", disable=not verbose)
     ):
         genotypes[:, i] = marker_genotypes
 
     if verbose:
-        print(f'✓ Loaded genotypes: {genotypes.shape}')
+        print(f"✓ Loaded genotypes: {genotypes.shape}")
 
     # Flush to disk if memory-mapped
     if isinstance(genotypes, np.memmap):
         genotypes.flush()
         if verbose:
-            print(f'✓ Flushed to disk: {cache_file}')
+            print(f"✓ Flushed to disk: {cache_file}")
         # Reopen as read-only for safety
-        genotypes = np.load(cache_file, mmap_mode='r')
+        genotypes = np.load(cache_file, mmap_mode="r")
 
     return genotypes, fam_data, bim_data
 
@@ -233,32 +224,30 @@ def _partition_unstratified(indices, nb_folds, train_valid_ratio, seed=None):
         np.random.seed(seed)
     shuffle(indices, seed=seed)
 
-    step = math.floor(len(indices)/nb_folds)
+    step = math.floor(len(indices) / nb_folds)
     split_pos = [i for i in range(0, len(indices), step)]
 
     test_indices_byfold = []
-    start = split_pos[0] # same as start=0
-    for i in range(nb_folds-1):
-        test_indices_byfold.append(indices[start:(start+step)])
-        start = split_pos[i+1]
+    start = split_pos[0]  # same as start=0
+    for i in range(nb_folds - 1):
+        test_indices_byfold.append(indices[start : (start + step)])
+        start = split_pos[i + 1]
 
-    test_indices_byfold.append(indices[start:]) # append last fold
+    test_indices_byfold.append(indices[start:])  # append last fold
 
     train_indices_byfold = []
     valid_indices_byfold = []
     for i in range(nb_folds):
-        other_folds = [f for f in range(nb_folds) if f!=i]
-        train_valid_indices = np.concatenate(
-                [test_indices_byfold[f] for f in other_folds]
-                )
-        train_indices, valid_indices = split(train_valid_indices,
-                train_valid_ratio, seed)
+        other_folds = [f for f in range(nb_folds) if f != i]
+        train_valid_indices = np.concatenate([test_indices_byfold[f] for f in other_folds])
+        train_indices, valid_indices = split(train_valid_indices, train_valid_ratio, seed)
         train_indices_byfold.append(train_indices)
         valid_indices_byfold.append(valid_indices)
 
     indices_byfold = []
     for train_indices, valid_indices, test_indices in zip(
-            train_indices_byfold, valid_indices_byfold, test_indices_byfold):
+        train_indices_byfold, valid_indices_byfold, test_indices_byfold
+    ):
         indices_byfold.append([train_indices, valid_indices, test_indices])
 
     return indices_byfold
@@ -309,9 +298,9 @@ def split(indices, split_ratio, seed):
         np.random.seed(seed)
 
     # Shuffle so that validation set is different between folds
-    #np.random.shuffle(indices)
+    # np.random.shuffle(indices)
 
-    split_pos = int(len(indices)*split_ratio)
+    split_pos = int(len(indices) * split_ratio)
 
     train_indexes = indices[0:split_pos]
     valid_indexes = indices[split_pos:]
@@ -320,64 +309,64 @@ def split(indices, split_ratio, seed):
 
 
 def load_genotypes(filename):
-    with open(filename, 'r') as f:
+    with open(filename, "r") as f:
         lines = f.readlines()
 
     # SNP ids
-    snps = np.array([i.strip() for i in lines[0].split('\t')[1:]])
+    snps = np.array([i.strip() for i in lines[0].split("\t")[1:]])
 
     # Sample ids
-    samples = np.array([i.split('\t')[0] for i in lines[1:]])
+    samples = np.array([i.split("\t")[0] for i in lines[1:]])
 
     # Genotypes
     genotypes = np.empty((len(samples), len(snps)), dtype="int8")
-    for i,line in enumerate(lines[1:]):
-        for j,genotype in enumerate(line.split('\t')[1:]):
-            if genotype.strip() == './.' or genotype.strip() == 'NA':
+    for i, line in enumerate(lines[1:]):
+        for j, genotype in enumerate(line.split("\t")[1:]):
+            if genotype.strip() == "./." or genotype.strip() == "NA":
                 genotype = -1
             else:
                 genotype = int(genotype.strip())
-            genotypes[i,j] = genotype
+            genotypes[i, j] = genotype
 
         # Log number of parsed samples
         if i % 100 == 0 and i != 0:
-            print('Loaded', i, 'out of', len(samples), 'samples')
+            print("Loaded", i, "out of", len(samples), "samples")
 
-    print('Loaded', str(genotypes.shape[1]), 'genotypes of', str(genotypes.shape[0]), 'samples')
+    print("Loaded", str(genotypes.shape[1]), "genotypes of", str(genotypes.shape[0]), "samples")
 
     return samples, snps, genotypes
 
 
 def load_genotypes_parallel(line):
     # Line : Sample id and genotype values across all SNPs
-    sample = (line.split('\t')[0]).strip()
+    sample = (line.split("\t")[0]).strip()
 
     # Fill with genotypes of all SNPs for the individual
     genotypes = []
-    for i in line.split('\t')[1:]:
+    for i in line.split("\t")[1:]:
         # Replace missing values with -1
-        if i.strip() == './.' or i.strip() == 'NA':
+        if i.strip() == "./." or i.strip() == "NA":
             genotype = -1
         else:
             genotype = int(i.strip())
 
         genotypes.append(genotype)
 
-    genotypes = np.array(genotypes, dtype='int8')
+    genotypes = np.array(genotypes, dtype="int8")
 
     return sample, genotypes
 
 
 def load_labels(filename):
-    with open(filename, 'r') as f:
+    with open(filename, "r") as f:
         lines = f.readlines()
 
-    mat = np.array([l.strip('\n').split('\t') for l in lines])
+    mat = np.array([l.strip("\n").split("\t") for l in lines])
 
-    samples = mat[1:,0]
-    labels = mat[1:,1]
+    samples = mat[1:, 0]
+    labels = mat[1:, 1]
 
-    print('Loaded', str(len(labels)),'labels of', str(len(samples)),'samples')
+    print("Loaded", str(len(labels)), "labels of", str(len(samples)), "samples")
 
     return samples, labels
 
@@ -393,52 +382,62 @@ def load_data(filename):
 
     return data
 
+
 # Not sure if this will be used
 def load_data_(filename):
     data = np.load(filename)
 
-    return data['inputs'], data['labels'], data['samples'],\
-           data['label_names'], data['snp_names']
+    return data["inputs"], data["labels"], data["samples"], data["label_names"], data["snp_names"]
 
 
 def load_folds_indexes(filename):
     data = np.load(filename, allow_pickle=True)
 
-    return data['folds_indexes']
+    return data["folds_indexes"]
 
 
 def load_embedding(filename, which_fold):
     data = np.load(filename)
-    embs = data['emb']
+    embs = data["emb"]
     emb = torch.from_numpy(embs[which_fold])
 
     return emb
 
 
-def get_fold_data(which_fold, folds_indexes, data, label='labels'):
+def get_fold_data(which_fold, folds_indexes, data, label="labels"):
     # Indices of each set for the fold (0:train, 1:valid, 2:test)
     fold_indexes = folds_indexes[which_fold]
-    train_indexes = np.sort(fold_indexes[0]) # sort is a hdf5 requirement
+    train_indexes = np.sort(fold_indexes[0])  # sort is a hdf5 requirement
     valid_indexes = np.sort(fold_indexes[1])
     test_indexes = np.sort(fold_indexes[2])
 
     # Get data (x,y,samples) of each set (train, valid, test)
-    x_train = data['inputs'][train_indexes]
+    x_train = data["inputs"][train_indexes]
     y_train = data[label][train_indexes]
-    samples_train = data['samples'][train_indexes]
+    samples_train = data["samples"][train_indexes]
 
-    x_valid = data['inputs'][valid_indexes]
+    x_valid = data["inputs"][valid_indexes]
     y_valid = data[label][valid_indexes]
-    samples_valid = data['samples'][valid_indexes]
+    samples_valid = data["samples"][valid_indexes]
 
-    x_test = data['inputs'][test_indexes]
+    x_test = data["inputs"][test_indexes]
     y_test = data[label][test_indexes]
-    samples_test = data['samples'][test_indexes]
+    samples_test = data["samples"][test_indexes]
 
-    return train_indexes, valid_indexes, test_indexes,\
-           x_train, y_train, samples_train,\
-           x_valid, y_valid, samples_valid,\
-           x_test, y_test, samples_test
+    return (
+        train_indexes,
+        valid_indexes,
+        test_indexes,
+        x_train,
+        y_train,
+        samples_train,
+        x_valid,
+        y_valid,
+        samples_valid,
+        x_test,
+        y_test,
+        samples_test,
+    )
 
 
 # !!This is the old function that has to be removed eventually!!
@@ -447,16 +446,16 @@ def _get_fold_data(which_fold, folds_indexes, data, split_ratio=None, seed=None)
     test_indexes = folds_indexes[which_fold]
 
     # Other folds are used for train and valid sets
-    other_folds = [i for i in range(len(folds_indexes)) if i!=which_fold]
+    other_folds = [i for i in range(len(folds_indexes)) if i != which_fold]
 
     # Concat indices of other folds
     other_indexes = np.concatenate([folds_indexes[i] for i in other_folds])
 
     # If we are generating embeddings, we don't need train/valid sets
     if split_ratio is None:
-        x = data['inputs'][other_indexes]
-        y = data['labels'][other_indexes]
-        samples = data['samples'][other_indexes]
+        x = data["inputs"][other_indexes]
+        y = data["labels"][other_indexes]
+        samples = data["samples"][other_indexes]
 
         return x, y, samples
 
@@ -464,22 +463,32 @@ def _get_fold_data(which_fold, folds_indexes, data, split_ratio=None, seed=None)
     train_indexes, valid_indexes = split(other_indexes, split_ratio, seed)
 
     # Get data (x,y,samples) of each set (train, valid, test)
-    x_train = torch.from_numpy(data['inputs'][train_indexes])
-    y_train = torch.from_numpy(data['labels'][train_indexes])
-    samples_train = data['samples'][train_indexes]
+    x_train = torch.from_numpy(data["inputs"][train_indexes])
+    y_train = torch.from_numpy(data["labels"][train_indexes])
+    samples_train = data["samples"][train_indexes]
 
-    x_valid = torch.from_numpy(data['inputs'][valid_indexes])
-    y_valid = torch.from_numpy(data['labels'][valid_indexes])
-    samples_valid = data['samples'][valid_indexes]
+    x_valid = torch.from_numpy(data["inputs"][valid_indexes])
+    y_valid = torch.from_numpy(data["labels"][valid_indexes])
+    samples_valid = data["samples"][valid_indexes]
 
-    x_test = torch.from_numpy(data['inputs'][test_indexes])
-    y_test = torch.from_numpy(data['labels'][test_indexes])
-    samples_test = data['samples'][test_indexes]
+    x_test = torch.from_numpy(data["inputs"][test_indexes])
+    y_test = torch.from_numpy(data["labels"][test_indexes])
+    samples_test = data["samples"][test_indexes]
 
-    return train_indexes, valid_indexes, test_indexes,\
-           x_train, y_train, samples_train,\
-           x_valid, y_valid, samples_valid,\
-           x_test, y_test, samples_test
+    return (
+        train_indexes,
+        valid_indexes,
+        test_indexes,
+        x_train,
+        y_train,
+        samples_train,
+        x_valid,
+        y_valid,
+        samples_valid,
+        x_test,
+        y_test,
+        samples_test,
+    )
 
 
 def compute_norm_values(x):
@@ -487,17 +496,17 @@ def compute_norm_values(x):
     x is a tensor
     """
     # Non missing values
-    mask = (x >= 0)
+    mask = x >= 0
 
     # Compute mean of every column (feature)
     with torch.no_grad():
-        per_feature_mean = torch.sum(x*mask, dim=0) / torch.sum(mask, dim=0)
+        per_feature_mean = torch.sum(x * mask, dim=0) / torch.sum(mask, dim=0)
 
         # S.d. of every column (feature)
         per_feature_sd = torch.sqrt(
-                torch.sum((x*mask-mask*per_feature_mean)**2, dim=0) / \
-                        (torch.sum(mask, dim=0) - 1)
-                        )
+            torch.sum((x * mask - mask * per_feature_mean) ** 2, dim=0)
+            / (torch.sum(mask, dim=0) - 1)
+        )
         per_feature_sd += 1e-6
 
     return per_feature_mean, per_feature_sd
@@ -507,10 +516,10 @@ def replace_missing_values(x, per_feature_mean):
     """
     x and per_feature_mean are tensors
     """
-    mask = (x >= 0)
+    mask = x >= 0
 
     for i in range(x.shape[0]):
-        x[i] =  mask[i]*x[i] + (~mask[i])*per_feature_mean
+        x[i] = mask[i] * x[i] + (~mask[i]) * per_feature_mean
 
 
 def normalize(x, per_feature_mean, per_feature_sd):
@@ -533,8 +542,15 @@ class InferenceDataset(torch.utils.data.Dataset):
     - Normalization (using model's training stats)
     """
 
-    def __init__(self, plink_prefix, model_package, use_memmap=True, cache_file=None,
-                 force_cache_rebuild=False, verbose=True):
+    def __init__(
+        self,
+        plink_prefix,
+        model_package,
+        use_memmap=True,
+        cache_file=None,
+        force_cache_rebuild=False,
+        verbose=True,
+    ):
         """
         Args:
             plink_prefix: Path to PLINK files (without .bed/.bim/.fam extension)
@@ -544,7 +560,8 @@ class InferenceDataset(torch.utils.data.Dataset):
             force_cache_rebuild: If True, rebuild cache even if it exists
         """
         from pathlib import Path
-        from Dietnet.helpers.snp_alignment import create_snp_mapping, check_alignment_quality
+
+        from Dietnet.helpers.snp_alignment import check_alignment_quality, create_snp_mapping
 
         self.plink_prefix = plink_prefix
         self.model_package = model_package
@@ -565,7 +582,7 @@ class InferenceDataset(torch.utils.data.Dataset):
             cache_file=cache_file,
             use_memmap=use_memmap,
             force_cache_rebuild=force_cache_rebuild,
-            verbose=verbose
+            verbose=verbose,
         )
 
         self.n_samples = len(self.fam_data)
@@ -577,25 +594,20 @@ class InferenceDataset(torch.utils.data.Dataset):
             print("\nAligning SNPs to model...")
         test_bim_path = f"{plink_prefix}.bim"
         self.snp_mapping, self.alignment_info = create_snp_mapping(
-            test_bim=test_bim_path,
-            model_snps=model_package.snps,
-            fill_value=-1
+            test_bim=test_bim_path, model_snps=model_package.snps, fill_value=-1
         )
 
         # Check alignment quality (warns if poor overlap)
         check_alignment_quality(
-            self.alignment_info,
-            min_overlap=0.1,
-            raise_on_poor=False,
-            verbose=verbose
+            self.alignment_info, min_overlap=0.1, raise_on_poor=False, verbose=verbose
         )
 
         # Load model's input statistics for imputation and normalization
         input_stats = model_package.input_stats
-        self.training_means = torch.from_numpy(input_stats['mean']).float()
+        self.training_means = torch.from_numpy(input_stats["mean"]).float()
 
-        if 'std' in input_stats:
-            self.training_stds = torch.from_numpy(input_stats['std']).float()
+        if "std" in input_stats:
+            self.training_stds = torch.from_numpy(input_stats["std"]).float()
         else:
             # If no std available, compute from means (won't normalize, just impute)
             self.training_stds = torch.ones_like(self.training_means)
@@ -625,14 +637,14 @@ class InferenceDataset(torch.utils.data.Dataset):
         aligned_geno = torch.from_numpy(aligned_geno).float()
 
         # Impute missing values with training means
-        mask = (aligned_geno >= 0)
+        mask = aligned_geno >= 0
         aligned_geno = mask * aligned_geno + (~mask) * self.training_means
 
         # Normalize using training statistics
         aligned_geno = (aligned_geno - self.training_means) / self.training_stds
 
         # Get sample ID from FAM file
-        sample_id = self.fam_data.iloc[index]['iid']
+        sample_id = self.fam_data.iloc[index]["iid"]
 
         return aligned_geno, sample_id
 
@@ -658,4 +670,4 @@ class InferenceDataset(torch.utils.data.Dataset):
 
     def get_sample_ids(self):
         """Get all sample IDs in order."""
-        return self.fam_data['iid'].tolist()
+        return self.fam_data["iid"].tolist()

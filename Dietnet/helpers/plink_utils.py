@@ -8,16 +8,17 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 
 def preprocess_test_data_with_plink(
     test_plink_prefix: str,
     model_bim_file: str,
     output_prefix: str,
-    plink_bin: str = 'plink2',
-    force: bool = False
+    plink_bin: str = "plink2",
+    force: bool = False,
 ) -> str:
     """
     Use PLINK2 to preprocess test data to match training allele coding.
@@ -58,23 +59,25 @@ def preprocess_test_data_with_plink(
     #   - 'force' allows changing already-set alleles
     cmd = [
         plink_bin,
-        '--bfile', test_plink_prefix,
-        '--extract', model_bim_file,
-        '--alt1-allele', 'force', model_bim_file, '5', '2',
-        '--make-bed',
-        '--out', output_prefix
+        "--bfile",
+        test_plink_prefix,
+        "--extract",
+        model_bim_file,
+        "--alt1-allele",
+        "force",
+        model_bim_file,
+        "5",
+        "2",
+        "--make-bed",
+        "--out",
+        output_prefix,
     ]
 
     print(f"\nConverting PLINK to correct format...")
     print(f"Command: {' '.join(cmd)}")
 
     try:
-        result = subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         print("✓ PLINK2 conversion complete")
     except subprocess.CalledProcessError as e:
         print(f"PLINK2 command failed with exit code {e.returncode}")
@@ -83,7 +86,7 @@ def preprocess_test_data_with_plink(
         raise RuntimeError(f"PLINK2 preprocessing failed: {e}")
 
     # Verify output files exist
-    for ext in ['.bed', '.bim', '.fam']:
+    for ext in [".bed", ".bim", ".fam"]:
         output_file = f"{output_prefix}{ext}"
         if not os.path.exists(output_file):
             raise FileNotFoundError(f"PLINK2 did not create expected output: {output_file}")
@@ -105,13 +108,14 @@ def find_plink_binary() -> str:
         Path to PLINK2 binary
     """
     # Check local bin/ directory
-    local_plink2 = Path('bin/plink2')
+    local_plink2 = Path("bin/plink2")
     if local_plink2.exists():
         return str(local_plink2.absolute())
 
     # Check PATH
     import shutil
-    plink2_path = shutil.which('plink2')
+
+    plink2_path = shutil.which("plink2")
     if plink2_path:
         return plink2_path
 

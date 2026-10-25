@@ -6,9 +6,9 @@ import hashlib
 import shutil
 import sys
 import tarfile
+import urllib.request
 from pathlib import Path
 from typing import Optional
-import urllib.request
 
 from Dietnet.pretrained_models import PRETRAINED_MODELS
 
@@ -20,12 +20,14 @@ def get_cache_dir() -> Path:
     Returns:
         Path to cache directory (~/.cache/dietnet/)
     """
-    cache_home = Path.home() / '.cache' / 'dietnet'
+    cache_home = Path.home() / ".cache" / "dietnet"
     cache_home.mkdir(parents=True, exist_ok=True)
     return cache_home
 
 
-def get_model_path(preset: str, force_download: bool = False, allow_local_fallback: bool = True) -> Path:
+def get_model_path(
+    preset: str, force_download: bool = False, allow_local_fallback: bool = True
+) -> Path:
     """
     Resolve model preset to local path, downloading if needed.
 
@@ -44,7 +46,7 @@ def get_model_path(preset: str, force_download: bool = False, allow_local_fallba
         raise ValueError(f"Unknown model preset: {preset}")
 
     config = PRETRAINED_MODELS[preset]
-    cache_dir = get_cache_dir() / config['cache_dir']
+    cache_dir = get_cache_dir() / config["cache_dir"]
 
     # Check if already cached
     if cache_dir.exists() and not force_download:
@@ -62,15 +64,16 @@ def get_model_path(preset: str, force_download: bool = False, allow_local_fallba
         return cache_dir
     except Exception as e:
         # Download failed - try local fallback
-        if allow_local_fallback and preset == '1kgp_default':
+        if allow_local_fallback and preset == "1kgp_default":
             print(f"\n⚠ Download failed: {e}", file=sys.stderr)
             print("Checking for local model directory...", file=sys.stderr)
 
             # Try to find local model directory
             from pathlib import Path
+
             possible_paths = [
-                Path.cwd() / 'pretrained_1000g_models',
-                Path(__file__).parent.parent / 'pretrained_1000g_models',
+                Path.cwd() / "pretrained_1000g_models",
+                Path(__file__).parent.parent / "pretrained_1000g_models",
             ]
 
             for local_path in possible_paths:
@@ -101,7 +104,7 @@ def download_model(preset: str, dest: Path):
     """
     config = PRETRAINED_MODELS[preset]
 
-    if config.get('model_url') is None or config['model_url'] == 'PLACEHOLDER_MODEL_URL':
+    if config.get("model_url") is None or config["model_url"] == "PLACEHOLDER_MODEL_URL":
         raise ValueError(
             f"Model preset '{preset}' has no download URL configured yet.\n"
             f"Please check the documentation or wait for the model to be uploaded."
@@ -113,7 +116,7 @@ def download_model(preset: str, dest: Path):
 
     print(f"Downloading from {config['model_url']}...", file=sys.stderr)
     try:
-        urllib.request.urlretrieve(config['model_url'], temp_file, reporthook=_download_progress)
+        urllib.request.urlretrieve(config["model_url"], temp_file, reporthook=_download_progress)
         print(file=sys.stderr)  # New line after progress
     except Exception as e:
         if temp_file.exists():
@@ -121,10 +124,10 @@ def download_model(preset: str, dest: Path):
         raise RuntimeError(f"Failed to download model: {e}")
 
     # Validate checksum
-    if config.get('model_sha256') and config['model_sha256'] != 'PLACEHOLDER_SHA256':
+    if config.get("model_sha256") and config["model_sha256"] != "PLACEHOLDER_SHA256":
         print("Validating checksum...", file=sys.stderr)
         actual_hash = compute_sha256(temp_file)
-        if actual_hash != config['model_sha256']:
+        if actual_hash != config["model_sha256"]:
             temp_file.unlink()
             raise ValueError(
                 f"Checksum mismatch!\n"
@@ -138,7 +141,7 @@ def download_model(preset: str, dest: Path):
     print(f"Extracting to {dest}...", file=sys.stderr)
     dest.mkdir(parents=True, exist_ok=True)
     try:
-        with tarfile.open(temp_file, 'r:gz') as tar:
+        with tarfile.open(temp_file, "r:gz") as tar:
             tar.extractall(dest)
     except Exception as e:
         temp_file.unlink()
@@ -162,20 +165,24 @@ def validate_model(model_dir: Path) -> bool:
         True if valid model package, False otherwise
     """
     # Should have seed_X/fold_Y/ structure
-    seed_dirs = list(model_dir.glob('seed_*'))
+    seed_dirs = list(model_dir.glob("seed_*"))
     if not seed_dirs:
         return False
 
     # Check first model has required files
-    fold_dirs = list(seed_dirs[0].glob('fold_*'))
+    fold_dirs = list(seed_dirs[0].glob("fold_*"))
     if not fold_dirs:
         return False
 
     fold_dir = fold_dirs[0]
     required_files = [
-        'model.pt', 'metadata.json', 'snps.txt',
-        'input_stats.npz', 'embedding.npz',
-        'label_mapping.json', 'allpos.bim'
+        "model.pt",
+        "metadata.json",
+        "snps.txt",
+        "input_stats.npz",
+        "embedding.npz",
+        "label_mapping.json",
+        "allpos.bim",
     ]
 
     return all((fold_dir / f).exists() for f in required_files)
@@ -192,8 +199,8 @@ def compute_sha256(file_path: Path) -> str:
         Hexadecimal SHA256 checksum
     """
     sha256 = hashlib.sha256()
-    with open(file_path, 'rb') as f:
-        for chunk in iter(lambda: f.read(8192), b''):
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
             sha256.update(chunk)
     return sha256.hexdigest()
 
@@ -212,7 +219,7 @@ def clear_cache(preset: Optional[str] = None):
         if preset not in PRETRAINED_MODELS:
             raise ValueError(f"Unknown model preset: {preset}")
 
-        model_cache = cache_dir / PRETRAINED_MODELS[preset]['cache_dir']
+        model_cache = cache_dir / PRETRAINED_MODELS[preset]["cache_dir"]
         if model_cache.exists():
             shutil.rmtree(model_cache)
             print(f"✓ Cleared cache for {preset}", file=sys.stderr)
@@ -233,6 +240,10 @@ def _download_progress(block_num, block_size, total_size):
         percent = min(100, downloaded * 100 / total_size)
         bar_length = 40
         filled = int(bar_length * downloaded / total_size)
-        bar = '=' * filled + '-' * (bar_length - filled)
-        print(f'\r[{bar}] {percent:.1f}% ({downloaded/(1024*1024):.1f}/{total_size/(1024*1024):.1f} MB)',
-              end='', flush=True, file=sys.stderr)
+        bar = "=" * filled + "-" * (bar_length - filled)
+        print(
+            f"\r[{bar}] {percent:.1f}% ({downloaded/(1024*1024):.1f}/{total_size/(1024*1024):.1f} MB)",
+            end="",
+            flush=True,
+            file=sys.stderr,
+        )

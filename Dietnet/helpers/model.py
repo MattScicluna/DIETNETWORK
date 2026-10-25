@@ -1,5 +1,4 @@
 import numpy as np
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,32 +13,25 @@ class Feat_emb_net(nn.Module):
         for i in range(len(n_hidden_u)):
             # First layer
             if i == 0:
-                self.hidden_layers.append(
-                        nn.Linear(n_feats, n_hidden_u[i], bias=False)
-                        )
+                self.hidden_layers.append(nn.Linear(n_feats, n_hidden_u[i], bias=False))
             else:
-                self.hidden_layers.append(
-                        nn.Linear(n_hidden_u[i-1], n_hidden_u[i], bias=False)
-                        )
+                self.hidden_layers.append(nn.Linear(n_hidden_u[i - 1], n_hidden_u[i], bias=False))
         self.hidden_layers = nn.ModuleList(self.hidden_layers)
 
         # Parameters initialization
-        if param_init is not None and len(self.hidden_layers)==2:
-            print('Initializing auxiliary network with weights from Theano')
+        if param_init is not None and len(self.hidden_layers) == 2:
+            print("Initializing auxiliary network with weights from Theano")
 
             # Load weights from Theano
             params = np.load(param_init)
 
             # Init layers with Theano weights
-            self.hidden_layers[0].weight = torch.nn.Parameter(
-                    torch.from_numpy(params['w1_aux']))
-            self.hidden_layers[1].weight = torch.nn.Parameter(
-                    torch.from_numpy(params['w2_aux']))
+            self.hidden_layers[0].weight = torch.nn.Parameter(torch.from_numpy(params["w1_aux"]))
+            self.hidden_layers[1].weight = torch.nn.Parameter(torch.from_numpy(params["w2_aux"]))
 
         else:
             for layer in self.hidden_layers:
                 nn.init.uniform_(layer.weight, a=-uniform_init_limit, b=uniform_init_limit)
-
 
     def forward(self, x):
         for layer in self.hidden_layers:
@@ -51,9 +43,17 @@ class Feat_emb_net(nn.Module):
 
 
 class Discrim_net(nn.Module):
-    def __init__(self, fatLayer_weights, n_feats,
-                 n_hidden1_u, n_hidden2_u, n_targets,
-                 input_dropout=0., eps=1e-05, incl_softmax=False):
+    def __init__(
+        self,
+        fatLayer_weights,
+        n_feats,
+        n_hidden1_u,
+        n_hidden2_u,
+        n_targets,
+        input_dropout=0.0,
+        eps=1e-05,
+        incl_softmax=False,
+    ):
         super(Discrim_net, self).__init__()
 
         # Dropout on input layer
@@ -80,7 +80,6 @@ class Discrim_net(nn.Module):
         self.dropout = nn.Dropout()
 
         self.incl_softmax = incl_softmax
-
 
     def forward(self, x):
         # input size: batch_size x n_feats
@@ -111,15 +110,24 @@ class Discrim_net2(nn.Module):
     Does not have weights for first layer;
     Uses F.linear with passed weights instead
     """
-    def __init__(self, n_feats,
-                 n_hidden_u, n_targets,
-                 param_init, input_dropout=0., eps=1e-5, incl_bias=True, incl_softmax=False):
+
+    def __init__(
+        self,
+        n_feats,
+        n_hidden_u,
+        n_targets,
+        param_init,
+        input_dropout=0.0,
+        eps=1e-5,
+        incl_bias=True,
+        incl_softmax=False,
+    ):
         super(Discrim_net2, self).__init__()
 
         self.hidden_layers = []
         self.bn_fatLayer = None
-        self.bn = [] # batch normalization (all layers except first)
-        self.out = None # Output layer
+        self.bn = []  # batch normalization (all layers except first)
+        self.out = None  # Output layer
         self.incl_softmax = incl_softmax
 
         # Dropout on input layer
@@ -134,10 +142,8 @@ class Discrim_net2(nn.Module):
                 self.bn_fatLayer = nn.BatchNorm1d(num_features=n_hidden_u[i], eps=eps)
             # Hidden layers
             else:
-                self.hidden_layers.append(
-                        nn.Linear(n_hidden_u[i-1], n_hidden_u[i]))
-                self.bn.append(
-                        nn.BatchNorm1d(num_features=n_hidden_u[i], eps=eps))
+                self.hidden_layers.append(nn.Linear(n_hidden_u[i - 1], n_hidden_u[i]))
+                self.bn.append(nn.BatchNorm1d(num_features=n_hidden_u[i], eps=eps))
             # Output layer
             self.out = nn.Linear(n_hidden_u[-1], n_targets)
 
@@ -145,17 +151,15 @@ class Discrim_net2(nn.Module):
         self.bn = nn.ModuleList(self.bn)
         # ---Parameters initialization---
         # Theno init
-        if param_init is not None and len(self.hidden_layers)==2:
-            print('Initializing main network with weights from Theano')
+        if param_init is not None and len(self.hidden_layers) == 2:
+            print("Initializing main network with weights from Theano")
 
             # Load weights from Theano
             params = np.load(param_init)
 
             # Init layers with Theano weights
-            self.hidden_layers[0].weight = torch.nn.Parameter(
-                    torch.from_numpy(params['w2_main']))
-            self.out.weight = torch.nn.Parameter(
-                    torch.from_numpy(params['w3_main']))
+            self.hidden_layers[0].weight = torch.nn.Parameter(torch.from_numpy(params["w2_main"]))
+            self.out.weight = torch.nn.Parameter(torch.from_numpy(params["w3_main"]))
 
         # Regular init
         else:
@@ -177,7 +181,6 @@ class Discrim_net2(nn.Module):
 
         # Output layer
         nn.init.zeros_(self.out.bias)
-
 
     def forward(self, x, fatLayer_weights, save_layers=False):
         # input size: batch_size x n_feats
@@ -214,21 +217,37 @@ class Discrim_net2(nn.Module):
 
 
 class CombinedModel(nn.Module):
-    def __init__(self, n_feats, n_hidden_u_aux, n_hidden_u_main,
-                 n_targets, param_init, aux_uniform_init_limit,
-                 input_dropout=0., eps=1e-5, incl_bias=True, incl_softmax=False):
+    def __init__(
+        self,
+        n_feats,
+        n_hidden_u_aux,
+        n_hidden_u_main,
+        n_targets,
+        param_init,
+        aux_uniform_init_limit,
+        input_dropout=0.0,
+        eps=1e-5,
+        incl_bias=True,
+        incl_softmax=False,
+    ):
         super(CombinedModel, self).__init__()
 
         # Initialize auxiliary and main networks (using old naming for compatibility)
         self.aux_net = Feat_emb_net(n_feats, n_hidden_u_aux, param_init, aux_uniform_init_limit)
-        self.main_net = Discrim_net2(n_feats, n_hidden_u_main, n_targets,
-                                      param_init, input_dropout, eps,
-                                      incl_bias, incl_softmax)
+        self.main_net = Discrim_net2(
+            n_feats,
+            n_hidden_u_main,
+            n_targets,
+            param_init,
+            input_dropout,
+            eps,
+            incl_bias,
+            incl_softmax,
+        )
         self.fatLayer_weights = None
         # Backward-compatible attribute names expected elsewhere
         self.feat_emb = self.aux_net
         self.disc_net = self.main_net
-
 
     def forward(self, emb, x_batch, save_layers=False):
         # Forward pass in auxiliary net
@@ -241,14 +260,12 @@ class CombinedModel(nn.Module):
 
 
 class Mlp(nn.Module):
-    def __init__(self, n_feats,
-                 n_hidden_u, n_targets,
-                 input_dropout=0., eps=1e-5):
+    def __init__(self, n_feats, n_hidden_u, n_targets, input_dropout=0.0, eps=1e-5):
         super(Mlp, self).__init__()
 
         self.hidden_layers = []
-        self.bn = [] # batch normalization
-        self.out = None # Output layer
+        self.bn = []  # batch normalization
+        self.out = None  # Output layer
 
         # Dropout on input layer
         self.input_dropout = nn.Dropout(p=input_dropout)
@@ -259,16 +276,12 @@ class Mlp(nn.Module):
         for i in range(len(n_hidden_u)):
             # First layer: linear function handle in forward function below
             if i == 0:
-                self.hidden_layers.append(
-                        nn.Linear(n_feats, n_hidden_u[i]))
-                self.bn.append(
-                        nn.BatchNorm1d(num_features=n_hidden_u[i], eps=eps))
+                self.hidden_layers.append(nn.Linear(n_feats, n_hidden_u[i]))
+                self.bn.append(nn.BatchNorm1d(num_features=n_hidden_u[i], eps=eps))
             # Hidden layers
             else:
-                self.hidden_layers.append(
-                        nn.Linear(n_hidden_u[i-1], n_hidden_u[i]))
-                self.bn.append(
-                        nn.BatchNorm1d(num_features=n_hidden_u[i], eps=eps))
+                self.hidden_layers.append(nn.Linear(n_hidden_u[i - 1], n_hidden_u[i]))
+                self.bn.append(nn.BatchNorm1d(num_features=n_hidden_u[i], eps=eps))
             # Output layer
             self.out = nn.Linear(n_hidden_u[-1], n_targets)
 
@@ -288,7 +301,6 @@ class Mlp(nn.Module):
         # Output layer
         nn.init.zeros_(self.out.bias)
 
-
     def forward(self, x):
         x = self.input_dropout(x)
 
@@ -306,21 +318,24 @@ class Mlp(nn.Module):
         return out
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Let's do a little test just to see if the run fails
     # Dummy data
-    x = torch.ones((30,3000),requires_grad=True)
+    x = torch.ones((30, 3000), requires_grad=True)
     y = torch.LongTensor(30).random_(0, 2)
-    x_emb = torch.ones((3000,3*3), requires_grad=True)
+    x_emb = torch.ones((3000, 3 * 3), requires_grad=True)
 
     # Intantiate models
     emb_model = Feat_emb_net(n_feats=x_emb.size()[1], n_hidden_u=100)
     emb_model_out = emb_model(x_emb)
-    fatLayer_weights = torch.transpose(emb_model_out,1,0)
-    discrim_model = Discrim_net(fatLayer_weights=fatLayer_weights,
-                                n_feats=x.size()[1],
-                                n_hidden1_u=100, n_hidden2_u=100,
-                                n_targets=y.size()[0])
+    fatLayer_weights = torch.transpose(emb_model_out, 1, 0)
+    discrim_model = Discrim_net(
+        fatLayer_weights=fatLayer_weights,
+        n_feats=x.size()[1],
+        n_hidden1_u=100,
+        n_hidden2_u=100,
+        n_targets=y.size()[0],
+    )
     # Loss
     criterion = nn.CrossEntropyLoss()
     # Optimizer
@@ -329,14 +344,14 @@ if __name__ == '__main__':
 
     # Training loop
     for epoch in range(10):
-        print('epoch:', epoch)
+        print("epoch:", epoch)
         optimizer.zero_grad()
 
         # Forward pass in feat emb net
         emb_out = emb_model(x_emb)
 
         # Set fat layer weights in discrim net
-        fatLayer_weights = torch.transpose(emb_out,1,0)
+        fatLayer_weights = torch.transpose(emb_out, 1, 0)
         discrim_model.hidden_1.weight.data = fatLayer_weights
 
         # Forward pass in discrim net
@@ -344,7 +359,7 @@ if __name__ == '__main__':
 
         # Compute loss
         loss = criterion(discrim_out, y)
-        print('Loss:', loss)
+        print("Loss:", loss)
 
         # Compute gradients in discrim net
         loss.backward()
