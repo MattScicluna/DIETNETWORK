@@ -1,0 +1,6 @@
+[flake8]
+# Matches black's line length, so a line black accepts is never a lint error.
+max-line-length = 100
+extend-ignore = E203,W503,E501,F841,F541
+# HussinLab's code is kept identical to upstream and never linted here.
+extend-exclude = Dietnet_train_and_evaluate,.venv

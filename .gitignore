@@ -18,3 +18,11 @@ Dietnet/tests/filenames.py
 
 # Model weights
 Models_1KGP_24populations/
+
+# Local environments and tool state
+.venv/
+.claude/
+.coverage
+coverage.xml
+# Written by the CI install step
+requirements-ci.txt
