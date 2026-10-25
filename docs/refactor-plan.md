@@ -83,6 +83,8 @@ scaling, an in-memory dataset and attribution models.
 
 | B17 | `get_train_dir` calls `sys.exit` without importing `sys`. | `helpers/test_external_utils.py` | The legacy `test_external_dataset.py` raises `NameError` instead of exiting cleanly when the training directory is missing. Found by flake8 (F821, exempted by name in `.flake8`). | — |
 
+| B18 | Without `--temp-dir`, `predict` writes its genotype cache (an `.npy` the size of the int8 matrix: about 77 GiB for UK Biobank) next to the input PLINK files. | `predict_with_plink.py` | Fills, or fails on, shared or read-only cohort directories. The HDF5 intermediate should go to an explicit, user-chosen location. | — |
+
 Open question Q1: the shipped config uses `input_dropout: 0.995`, which drops
 99.5% of SNP inputs per sample per step (`nn.Dropout(p)` takes the *drop*
 probability, here and upstream). It may be deliberate, but nobody has recorded
