@@ -44,3 +44,13 @@ def upstream_checkout() -> Path:
     if not (root / "Dietnet_train_and_evaluate" / "test_independent_dataset.py").is_file():
         pytest.fail(f"DIETNET_UPSTREAM_DIR={root} is not a full upstream checkout")
     return root
+
+
+@pytest.fixture(scope="session")
+def published_packages(tmp_path_factory):
+    from dietnet import published
+
+    cache = os.environ.get("DIETNET_PUBLISHED_DIR")
+    root = Path(cache) if cache else tmp_path_factory.mktemp("published")
+    release = published.fetch(root / "download")
+    return published.import_training_release(release, root / "packages")

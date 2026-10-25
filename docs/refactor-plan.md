@@ -103,12 +103,28 @@ runs all 15.
 
 ## Phases from here
 
-1. **Reproduce, then retrain.**
-   - Published models on 1KGP: done for numerical parity. Per-fold accuracy
-     needs the published partition, which Zenodo does not include; ask Camille
-     for it.
-   - Retrain 1KGP (5 × 3, published config) with `dietnet train` on the
-     cluster, and compare with the paper and the published models.
+1. **Reproduce, then retrain** (in progress).
+   - ✅ **The published split is recovered.** It is upstream's `partition_data.py
+     --balance-class --seed 124`. The file was taken from the lab's 1KGP
+     directory on the cluster and is now `reproduction/1kgp_partition_seed124.npz`.
+     Its training indices reproduce Zenodo's per-fold means, SDs and
+     embedding exactly. `dietnet partition --seed 124` regenerates its
+     membership but not its within-fold order (U2), so the retrain uses the
+     file.
+   - ✅ **The published accuracy is reproduced.** Each of the 15 models, on its
+     own test fold: mean 0.9214, sd 0.013 (per model in
+     `reproduction/README.md`), matching the paper's Figure 1A (~0.92).
+     Pinned by `tests/parity/test_published.py` (slow).
+   - **Finding:** the published models count the ALT allele at all 229,986
+     SNPs, but the distributed 1KGP PLINK files count the minor allele
+     (plink 1.9's default). They differ at 56,195 SNPs (24%), which
+     allele-aware matching flips back; same accuracy either way. Matching by
+     SNP id alone would feed those SNPs mirror-coded.
+   - **Retrain:** 15 models on GPUs with the published configs and split
+     (`reproduction/submit_retrain.sh`), then compare per (seed, fold) with
+     the published models. Identical weights are not expected (GPU
+     nondeterminism, torch version), so the comparison is accuracy and
+     prediction agreement.
 2. **Scale.**
    - UK Biobank on Narval end to end: time and peak memory per step
      (`benchmarks/slurm/bench_predict.sbatch`).

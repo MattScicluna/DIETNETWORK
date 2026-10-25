@@ -24,3 +24,7 @@ tests/fixtures/synthetic.bed:genotype-data
 tests/fixtures/synthetic.bim:genotype-data
 tests/fixtures/synthetic.fam:genotype-data
 tests/fixtures/synthetic_upstream.hdf5:data-container
+
+# The published models' 5-fold split (sample row indices into the public 1KGP
+# dataset), needed to reproduce them; see reproduction/README.md. Reviewed 2026-10-25.
+reproduction/1kgp_partition_seed124.npz:data-container

@@ -69,6 +69,7 @@ packages = ["src/dietnet"]
 only-include = [
     "src/dietnet",
     "Dietnet_train_and_evaluate",
+    "reproduction",
     "tests",
     "scripts",
     "README.md",

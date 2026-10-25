@@ -104,16 +104,6 @@ def test_missing_snps_are_handled_as_upstream_handles_them(
     np.testing.assert_allclose(ours.scores[0], theirs, rtol=1e-5, atol=1e-6)
 
 
-@pytest.fixture(scope="session")
-def published_packages(tmp_path_factory):
-    from dietnet import published
-
-    cache = os.environ.get("DIETNET_PUBLISHED_DIR")
-    root = Path(cache) if cache else tmp_path_factory.mktemp("published")
-    release = published.fetch(root / "download")
-    return published.import_training_release(release, root / "packages")
-
-
 @pytest.mark.slow
 @pytest.mark.network
 def test_published_models_match_upstream_inference(

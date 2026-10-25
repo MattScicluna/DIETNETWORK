@@ -7,7 +7,7 @@
 # cluster path is committed:
 #
 #   TRAIN_PREFIX=/path/panel TRAIN_LABELS=/path/panel_labels.tsv \
-#   TEST_PREFIX=/path/cohort DIETNET_VENV=/path/.venv RUN_DIR=/path/on/scratch \
+#   TEST_PREFIX=/path/cohort DIETNET_VENV=/path/.venv RUN_DIR=/path/to/run_dir \
 #   sbatch --account=ACCOUNT benchmarks/slurm/bench_predict.sbatch
 #
 # Outputs (the matched cohort HDF5, predictions) are cohort data and stay
