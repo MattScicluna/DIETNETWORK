@@ -6,7 +6,7 @@ automatically, as well as test datasets for validation.
 """
 
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 PRETRAINED_MODELS: Dict[str, Dict[str, Any]] = {
     "1kgp_default": {
@@ -24,9 +24,30 @@ PRETRAINED_MODELS: Dict[str, Dict[str, Any]] = {
         "size_mb": 1600,  # ~1.6 GB for 15 models
         "cache_dir": "1kgp_default_v1",
         "populations": [
-            "ACB", "ASW", "BEB", "CDX", "CEUGBR", "CHB", "CHS",
-            "CLM", "ESN", "FIN", "GIH", "GWD", "IBS", "JPT", "KHV",
-            "LWK", "MSL", "MXL", "PEL", "PJL", "PUR", "STUITU", "TSI", "YRI"
+            "ACB",
+            "ASW",
+            "BEB",
+            "CDX",
+            "CEUGBR",
+            "CHB",
+            "CHS",
+            "CLM",
+            "ESN",
+            "FIN",
+            "GIH",
+            "GWD",
+            "IBS",
+            "JPT",
+            "KHV",
+            "LWK",
+            "MSL",
+            "MXL",
+            "PEL",
+            "PJL",
+            "PUR",
+            "STUITU",
+            "TSI",
+            "YRI",
         ],
     },
     "hgdp_ukbb": {
@@ -36,7 +57,7 @@ PRETRAINED_MODELS: Dict[str, Dict[str, Any]] = {
         "model_url": None,  # To be added later
         "model_sha256": None,
         "cache_dir": "hgdp_ukbb_v1",
-    }
+    },
 }
 
 TEST_DATA: Dict[str, Dict[str, Any]] = {
@@ -46,7 +67,7 @@ TEST_DATA: Dict[str, Dict[str, Any]] = {
         "plink_url": "https://www.dropbox.com/scl/fi/dqumjkv8kxfbt3caog81h/dietnet_1kgp_test_data_v1.tar.gz?rlkey=wl1u2cufinui7k0m9pp4197n5&st=u5cy2q6z&dl=1",  # User fills after upload
         "plink_sha256": "fbf5dab7afca99008870e669a9efe20cbca19c041695a23536a848258c7400e5",
         "expected_accuracy_min": 0.85,  # 85% minimum expected
-        "expected_accuracy_max": 1.0,   # 100% maximum expected
+        "expected_accuracy_max": 1.0,  # 100% maximum expected
         "plink_basename": "1000G.2504_WGS30x.GSA17k_MHI.intersectGSA.miss10perc.maf0.05.pruned.autosomes.noHLA.phased_imputed_V1",
         "labels_filename": "labels_pop_subsampleV1.tsv",
     }
@@ -93,5 +114,4 @@ def is_model_available(preset: str) -> bool:
         return False
 
     config = PRETRAINED_MODELS[preset]
-    return config.get("model_url") is not None and \
-           config["model_url"] != "PLACEHOLDER_MODEL_URL"
+    return config.get("model_url") is not None and config["model_url"] != "PLACEHOLDER_MODEL_URL"

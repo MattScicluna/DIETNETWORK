@@ -3,6 +3,7 @@ Command-line interface for DietNetwork.
 
 This module provides a unified CLI for training and inference with DietNetwork.
 """
+
 import os
 import sys
 from pathlib import Path
@@ -18,7 +19,7 @@ def _parse_int_multi(ctx, param, value):
         return None
     out = []
     for item in value:
-        for part in str(item).split(','):
+        for part in str(item).split(","):
             part = part.strip()
             if part:
                 out.append(int(part))
@@ -39,125 +40,134 @@ def main():
 
 @main.command()
 @click.option(
-    '--exp-path',
+    "--exp-path",
     type=click.Path(exists=True),
     required=True,
-    help='Path to directory containing dataset, partitions, and embeddings.'
+    help="Path to directory containing dataset, partitions, and embeddings.",
 )
 @click.option(
-    '--exp-name',
+    "--exp-name",
     type=str,
     required=True,
-    help='Name of experiment directory where results will be saved.'
+    help="Name of experiment directory where results will be saved.",
 )
 @click.option(
-    '--config',
+    "--config",
     type=str,
-    default='config.yaml',
-    help='YAML config file with hyperparameters (default: config.yaml).'
+    default="config.yaml",
+    help="YAML config file with hyperparameters (default: config.yaml).",
 )
 # NEW PLINK PACKAGE APPROACH (Recommended)
 @click.option(
-    '--plink-prefix',
+    "--plink-prefix",
     type=str,
     default=None,
-    help='PLINK file prefix for training data (without .bed/.bim/.fam).'
+    help="PLINK file prefix for training data (without .bed/.bim/.fam).",
 )
 @click.option(
-    '--output-dir',
+    "--output-dir",
     type=click.Path(),
     default=None,
-    help='Directory to save trained model package(s). Defaults to <exp-path>/<exp-name>_packages.'
+    help="Directory to save trained model package(s). Defaults to <exp-path>/<exp-name>_packages.",
 )
 @click.option(
-    '--seeds',
+    "--seeds",
     multiple=True,
     callback=_parse_int_multi,
     type=str,
     default=None,
-    help='Seeds to train (repeat flag or comma-separated; default: seed from config).'
+    help="Seeds to train (repeat flag or comma-separated; default: seed from config).",
 )
 @click.option(
-    '--folds',
+    "--folds",
     multiple=True,
     callback=_parse_int_multi,
     type=str,
     default=None,
-    help='Folds to train (repeat flag or comma-separated; default: all folds).'
+    help="Folds to train (repeat flag or comma-separated; default: all folds).",
 )
 @click.option(
-    '--task',
-    type=click.Choice(['classification', 'regression']),
-    default='classification',
-    help='Task type (default: classification).'
+    "--task",
+    type=click.Choice(["classification", "regression"]),
+    default="classification",
+    help="Task type (default: classification).",
 )
 @click.option(
-    '--normalize/--no-normalize',
+    "--normalize/--no-normalize",
     default=True,
-    help='Apply normalization to input features (default: normalize).'
+    help="Apply normalization to input features (default: normalize).",
 )
 @click.option(
-    '--param-init',
+    "--param-init",
     type=click.Path(exists=True),
     default=None,
-    help='Path to pre-trained parameter initialization (.npz from Theano).'
+    help="Path to pre-trained parameter initialization (.npz from Theano).",
 )
 @click.option(
-    '--comet-ml/--no-comet-ml',
+    "--comet-ml/--no-comet-ml",
     default=False,
-    help='Enable Comet.ML experiment tracking (default: disabled).'
+    help="Enable Comet.ML experiment tracking (default: disabled).",
 )
+@click.option("--comet-ml-project-name", type=str, default=None, help="Comet.ML project name.")
 @click.option(
-    '--comet-ml-project-name',
-    type=str,
-    default=None,
-    help='Comet.ML project name.'
-)
-@click.option(
-    '--optimization/--no-optimization',
+    "--optimization/--no-optimization",
     default=False,
-    help='Run in hyperparameter optimization mode (default: disabled).'
+    help="Run in hyperparameter optimization mode (default: disabled).",
 )
 @click.option(
-    '--dataset',
+    "--dataset",
     type=str,
-    default='dataset.hdf5',
-    help='[DEPRECATED] HDF5 dataset file (default: dataset.hdf5).'
+    default="dataset.hdf5",
+    help="[DEPRECATED] HDF5 dataset file (default: dataset.hdf5).",
 )
 @click.option(
-    '--partition',
+    "--partition",
     type=str,
-    default='partitioned_idx.npz',
-    help='Partition indexes file (default: partitioned_idx.npz).'
+    default="partitioned_idx.npz",
+    help="Partition indexes file (default: partitioned_idx.npz).",
 )
 @click.option(
-    '--embedding',
+    "--embedding",
     type=str,
-    default='embedding.npz',
-    help='Genotype frequency embedding file (default: embedding.npz).'
+    default="embedding.npz",
+    help="Genotype frequency embedding file (default: embedding.npz).",
 )
 @click.option(
-    '--input-features-means',
+    "--input-features-means",
     type=str,
-    default='input_features_means.npz',
-    help='Input feature means for missing value imputation (default: input_features_means.npz).'
+    default="input_features_means.npz",
+    help="Input feature means for missing value imputation (default: input_features_means.npz).",
 )
 @click.option(
-    '--label-file',
+    "--label-file",
     type=str,
     default=None,
-    help='Label file (TSV format, required for PLINK datasets).'
+    help="Label file (TSV format, required for PLINK datasets).",
 )
 @click.option(
-    '--which-fold',
-    type=int,
-    default=None,
-    help='[DEPRECATED] Which fold to train on (0-indexed).'
+    "--which-fold", type=int, default=None, help="[DEPRECATED] Which fold to train on (0-indexed)."
 )
-def train(exp_path, exp_name, config, plink_prefix, output_dir, seeds, folds,
-          task, normalize, param_init, comet_ml, comet_ml_project_name,
-          optimization, dataset, partition, embedding, input_features_means,
-          label_file, which_fold):
+def train(
+    exp_path,
+    exp_name,
+    config,
+    plink_prefix,
+    output_dir,
+    seeds,
+    folds,
+    task,
+    normalize,
+    param_init,
+    comet_ml,
+    comet_ml_project_name,
+    optimization,
+    dataset,
+    partition,
+    embedding,
+    input_features_means,
+    label_file,
+    which_fold,
+):
     """
     Train DietNetwork models and save them as model packages.
 
@@ -168,7 +178,7 @@ def train(exp_path, exp_name, config, plink_prefix, output_dir, seeds, folds,
     import warnings
 
     # Detect which training path to use
-    dataset_is_plink = dataset is not None and dataset.endswith(('.bed', '.bim', '.fam'))
+    dataset_is_plink = dataset is not None and dataset.endswith((".bed", ".bim", ".fam"))
     using_plink = plink_prefix is not None or dataset_is_plink
 
     if plink_prefix and dataset_is_plink:
@@ -192,7 +202,7 @@ def train(exp_path, exp_name, config, plink_prefix, output_dir, seeds, folds,
             partition=partition,
             embedding=embedding,
             input_features_means=input_features_means,
-            label_file=label_file
+            label_file=label_file,
         )
         return
 
@@ -210,7 +220,7 @@ def train(exp_path, exp_name, config, plink_prefix, output_dir, seeds, folds,
         "\n"
         "═══════════════════════════════════════════════════════════════\n",
         DeprecationWarning,
-        stacklevel=2
+        stacklevel=2,
     )
 
     if which_fold is None:
@@ -244,15 +254,30 @@ def train(exp_path, exp_name, config, plink_prefix, output_dir, seeds, folds,
     train_module.main_with_args(args)
 
 
-def _train_with_plink_packages(exp_path, exp_name, config, plink_prefix,
-                               output_dir, seeds, folds, task, normalize,
-                               param_init, comet_ml, comet_ml_project_name,
-                               optimization, partition, embedding,
-                               input_features_means, label_file):
+def _train_with_plink_packages(
+    exp_path,
+    exp_name,
+    config,
+    plink_prefix,
+    output_dir,
+    seeds,
+    folds,
+    task,
+    normalize,
+    param_init,
+    comet_ml,
+    comet_ml_project_name,
+    optimization,
+    partition,
+    embedding,
+    input_features_means,
+    label_file,
+):
     """
     Train one or more models from PLINK data and package them for inference.
     """
     import copy
+
     import numpy as np
     import torch
     import yaml
@@ -273,7 +298,7 @@ def _train_with_plink_packages(exp_path, exp_name, config, plink_prefix,
     plink_prefix_path = _normalize_plink_prefix(plink_prefix)
     dataset_arg = f"{plink_prefix_path}.bed"
     dataset_file = _resolve_path(exp_path, dataset_arg)
-    bim_file = Path(str(dataset_file)[:-4] + '.bim')
+    bim_file = Path(str(dataset_file)[:-4] + ".bim")
 
     if not dataset_file.exists():
         click.echo(f"ERROR: Training PLINK file not found: {dataset_file}", err=True)
@@ -289,10 +314,10 @@ def _train_with_plink_packages(exp_path, exp_name, config, plink_prefix,
         click.echo(f"ERROR: Config file not found: {config_path}", err=True)
         sys.exit(1)
 
-    with open(config_path, 'r') as f:
+    with open(config_path, "r") as f:
         base_config = yaml.safe_load(f) or {}
 
-    default_seed = base_config.get('seed')
+    default_seed = base_config.get("seed")
     seed_list = list(seeds) if seeds else ([default_seed] if default_seed is not None else [])
     if not seed_list:
         click.echo("ERROR: No seed provided and config file has no 'seed' value.", err=True)
@@ -305,13 +330,16 @@ def _train_with_plink_packages(exp_path, exp_name, config, plink_prefix,
         sys.exit(1)
 
     folds_data = np.load(partition_path, allow_pickle=True)
-    folds_indexes = folds_data['folds_indexes']
+    folds_indexes = folds_data["folds_indexes"]
     available_folds = list(range(len(folds_indexes)))
     fold_list = list(folds) if folds else available_folds
 
     invalid_folds = [f for f in fold_list if f not in available_folds]
     if invalid_folds:
-        click.echo(f"ERROR: Requested folds {invalid_folds} not in available folds {available_folds}.", err=True)
+        click.echo(
+            f"ERROR: Requested folds {invalid_folds} not in available folds {available_folds}.",
+            err=True,
+        )
         sys.exit(1)
 
     # Label mapping (classification only)
@@ -324,7 +352,7 @@ def _train_with_plink_packages(exp_path, exp_name, config, plink_prefix,
 
     # SNP list from training BIM
     snp_df = parse_bim_file(bim_file)
-    snps = snp_df['chr_pos'].tolist()
+    snps = snp_df["chr_pos"].tolist()
 
     # Load embedding and input stats once
     embedding_path = _resolve_path(exp_path, embedding)
@@ -372,15 +400,17 @@ def _train_with_plink_packages(exp_path, exp_name, config, plink_prefix,
             out_dir = exp_path / exp_name / f"{exp_name}_seed{seed_value}_fold{fold}"
             checkpoint = _find_model_checkpoint(out_dir)
             if checkpoint is None:
-                click.echo(f"ERROR: No checkpoint found in {out_dir}; skipping packaging.", err=True)
+                click.echo(
+                    f"ERROR: No checkpoint found in {out_dir}; skipping packaging.", err=True
+                )
                 continue
 
-            model_state = torch.load(checkpoint, map_location='cpu', weights_only=False)
+            model_state = torch.load(checkpoint, map_location="cpu", weights_only=False)
             embedding_for_fold = _select_embedding_for_fold(embedding_data, fold)
             input_stats = _extract_input_stats_for_fold(stats_data, fold)
 
             config_for_meta = copy.deepcopy(base_config)
-            config_for_meta['seed'] = seed_value
+            config_for_meta["seed"] = seed_value
 
             package_dir = package_root / f"seed_{seed_value}" / f"fold_{fold}"
             ModelPackage(package_dir).save(
@@ -393,11 +423,11 @@ def _train_with_plink_packages(exp_path, exp_name, config, plink_prefix,
                 seed=seed_value,
                 fold=fold,
                 training_info={
-                    'exp_path': str(exp_path),
-                    'exp_name': exp_name,
-                    'dataset': str(dataset_file)
+                    "exp_path": str(exp_path),
+                    "exp_name": exp_name,
+                    "dataset": str(dataset_file),
                 },
-                bim_file=bim_file
+                bim_file=bim_file,
             )
 
             click.echo(f"✓ Saved model package to {package_dir}", err=True)
@@ -405,8 +435,8 @@ def _train_with_plink_packages(exp_path, exp_name, config, plink_prefix,
 
 def _normalize_plink_prefix(plink_prefix: str) -> Path:
     path = Path(plink_prefix)
-    if path.suffix in {'.bed', '.bim', '.fam'}:
-        path = path.with_suffix('')
+    if path.suffix in {".bed", ".bim", ".fam"}:
+        path = path.with_suffix("")
     return path
 
 
@@ -420,7 +450,7 @@ def _resolve_path(base: Path, target: str) -> Path:
 def _find_model_checkpoint(out_dir: Path):
     if not out_dir.exists():
         return None
-    candidates = list(out_dir.glob('*.pt'))
+    candidates = list(out_dir.glob("*.pt"))
     if not candidates:
         return None
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -430,10 +460,10 @@ def _find_model_checkpoint(out_dir: Path):
 def _select_embedding_for_fold(embedding_data, fold: int):
     import numpy as np
 
-    if 'emb' in embedding_data:
-        emb_arr = embedding_data['emb']
-    elif 'embedding' in embedding_data:
-        emb_arr = embedding_data['embedding']
+    if "emb" in embedding_data:
+        emb_arr = embedding_data["emb"]
+    elif "embedding" in embedding_data:
+        emb_arr = embedding_data["embedding"]
     else:
         emb_arr = embedding_data[list(embedding_data.files)[0]]
 
@@ -448,27 +478,27 @@ def _extract_input_stats_for_fold(stats_data, fold: int):
 
     # Format written by compute_input_features_mean.py:
     #   means_by_fold[fold] = mean array, sd_by_fold[fold] = std array
-    if 'means_by_fold' in stats_data:
-        mean = np.array(stats_data['means_by_fold'][fold])
-        std = np.array(stats_data['sd_by_fold'][fold]) if 'sd_by_fold' in stats_data else None
+    if "means_by_fold" in stats_data:
+        mean = np.array(stats_data["means_by_fold"][fold])
+        std = np.array(stats_data["sd_by_fold"][fold]) if "sd_by_fold" in stats_data else None
     else:
-        mean = np.array(stats_data['mean'])
-        std = np.array(stats_data['std']) if 'std' in stats_data else None
+        mean = np.array(stats_data["mean"])
+        std = np.array(stats_data["std"]) if "std" in stats_data else None
         if mean.ndim > 1 and mean.shape[0] > fold:
             mean = mean[fold]
         if std is not None and std.ndim > 1 and std.shape[0] > fold:
             std = std[fold]
 
-    input_stats = {'mean': np.asarray(mean)}
+    input_stats = {"mean": np.asarray(mean)}
     if std is not None:
-        input_stats['std'] = np.asarray(std)
+        input_stats["std"] = np.asarray(std)
     return input_stats
 
 
 def _load_label_mapping(label_file: Path, task: str, du) -> dict:
     import numpy as np
 
-    if task == 'regression':
+    if task == "regression":
         return {}
 
     samples, labels = du.load_labels(label_file)
@@ -479,156 +509,160 @@ def _load_label_mapping(label_file: Path, task: str, du) -> dict:
 @main.command()
 # NEW MODEL PACKAGE APPROACH (Recommended)
 @click.option(
-    '--model',
+    "--model",
     type=str,
     default=None,
-    help='Model preset (e.g., 1kgp_default) or path to model package directory.'
+    help="Model preset (e.g., 1kgp_default) or path to model package directory.",
 )
 @click.option(
-    '--plink-prefix',
+    "--plink-prefix",
     type=str,
     default=None,
-    help='PLINK file prefix for test data (without .bed/.bim/.fam).'
+    help="PLINK file prefix for test data (without .bed/.bim/.fam).",
 )
-@click.option(
-    '--output',
-    type=str,
-    default=None,
-    help='Output file for predictions (text).'
-)
+@click.option("--output", type=str, default=None, help="Output file for predictions (text).")
 # LEGACY HDF5 APPROACH (Deprecated)
 @click.option(
-    '--test-dataset',
+    "--test-dataset",
     type=click.Path(exists=True),
     default=None,
-    help='[DEPRECATED] HDF5 file containing test data.'
+    help="[DEPRECATED] HDF5 file containing test data.",
 )
 @click.option(
-    '--train-dataset',
+    "--train-dataset",
     type=click.Path(exists=True),
     default=None,
-    help='[DEPRECATED] HDF5 file containing training data (for SNP alignment).'
+    help="[DEPRECATED] HDF5 file containing training data (for SNP alignment).",
 )
 @click.option(
-    '--config',
+    "--config",
     type=click.Path(exists=True),
     default=None,
-    help='[DEPRECATED] YAML config file used for training.'
+    help="[DEPRECATED] YAML config file used for training.",
 )
 @click.option(
-    '--embedding',
+    "--embedding",
     type=click.Path(exists=True),
     default=None,
-    help='[DEPRECATED] Genotype frequency embedding file from training.'
+    help="[DEPRECATED] Genotype frequency embedding file from training.",
 )
 @click.option(
-    '--input-features-stats',
+    "--input-features-stats",
     type=click.Path(exists=True),
     default=None,
-    help='[DEPRECATED] Input feature statistics from training (for normalization).'
+    help="[DEPRECATED] Input feature statistics from training (for normalization).",
 )
 @click.option(
-    '--model-params',
+    "--model-params",
     type=click.Path(exists=True),
     default=None,
-    help='[DEPRECATED] Trained model checkpoint (.pt file).'
+    help="[DEPRECATED] Trained model checkpoint (.pt file).",
 )
 @click.option(
-    '--output-dir',
+    "--output-dir",
     type=click.Path(),
     default=None,
-    help='[DEPRECATED] Directory where predictions will be saved.'
+    help="[DEPRECATED] Directory where predictions will be saved.",
 )
 @click.option(
-    '--output-name',
+    "--output-name",
     type=str,
-    default='predictions',
-    help='[DEPRECATED] Base name for output files (default: predictions).'
+    default="predictions",
+    help="[DEPRECATED] Base name for output files (default: predictions).",
 )
 @click.option(
-    '--which-fold',
+    "--which-fold",
     type=int,
     default=None,
-    help='[DEPRECATED] Which fold was used for training (0-indexed).'
+    help="[DEPRECATED] Which fold was used for training (0-indexed).",
 )
 # COMMON OPTIONS
 @click.option(
-    '--seeds',
+    "--seeds",
     multiple=True,
     callback=_parse_int_multi,
     type=str,
     default=None,
-    help='Seeds to use (repeat flag or comma-separated; default: all in model package).'
+    help="Seeds to use (repeat flag or comma-separated; default: all in model package).",
 )
 @click.option(
-    '--folds',
+    "--folds",
     multiple=True,
     callback=_parse_int_multi,
     type=str,
     default=None,
-    help='Folds to use (repeat flag or comma-separated; default: all in model package).'
+    help="Folds to use (repeat flag or comma-separated; default: all in model package).",
 )
 @click.option(
-    '--batch-size',
-    type=int,
-    default=128,
-    help='Batch size for inference (default: 128).'
+    "--batch-size", type=int, default=128, help="Batch size for inference (default: 128)."
 )
 @click.option(
-    '--device',
+    "--device", type=str, default=None, help="Device: cpu or cuda (default: auto-detect)."
+)
+@click.option("--num-workers", type=int, default=0, help="DataLoader workers (default: 0).")
+@click.option(
+    "--save-logits",
     type=str,
     default=None,
-    help='Device: cpu or cuda (default: auto-detect).'
+    help="Optional path to save raw logits/probabilities (.npz).",
 )
 @click.option(
-    '--num-workers',
-    type=int,
-    default=0,
-    help='DataLoader workers (default: 0).'
-)
-@click.option(
-    '--save-logits',
+    "--save-hidden",
     type=str,
     default=None,
-    help='Optional path to save raw logits/probabilities (.npz).'
+    help="Optional path to save final hidden representations (.npz).",
 )
 @click.option(
-    '--save-hidden',
-    type=str,
-    default=None,
-    help='Optional path to save final hidden representations (.npz).'
-)
-@click.option(
-    '--force-download',
+    "--force-download",
     is_flag=True,
-    help='Force re-download of model preset (only for --model presets).'
+    help="Force re-download of model preset (only for --model presets).",
 )
 @click.option(
-    '--temp-dir',
+    "--temp-dir",
     type=str,
     default=None,
-    help='Directory for PLINK preprocessing outputs (default: alongside --plink-prefix).'
+    help="Directory for PLINK preprocessing outputs (default: alongside --plink-prefix).",
 )
 @click.option(
-    '--skip-preprocess',
+    "--skip-preprocess",
     is_flag=True,
-    help='Skip PLINK preprocessing (use if plink-prefix already preprocessed with preprocess-plink).'
+    help="Skip PLINK preprocessing (use if plink-prefix already preprocessed with preprocess-plink).",
 )
 @click.option(
-    '--task',
-    type=click.Choice(['classification', 'regression']),
-    default='classification',
-    help='Task type (default: classification).'
+    "--task",
+    type=click.Choice(["classification", "regression"]),
+    default="classification",
+    help="Task type (default: classification).",
 )
 @click.option(
-    '--normalize/--no-normalize',
-    default=True,
-    help='Apply normalization (default: True).'
+    "--normalize/--no-normalize", default=True, help="Apply normalization (default: True)."
 )
-def predict(model, plink_prefix, output, test_dataset, train_dataset, config,
-            embedding, input_features_stats, model_params, output_dir, output_name,
-            which_fold, seeds, folds, batch_size, device, num_workers, force_download,
-            temp_dir, skip_preprocess, task, normalize, save_logits, save_hidden):
+def predict(
+    model,
+    plink_prefix,
+    output,
+    test_dataset,
+    train_dataset,
+    config,
+    embedding,
+    input_features_stats,
+    model_params,
+    output_dir,
+    output_name,
+    which_fold,
+    seeds,
+    folds,
+    batch_size,
+    device,
+    num_workers,
+    force_download,
+    temp_dir,
+    skip_preprocess,
+    task,
+    normalize,
+    save_logits,
+    save_hidden,
+):
     """
     Run inference on a test dataset using a trained model.
 
@@ -650,10 +684,10 @@ def predict(model, plink_prefix, output, test_dataset, train_dataset, config,
     LEGACY APPROACH (Deprecated):
         The HDF5-based approach is deprecated. Please use model packages instead.
     """
-    import warnings
-    import sys
     import os
     import subprocess
+    import sys
+    import warnings
     from pathlib import Path
 
     # Detect which approach is being used
@@ -661,11 +695,16 @@ def predict(model, plink_prefix, output, test_dataset, train_dataset, config,
     using_legacy_hdf5 = model_params is not None
 
     if using_model_package and using_legacy_hdf5:
-        click.echo("ERROR: Cannot use both --model and --model-params. Choose one approach.", err=True)
+        click.echo(
+            "ERROR: Cannot use both --model and --model-params. Choose one approach.", err=True
+        )
         sys.exit(1)
 
     if not using_model_package and not using_legacy_hdf5:
-        click.echo("ERROR: Must provide either --model (new approach) or --model-params (legacy).", err=True)
+        click.echo(
+            "ERROR: Must provide either --model (new approach) or --model-params (legacy).",
+            err=True,
+        )
         click.echo("See 'dietnet predict --help' for usage examples.", err=True)
         sys.exit(1)
 
@@ -700,7 +739,8 @@ def predict(model, plink_prefix, output, test_dataset, train_dataset, config,
         # Determine device
         if device is None:
             import torch
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # Default temp dir alongside the PLINK prefix when not provided
         effective_temp_dir = temp_dir or str(Path(plink_prefix).parent)
@@ -708,26 +748,33 @@ def predict(model, plink_prefix, output, test_dataset, train_dataset, config,
         # Build command for predict_with_plink.py
         cmd = [
             sys.executable,
-            str(Path(__file__).parent / 'predict_with_plink.py'),
-            '--model-dir', str(model_dir),
-            '--plink-prefix', plink_prefix,
-            '--output', output,
-            '--batch-size', str(batch_size),
-            '--device', device,
-            '--num-workers', str(num_workers),
-            '--temp-dir', effective_temp_dir
+            str(Path(__file__).parent / "predict_with_plink.py"),
+            "--model-dir",
+            str(model_dir),
+            "--plink-prefix",
+            plink_prefix,
+            "--output",
+            output,
+            "--batch-size",
+            str(batch_size),
+            "--device",
+            device,
+            "--num-workers",
+            str(num_workers),
+            "--temp-dir",
+            effective_temp_dir,
         ]
 
         if seeds:
-            cmd.extend(['--seeds'] + [str(s) for s in seeds])
+            cmd.extend(["--seeds"] + [str(s) for s in seeds])
         if folds:
-            cmd.extend(['--folds'] + [str(f) for f in folds])
+            cmd.extend(["--folds"] + [str(f) for f in folds])
         if skip_preprocess:
-            cmd.append('--skip-preprocess')
+            cmd.append("--skip-preprocess")
         if save_logits:
-            cmd.extend(['--save-logits', save_logits])
+            cmd.extend(["--save-logits", save_logits])
         if save_hidden:
-            cmd.extend(['--save-hidden', save_hidden])
+            cmd.extend(["--save-hidden", save_hidden])
 
         # Run inference
         result = subprocess.run(cmd)
@@ -761,24 +808,27 @@ def predict(model, plink_prefix, output, test_dataset, train_dataset, config,
             "\n"
             "═══════════════════════════════════════════════════════════════\n",
             DeprecationWarning,
-            stacklevel=2
+            stacklevel=2,
         )
 
         # Validate required legacy arguments
         required_legacy = {
-            'test-dataset': test_dataset,
-            'train-dataset': train_dataset,
-            'config': config,
-            'embedding': embedding,
-            'input-features-stats': input_features_stats,
-            'model-params': model_params,
-            'output-dir': output_dir,
-            'which-fold': which_fold
+            "test-dataset": test_dataset,
+            "train-dataset": train_dataset,
+            "config": config,
+            "embedding": embedding,
+            "input-features-stats": input_features_stats,
+            "model-params": model_params,
+            "output-dir": output_dir,
+            "which-fold": which_fold,
         }
 
         missing = [name for name, value in required_legacy.items() if value is None]
         if missing:
-            click.echo(f"ERROR: Missing required legacy arguments: {', '.join('--' + m for m in missing)}", err=True)
+            click.echo(
+                f"ERROR: Missing required legacy arguments: {', '.join('--' + m for m in missing)}",
+                err=True,
+            )
             sys.exit(1)
 
         click.echo(f"Loading model from {model_params}...")
@@ -806,6 +856,7 @@ def predict(model, plink_prefix, output, test_dataset, train_dataset, config,
 
         # Import and run test logic
         from Dietnet import test_external_dataset as test_module
+
         test_module.test_with_args(args)
 
         click.echo(f"✓ Predictions saved to {output_dir}/{output_name}_results.npz")
@@ -813,54 +864,49 @@ def predict(model, plink_prefix, output, test_dataset, train_dataset, config,
 
 @main.command()
 @click.option(
-    '--genotypes',
+    "--genotypes",
     type=click.Path(exists=True),
     required=True,
-    help='Tab-separated genotype file or PLINK prefix.'
+    help="Tab-separated genotype file or PLINK prefix.",
 )
 @click.option(
-    '--labels',
+    "--labels",
     type=click.Path(exists=True),
     required=True,
-    help='Tab-separated label file (sample_id<tab>label).'
+    help="Tab-separated label file (sample_id<tab>label).",
 )
 @click.option(
-    '--output-dir',
-    type=click.Path(),
-    required=True,
-    help='Output directory for dataset.'
+    "--output-dir", type=click.Path(), required=True, help="Output directory for dataset."
 )
 @click.option(
-    '--output-name',
+    "--output-name",
     type=str,
-    default='dataset.hdf5',
-    help='Output filename (default: dataset.hdf5).'
+    default="dataset.hdf5",
+    help="Output filename (default: dataset.hdf5).",
 )
 @click.option(
-    '--task',
-    type=click.Choice(['classification', 'regression']),
-    default='classification',
-    help='Task type (default: classification).'
+    "--task",
+    type=click.Choice(["classification", "regression"]),
+    default="classification",
+    help="Task type (default: classification).",
 )
 @click.option(
-    '--class-labels',
+    "--class-labels",
     type=click.Path(exists=True),
     default=None,
-    help='Class labels file (required for regression task).'
+    help="Class labels file (required for regression task).",
 )
 @click.option(
-    '--parallel-loading/--no-parallel-loading',
+    "--parallel-loading/--no-parallel-loading",
     default=False,
-    help='Use parallel processing for loading (default: disabled).'
+    help="Use parallel processing for loading (default: disabled).",
 )
 @click.option(
-    '--ncpus',
-    type=int,
-    default=4,
-    help='Number of CPUs for parallel loading (default: 4).'
+    "--ncpus", type=int, default=4, help="Number of CPUs for parallel loading (default: 4)."
 )
-def create_dataset(genotypes, labels, output_dir, output_name, task,
-                   class_labels, parallel_loading, ncpus):
+def create_dataset(
+    genotypes, labels, output_dir, output_name, task, class_labels, parallel_loading, ncpus
+):
     """
     Create HDF5 dataset from genotype and label files.
 
@@ -887,6 +933,7 @@ def create_dataset(genotypes, labels, output_dir, output_name, task,
     args.ncpus = ncpus
 
     from Dietnet import create_dataset as create_module
+
     create_module.create_dataset_with_args(args)
 
     click.echo(f"✓ Dataset created: {output_dir}/{output_name}")
@@ -894,53 +941,44 @@ def create_dataset(genotypes, labels, output_dir, output_name, task,
 
 @main.command()
 @click.option(
-    '--exp-path',
+    "--exp-path",
     type=click.Path(exists=True),
     required=True,
-    help='Path to directory containing dataset.'
+    help="Path to directory containing dataset.",
 )
 @click.option(
-    '--dataset',
-    type=str,
-    default='dataset.hdf5',
-    help='Dataset filename (default: dataset.hdf5).'
+    "--dataset", type=str, default="dataset.hdf5", help="Dataset filename (default: dataset.hdf5)."
 )
 @click.option(
-    '--label-file',
+    "--label-file",
     type=str,
     default=None,
-    help='Label TSV (required for stratified PLINK partitioning).'
+    help="Label TSV (required for stratified PLINK partitioning).",
 )
 @click.option(
-    '--output-name',
+    "--output-name",
     type=str,
-    default='partitioned_idx.npz',
-    help='Output filename (default: partitioned_idx.npz).'
+    default="partitioned_idx.npz",
+    help="Output filename (default: partitioned_idx.npz).",
 )
 @click.option(
-    '--nb-folds',
-    type=int,
-    default=5,
-    help='Number of cross-validation folds (default: 5).'
+    "--nb-folds", type=int, default=5, help="Number of cross-validation folds (default: 5)."
 )
 @click.option(
-    '--train-valid-ratio',
+    "--train-valid-ratio",
     type=float,
     default=0.75,
-    help='Train/validation split ratio (default: 0.75).'
+    help="Train/validation split ratio (default: 0.75).",
 )
+@click.option("--seed", type=int, default=23, help="Random seed for reproducibility (default: 23).")
 @click.option(
-    '--seed',
-    type=int,
-    default=23,
-    help='Random seed for reproducibility (default: 23).'
-)
-@click.option(
-    '--stratify/--no-stratify',
+    "--stratify/--no-stratify",
     default=False,
-    help='Stratify folds by label/population (default: no).'
+    help="Stratify folds by label/population (default: no).",
 )
-def partition(exp_path, dataset, output_name, nb_folds, train_valid_ratio, seed, label_file, stratify):
+def partition(
+    exp_path, dataset, output_name, nb_folds, train_valid_ratio, seed, label_file, stratify
+):
     """
     Partition dataset into cross-validation folds.
 
@@ -949,6 +987,7 @@ def partition(exp_path, dataset, output_name, nb_folds, train_valid_ratio, seed,
     Example:
         dietnet partition --exp-path ./processed --nb-folds 5
     """
+
     class Args:
         pass
 
@@ -963,6 +1002,7 @@ def partition(exp_path, dataset, output_name, nb_folds, train_valid_ratio, seed,
     args.stratify = stratify
 
     from Dietnet import partition_data as partition_module
+
     partition_module.partition_data_with_args(args)
 
     click.echo(f"✓ Partitions created: {exp_path}/{output_name}")
@@ -970,40 +1010,37 @@ def partition(exp_path, dataset, output_name, nb_folds, train_valid_ratio, seed,
 
 @main.command()
 @click.option(
-    '--exp-path',
+    "--exp-path",
     type=click.Path(exists=True),
     required=True,
-    help='Path to directory containing dataset and partitions.'
+    help="Path to directory containing dataset and partitions.",
 )
 @click.option(
-    '--dataset',
+    "--dataset", type=str, default="dataset.hdf5", help="Dataset filename (default: dataset.hdf5)."
+)
+@click.option(
+    "--partition",
     type=str,
-    default='dataset.hdf5',
-    help='Dataset filename (default: dataset.hdf5).'
+    default="partitioned_idx.npz",
+    help="Partition file (default: partitioned_idx.npz).",
 )
 @click.option(
-    '--partition',
+    "--output-name",
     type=str,
-    default='partitioned_idx.npz',
-    help='Partition file (default: partitioned_idx.npz).'
+    default="embedding.npz",
+    help="Output filename (default: embedding.npz).",
 )
 @click.option(
-    '--output-name',
-    type=str,
-    default='embedding.npz',
-    help='Output filename (default: embedding.npz).'
+    "--task",
+    type=click.Choice(["classification", "regression"]),
+    default="classification",
+    help="Task type (default: classification).",
 )
 @click.option(
-    '--task',
-    type=click.Choice(['classification', 'regression']),
-    default='classification',
-    help='Task type (default: classification).'
-)
-@click.option(
-    '--label-file',
+    "--label-file",
     type=str,
     default=None,
-    help='Label file (TSV format, required for PLINK datasets).'
+    help="Label file (TSV format, required for PLINK datasets).",
 )
 def generate_embedding(exp_path, dataset, partition, output_name, task, label_file):
     """
@@ -1014,6 +1051,7 @@ def generate_embedding(exp_path, dataset, partition, output_name, task, label_fi
     Example:
         dietnet generate-embedding --exp-path ./processed
     """
+
     class Args:
         pass
 
@@ -1026,49 +1064,50 @@ def generate_embedding(exp_path, dataset, partition, output_name, task, label_fi
     args.label_file = label_file
     args.include_valid = False
     args.only_valid = False
-    args.emb_class_label = 'labels'
+    args.emb_class_label = "labels"
 
     from Dietnet import generate_embedding as embedding_module
+
     embedding_module.generate_embedding_with_args(args)
 
     click.echo(f"✓ Embeddings generated: {exp_path}/{output_name}")
 
 
-@main.command(name='compute-input-stats')
+@main.command(name="compute-input-stats")
 @click.option(
-    '--exp-path',
+    "--exp-path",
     type=click.Path(exists=True),
     required=True,
-    help='Path to directory containing dataset and partitions.'
+    help="Path to directory containing dataset and partitions.",
 )
 @click.option(
-    '--dataset',
+    "--dataset",
     type=str,
-    default='dataset.hdf5',
-    help='Dataset filename (.hdf5/.h5 or PLINK .bed).'
+    default="dataset.hdf5",
+    help="Dataset filename (.hdf5/.h5 or PLINK .bed).",
 )
 @click.option(
-    '--partition',
+    "--partition",
     type=str,
-    default='partitioned_idx.npz',
-    help='Partition file (default: partitioned_idx.npz).'
+    default="partitioned_idx.npz",
+    help="Partition file (default: partitioned_idx.npz).",
 )
 @click.option(
-    '--output-name',
+    "--output-name",
     type=str,
-    default='input_features_means.npz',
-    help='Output filename for feature statistics (default: input_features_means.npz).'
+    default="input_features_means.npz",
+    help="Output filename for feature statistics (default: input_features_means.npz).",
 )
 @click.option(
-    '--parallel-loading/--no-parallel-loading',
+    "--parallel-loading/--no-parallel-loading",
     default=False,
-    help='Use parallel loading (HDF5 datasets only).'
+    help="Use parallel loading (HDF5 datasets only).",
 )
 @click.option(
-    '--ncpus',
+    "--ncpus",
     type=int,
     default=None,
-    help='Number of CPUs for parallel loading (default: all available).'
+    help="Number of CPUs for parallel loading (default: all available).",
 )
 def compute_input_stats(exp_path, dataset, partition, output_name, parallel_loading, ncpus):
     """
@@ -1078,6 +1117,7 @@ def compute_input_stats(exp_path, dataset, partition, output_name, parallel_load
     `dietnet train` (--input-features-means).
     """
     import sys
+
     from Dietnet import compute_input_features_mean as stats_module
 
     exp_path = Path(exp_path)
@@ -1109,34 +1149,24 @@ def compute_input_stats(exp_path, dataset, partition, output_name, parallel_load
 
 @main.command()
 @click.option(
-    '--model',
+    "--model",
     type=str,
     required=True,
-    help='Model preset (e.g., 1kgp_default) or path to model package directory.'
+    help="Model preset (e.g., 1kgp_default) or path to model package directory.",
 )
 @click.option(
-    '--plink-prefix',
+    "--plink-prefix",
     type=str,
     required=True,
-    help='Input PLINK file prefix (without .bed/.bim/.fam).'
+    help="Input PLINK file prefix (without .bed/.bim/.fam).",
 )
 @click.option(
-    '--output-prefix',
-    type=str,
-    required=True,
-    help='Output preprocessed PLINK file prefix.'
+    "--output-prefix", type=str, required=True, help="Output preprocessed PLINK file prefix."
 )
 @click.option(
-    '--plink-bin',
-    type=str,
-    default=None,
-    help='Path to PLINK binary (default: auto-detect).'
+    "--plink-bin", type=str, default=None, help="Path to PLINK binary (default: auto-detect)."
 )
-@click.option(
-    '--force',
-    is_flag=True,
-    help='Force re-preprocessing even if output exists.'
-)
+@click.option("--force", is_flag=True, help="Force re-preprocessing even if output exists.")
 def preprocess_plink(model, plink_prefix, output_prefix, plink_bin, force):
     """
     Preprocess PLINK files to match model's SNP set and allele coding.
@@ -1150,9 +1180,10 @@ def preprocess_plink(model, plink_prefix, output_prefix, plink_bin, force):
                                  --output-prefix ./preprocessed/test
     """
     from pathlib import Path
+
+    from Dietnet.helpers.plink_utils import find_plink_binary, preprocess_test_data_with_plink
     from Dietnet.model_manager import get_model_path
     from Dietnet.pretrained_models import PRETRAINED_MODELS
-    from Dietnet.helpers.plink_utils import preprocess_test_data_with_plink, find_plink_binary
 
     # Resolve model path
     if model in PRETRAINED_MODELS:
@@ -1166,13 +1197,13 @@ def preprocess_plink(model, plink_prefix, output_prefix, plink_bin, force):
         click.echo(f"Using local model: {model_dir}", err=True)
 
     # Find first model package to get BIM file
-    seed_dirs = sorted(model_dir.glob('seed_*'))
+    seed_dirs = sorted(model_dir.glob("seed_*"))
     if not seed_dirs:
         click.echo(f"ERROR: No seed directories found in {model_dir}", err=True)
         sys.exit(1)
 
-    fold_dir = seed_dirs[0] / 'fold_0'
-    bim_file = fold_dir / 'allpos.bim'
+    fold_dir = seed_dirs[0] / "fold_0"
+    bim_file = fold_dir / "allpos.bim"
 
     if not bim_file.exists():
         click.echo(f"ERROR: Model BIM file not found: {bim_file}", err=True)
@@ -1193,7 +1224,7 @@ def preprocess_plink(model, plink_prefix, output_prefix, plink_bin, force):
         model_bim_file=str(bim_file),
         output_prefix=output_prefix,
         plink_bin=plink_bin,
-        force=force
+        force=force,
     )
 
     click.echo(f"✓ Preprocessing complete: {result}", err=True)
@@ -1201,40 +1232,40 @@ def preprocess_plink(model, plink_prefix, output_prefix, plink_bin, force):
 
 @main.command()
 @click.option(
-    '--predictions',
+    "--predictions",
     type=click.Path(exists=True),
     required=True,
-    help='Prediction text file (from dietnet predict).'
+    help="Prediction text file (from dietnet predict).",
 )
 @click.option(
-    '--labels',
+    "--labels",
     type=click.Path(exists=True),
     required=True,
-    help='TSV file with true labels (sample_id<tab>label).'
+    help="TSV file with true labels (sample_id<tab>label).",
 )
 @click.option(
-    '--min-accuracy',
+    "--min-accuracy",
     type=float,
     default=None,
-    help='Minimum expected accuracy (exits with error if below).'
+    help="Minimum expected accuracy (exits with error if below).",
 )
 @click.option(
-    '--max-accuracy',
+    "--max-accuracy",
     type=float,
     default=None,
-    help='Maximum expected accuracy (exits with error if above).'
+    help="Maximum expected accuracy (exits with error if above).",
 )
 @click.option(
-    '--partition-file',
+    "--partition-file",
     type=click.Path(exists=True),
     default=None,
-    help='Partition NPZ (from dietnet partition) to filter predictions to a specific test fold.'
+    help="Partition NPZ (from dietnet partition) to filter predictions to a specific test fold.",
 )
 @click.option(
-    '--fold',
+    "--fold",
     type=int,
     default=None,
-    help='Which fold\'s test split to filter to (required with --partition-file).'
+    help="Which fold's test split to filter to (required with --partition-file).",
 )
 def check(predictions, labels, min_accuracy, max_accuracy, partition_file, fold):
     """
@@ -1256,9 +1287,10 @@ def check(predictions, labels, min_accuracy, max_accuracy, partition_file, fold)
                       --partition-file partitioned_idx.npz \\
                       --fold 0
     """
+    from pathlib import Path
+
     import numpy as np
     import pandas as pd
-    from pathlib import Path
 
     if partition_file is not None and fold is None:
         click.echo("ERROR: --fold is required when --partition-file is provided.", err=True)
@@ -1275,29 +1307,29 @@ def check(predictions, labels, min_accuracy, max_accuracy, partition_file, fold)
             continue
         sample_id = parts[0]
         label_token = parts[1]
-        label = label_token.split('(')[0].rstrip('.,;')
+        label = label_token.split("(")[0].rstrip(".,;")
         lines.append((sample_id, label))
 
     if not lines:
         click.echo(
             "ERROR: Could not parse predictions file. Expected lines like '<sample_id> CEUGBR(15)'.",
-            err=True
+            err=True,
         )
         sys.exit(1)
 
-    pred_df = pd.DataFrame(lines, columns=['sample_id', 'predicted_class'])
-    pred_df['sample_id'] = pred_df['sample_id'].astype(str)
-    pred_df['predicted_class'] = pred_df['predicted_class'].astype(str)
+    pred_df = pd.DataFrame(lines, columns=["sample_id", "predicted_class"])
+    pred_df["sample_id"] = pred_df["sample_id"].astype(str)
+    pred_df["predicted_class"] = pred_df["predicted_class"].astype(str)
 
     # Load labels and align types
-    labels_df = pd.read_csv(labels, sep='\t')
+    labels_df = pd.read_csv(labels, sep="\t")
     label_id_col = labels_df.columns[0]  # First column is always sample ID
     label_class_col = labels_df.columns[1]  # Second column is always the label
     labels_df[label_id_col] = labels_df[label_id_col].astype(str)
     labels_df[label_class_col] = labels_df[label_class_col].astype(str)
 
     # Merge on sample IDs
-    merged = pred_df.merge(labels_df, left_on='sample_id', right_on=label_id_col)
+    merged = pred_df.merge(labels_df, left_on="sample_id", right_on=label_id_col)
 
     if len(merged) == 0:
         click.echo("ERROR: No matching samples found between predictions and labels", err=True)
@@ -1306,36 +1338,35 @@ def check(predictions, labels, min_accuracy, max_accuracy, partition_file, fold)
     # Optionally filter to test-fold samples only
     if partition_file is not None:
         partition_data = np.load(partition_file, allow_pickle=True)
-        if 'sample_ids' not in partition_data:
+        if "sample_ids" not in partition_data:
             click.echo(
                 "ERROR: Partition file does not contain 'sample_ids'. "
                 "Re-run 'dietnet partition' to regenerate it.",
-                err=True
+                err=True,
             )
             sys.exit(1)
         # Validate requested fold index against available folds
-        num_folds = len(partition_data['folds_indexes'])
+        num_folds = len(partition_data["folds_indexes"])
         if fold < 0 or fold >= num_folds:
             raise click.BadParameter(
                 f"Fold index {fold} is out of range for partition file; "
                 f"valid fold indices are 0 to {num_folds - 1}.",
                 param_hint="fold",
             )
-        all_sample_ids = partition_data['sample_ids'].astype(str)
-        test_indices = partition_data['folds_indexes'][fold][2]
+        all_sample_ids = partition_data["sample_ids"].astype(str)
+        test_indices = partition_data["folds_indexes"][fold][2]
         test_sample_ids = set(all_sample_ids[test_indices])
-        merged = merged[merged['sample_id'].isin(test_sample_ids)]
+        merged = merged[merged["sample_id"].isin(test_sample_ids)]
         if len(merged) == 0:
             click.echo(
-                f"ERROR: No samples remaining after filtering to fold {fold} test split.",
-                err=True
+                f"ERROR: No samples remaining after filtering to fold {fold} test split.", err=True
             )
             sys.exit(1)
         click.echo(f"Filtered to fold {fold} test split: {len(merged)} samples")
 
     # Get true labels
     true_labels = merged[label_class_col]
-    predicted_labels = merged['predicted_class']
+    predicted_labels = merged["predicted_class"]
 
     _print_accuracy_table(true_labels, predicted_labels)
 
@@ -1344,12 +1375,18 @@ def check(predictions, labels, min_accuracy, max_accuracy, partition_file, fold)
     # Check thresholds
     if min_accuracy is not None:
         if overall_accuracy < min_accuracy:
-            click.echo(f"❌ FAILED: Accuracy {overall_accuracy:.2%} below minimum {min_accuracy:.2%}", err=True)
+            click.echo(
+                f"❌ FAILED: Accuracy {overall_accuracy:.2%} below minimum {min_accuracy:.2%}",
+                err=True,
+            )
             sys.exit(1)
 
     if max_accuracy is not None:
         if overall_accuracy > max_accuracy:
-            click.echo(f"❌ FAILED: Accuracy {overall_accuracy:.2%} above maximum {max_accuracy:.2%}", err=True)
+            click.echo(
+                f"❌ FAILED: Accuracy {overall_accuracy:.2%} above maximum {max_accuracy:.2%}",
+                err=True,
+            )
             sys.exit(1)
 
     click.echo("✓ PASSED")
@@ -1379,41 +1416,36 @@ def _print_accuracy_table(true_labels, predicted_labels):
 
 @main.command()
 @click.option(
-    '--predictions',
+    "--predictions",
     type=click.Path(exists=True),
     required=True,
-    help='Prediction text file (compact format from dietnet predict).'
+    help="Prediction text file (compact format from dietnet predict).",
 )
 @click.option(
-    '--labels',
+    "--labels",
     type=click.Path(exists=True),
     required=True,
-    help='TSV file with true labels (sample_id<tab>label).'
+    help="TSV file with true labels (sample_id<tab>label).",
 )
 @click.option(
-    '--population',
+    "--population",
     type=str,
     required=True,
-    help='Target population label to analyze (must exist in labels file).'
+    help="Target population label to analyze (must exist in labels file).",
 )
 @click.option(
-    '--cmap',
+    "--cmap",
     type=click.Path(exists=True),
     required=True,
-    help='JSON file mapping population labels to hex colors.'
+    help="JSON file mapping population labels to hex colors.",
 )
 @click.option(
-    '--output',
+    "--output",
     type=click.Path(),
     required=True,
-    help='Path to save stacked bar plot (e.g., figures/mxl_stack.png).'
+    help="Path to save stacked bar plot (e.g., figures/mxl_stack.png).",
 )
-@click.option(
-    '--title',
-    type=str,
-    default=None,
-    help='Plot title (default: auto-generated).'
-)
+@click.option("--title", type=str, default=None, help="Plot title (default: auto-generated).")
 def analyze_population(predictions, labels, population, cmap, output, title):
     """
     Generate a per-sample stacked bar plot of ensemble votes for a target population.
@@ -1421,6 +1453,7 @@ def analyze_population(predictions, labels, population, cmap, output, title):
     Uses the compact text predictions (with vote counts) and true labels TSV.
     """
     from Dietnet.analysis.prediction_plots import plot_population_stack
+
     try:
         plot_population_stack(
             predictions_path=predictions,
@@ -1439,10 +1472,10 @@ def analyze_population(predictions, labels, population, cmap, output, title):
 @main.command()
 def info():
     """Display information about the DietNetwork installation."""
-    import torch
+    import h5py
     import numpy as np
     import pandas as pd
-    import h5py
+    import torch
 
     click.echo("DietNetwork Installation Info")
     click.echo("=" * 50)
@@ -1458,5 +1491,5 @@ def info():
         click.echo(f"GPU count: {torch.cuda.device_count()}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

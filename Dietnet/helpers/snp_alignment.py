@@ -7,7 +7,8 @@ efficient index mappings for batch processing.
 """
 
 from pathlib import Path
-from typing import Union, List, Tuple, Dict, Optional
+from typing import Dict, List, Optional, Tuple, Union
+
 import numpy as np
 import pandas as pd
 from pyplink import PyPlink
@@ -30,17 +31,17 @@ def parse_bim_file(bim_path: Union[str, Path]) -> pd.DataFrame:
     # Columns: chr, snp_id, cm (centimorgan), pos, a1, a2
     bim = pd.read_csv(
         bim_path,
-        sep='\t',
+        sep="\t",
         header=None,
-        names=['chr', 'snp_id', 'cm', 'pos', 'a1', 'a2'],
-        dtype={'chr': str, 'snp_id': str, 'cm': float, 'pos': int, 'a1': str, 'a2': str}
+        names=["chr", "snp_id", "cm", "pos", "a1", "a2"],
+        dtype={"chr": str, "snp_id": str, "cm": float, "pos": int, "a1": str, "a2": str},
     )
 
     # Create chr:pos identifier for matching
-    bim['chr_pos'] = bim['chr'].astype(str) + ':' + bim['pos'].astype(str)
+    bim["chr_pos"] = bim["chr"].astype(str) + ":" + bim["pos"].astype(str)
 
     # Set index for fast lookup
-    bim = bim.set_index('chr_pos', drop=False)
+    bim = bim.set_index("chr_pos", drop=False)
 
     return bim
 
@@ -49,7 +50,7 @@ def create_snp_mapping(
     test_bim: Union[str, Path, pd.DataFrame],
     model_snps: Union[List[str], np.ndarray, pd.Index],
     model_bim: Optional[Union[str, Path, pd.DataFrame]] = None,
-    fill_value: int = -1
+    fill_value: int = -1,
 ) -> Tuple[np.ndarray, Dict[str, any]]:
     """
     Create SNP index mapping from test dataset to model training SNPs.
@@ -91,9 +92,9 @@ def create_snp_mapping(
 
         # Try to match by rsID first
         # Assume model_snps are rsIDs if they don't contain ':'
-        if ':' not in str(model_snps[0]):
+        if ":" not in str(model_snps[0]):
             # Create mapping from rsID to chr:pos
-            rsid_to_chrpos = dict(zip(model_bim_df['snp_id'], model_bim_df['chr_pos']))
+            rsid_to_chrpos = dict(zip(model_bim_df["snp_id"], model_bim_df["chr_pos"]))
             model_snps_chrpos = [rsid_to_chrpos.get(snp, snp) for snp in model_snps]
         else:
             model_snps_chrpos = model_snps
@@ -106,10 +107,10 @@ def create_snp_mapping(
     missing_snps = 0
 
     # Create reverse mapping from chr:pos to test index
-    test_chrpos_to_idx = {chrpos: idx for idx, chrpos in enumerate(test_bim_df['chr_pos'])}
+    test_chrpos_to_idx = {chrpos: idx for idx, chrpos in enumerate(test_bim_df["chr_pos"])}
 
     # Also try matching by rsID if chr:pos fails
-    test_rsid_to_idx = {rsid: idx for idx, rsid in enumerate(test_bim_df['snp_id'])}
+    test_rsid_to_idx = {rsid: idx for idx, rsid in enumerate(test_bim_df["snp_id"])}
 
     for model_snp in model_snps_chrpos:
         # Try matching by chr:pos first
@@ -129,21 +130,19 @@ def create_snp_mapping(
 
     # Calculate alignment statistics
     alignment_info = {
-        'n_model_snps': len(model_snps),
-        'n_test_snps': len(test_bim_df),
-        'n_matched': matched_snps,
-        'n_missing': missing_snps,
-        'overlap_fraction': matched_snps / len(model_snps) if len(model_snps) > 0 else 0,
-        'missing_indices': np.where(snp_indices == fill_value)[0].tolist()
+        "n_model_snps": len(model_snps),
+        "n_test_snps": len(test_bim_df),
+        "n_matched": matched_snps,
+        "n_missing": missing_snps,
+        "overlap_fraction": matched_snps / len(model_snps) if len(model_snps) > 0 else 0,
+        "missing_indices": np.where(snp_indices == fill_value)[0].tolist(),
     }
 
     return snp_indices, alignment_info
 
 
 def align_genotypes(
-    test_genotypes: np.ndarray,
-    snp_mapping: np.ndarray,
-    fill_value: int = -1
+    test_genotypes: np.ndarray, snp_mapping: np.ndarray, fill_value: int = -1
 ) -> np.ndarray:
     """
     Align test genotypes to model SNP order.
@@ -176,7 +175,7 @@ def check_alignment_quality(
     min_overlap: float = 0.5,
     warn_overlap: float = 0.8,
     raise_on_poor: bool = False,
-    verbose: bool = True
+    verbose: bool = True,
 ) -> bool:
     """
     Check alignment quality and issue warnings/errors as appropriate.
@@ -193,9 +192,9 @@ def check_alignment_quality(
     Raises:
         ValueError: If overlap is below min_overlap and raise_on_poor is True
     """
-    overlap = alignment_info['overlap_fraction']
-    n_matched = alignment_info['n_matched']
-    n_total = alignment_info['n_model_snps']
+    overlap = alignment_info["overlap_fraction"]
+    n_matched = alignment_info["n_matched"]
+    n_total = alignment_info["n_model_snps"]
 
     if verbose:
         print(f"\nSNP Alignment Summary:")
@@ -205,8 +204,10 @@ def check_alignment_quality(
         print(f"  Missing: {alignment_info['n_missing']} ({1-overlap:.1%})")
 
     if overlap < min_overlap:
-        msg = (f"Poor SNP overlap: {overlap:.1%} < {min_overlap:.1%}. "
-               f"Consider retraining model on dataset with better SNP coverage.")
+        msg = (
+            f"Poor SNP overlap: {overlap:.1%} < {min_overlap:.1%}. "
+            f"Consider retraining model on dataset with better SNP coverage."
+        )
 
         if raise_on_poor:
             raise ValueError(msg)
@@ -238,15 +239,13 @@ def get_snp_list_from_plink(plink_prefix: Union[str, Path]) -> List[str]:
     Returns:
         List of SNP identifiers in 'chr:pos' format
     """
-    bim_path = Path(str(plink_prefix) + '.bim')
+    bim_path = Path(str(plink_prefix) + ".bim")
     bim_df = parse_bim_file(bim_path)
-    return bim_df['chr_pos'].tolist()
+    return bim_df["chr_pos"].tolist()
 
 
 def create_snp_file(
-    plink_prefix: Union[str, Path],
-    output_file: Union[str, Path],
-    format: str = 'chr:pos'
+    plink_prefix: Union[str, Path], output_file: Union[str, Path], format: str = "chr:pos"
 ):
     """
     Create a SNP list file from PLINK .bim file.
@@ -256,17 +255,17 @@ def create_snp_file(
         output_file: Where to save SNP list
         format: 'chr:pos' or 'rsid'
     """
-    bim_path = Path(str(plink_prefix) + '.bim')
+    bim_path = Path(str(plink_prefix) + ".bim")
     bim_df = parse_bim_file(bim_path)
 
-    with open(output_file, 'w') as f:
-        if format == 'chr:pos':
-            for chrpos in bim_df['chr_pos']:
-                f.write(f'{chrpos}\n')
-        elif format == 'rsid':
-            for rsid in bim_df['snp_id']:
-                f.write(f'{rsid}\n')
+    with open(output_file, "w") as f:
+        if format == "chr:pos":
+            for chrpos in bim_df["chr_pos"]:
+                f.write(f"{chrpos}\n")
+        elif format == "rsid":
+            for rsid in bim_df["snp_id"]:
+                f.write(f"{rsid}\n")
         else:
             raise ValueError(f"Unknown format: {format}. Use 'chr:pos' or 'rsid'")
 
-    print(f'Saved {len(bim_df)} SNPs to {output_file} (format: {format})')
+    print(f"Saved {len(bim_df)} SNPs to {output_file} (format: {format})")

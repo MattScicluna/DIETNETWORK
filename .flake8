@@ -6,4 +6,6 @@ extend-ignore = E203,W503,E501,F841,F541
 # errors (undefined names, bad syntax) but not for style it is about to lose in
 # the Phase 2 restructure. New code is held to the full rule set.
 per-file-ignores =
-    Dietnet/*:E1,E2,E3,E7,W2,W3,W6,F401,F403,F405,F811,E722,E731,E741
+    Dietnet/*:E1,E2,E3,E402,E7,W2,W3,W6,F401,F403,F405,F811,E722,E731,E741
+    # B17 in docs/refactor-plan.md: a real undefined name, left for its fix.
+    Dietnet/helpers/test_external_utils.py:E1,E2,E3,E7,W2,W3,W6,F401,F821

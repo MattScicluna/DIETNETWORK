@@ -4,10 +4,11 @@ Utilities for visualizing ensemble prediction breakdowns.
 Provides a stacked bar plot for a target population where each sample's bar
 shows the vote counts across source populations from the compact prediction text.
 """
+
+import json
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import json
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -141,4 +142,3 @@ def plot_population_stack(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(out_path, dpi=200)
     plt.close()
-

@@ -81,6 +81,8 @@ scaling, an in-memory dataset and attribution models.
 | B15 | `load_model_from_package` loads with `strict=False`. | `predict_with_plink.py` | A checkpoint missing a layer predicts with random weights, silently. | ✗ unit |
 | B16 | Regression is broken end to end. `generate-embedding --task regression` computes per-class frequencies over the float trait and crashes. Predict builds a `len(label_mapping) == 0` output layer and assumes softmax. | `generate_embedding.py`, `predict_with_plink.py` | Regression unusable. Upstream builds the regression embedding from class labels stored beside the trait. The right regression embedding is a Phase 4 provider question. | ✗ integration |
 
+| B17 | `get_train_dir` calls `sys.exit` without importing `sys`. | `helpers/test_external_utils.py` | The legacy `test_external_dataset.py` raises `NameError` instead of exiting cleanly when the training directory is missing. Found by flake8 (F821, exempted by name in `.flake8`). | — |
+
 Open question Q1: the shipped config uses `input_dropout: 0.995`, which drops
 99.5% of SNP inputs per sample per step (`nn.Dropout(p)` takes the *drop*
 probability, here and upstream). It may be deliberate, but nobody has recorded
