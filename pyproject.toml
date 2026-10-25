@@ -37,7 +37,10 @@ dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "black>=23.7.0",
-    "ruff>=0.0.280",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    # Installs the guardrail hooks: uv run pre-commit install
+    "pre-commit>=3.5",
 ]
 interpretability = [
     "captum>=0.6.0",
@@ -52,9 +55,9 @@ tracking = [
 dietnet = "Dietnet.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/rochefca/DIETNETWORK"
-Documentation = "https://github.com/rochefca/DIETNETWORK"
-Repository = "https://github.com/rochefca/DIETNETWORK"
+Homepage = "https://github.com/MattScicluna/DIETNETWORK"
+Repository = "https://github.com/MattScicluna/DIETNETWORK"
+Upstream = "https://github.com/HussinLab/DIETNETWORK"
 
 [tool.hatch.build.targets.wheel]
 packages = ["Dietnet"]
@@ -63,10 +66,22 @@ packages = ["Dietnet"]
 line-length = 100
 target-version = ["py310"]
 
-[tool.ruff]
-line-length = 100
-target-version = "py310"
+[tool.isort]
+profile = "black"
+line_length = 100
 
 [tool.pytest.ini_options]
-testpaths = ["Dietnet/tests"]
-python_files = ["test_*.py", "*_test.py"]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "slow: long-running (full 1KGP data, many epochs)",
+    "integration: runs several pipeline steps end to end through the CLI",
+    "network: needs network access (downloads, remote data)",
+    "upstream: compares against HussinLab/DIETNETWORK; needs DIETNET_UPSTREAM_DIR",
+]
+# A known bug is recorded as a strict xfail named after its entry in
+# docs/refactor-plan.md (B1, B2, ...). Strict, so the fix that makes one pass
+# also has to delete its marker -- the record cannot silently go stale.
+xfail_strict = true

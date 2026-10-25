@@ -1,0 +1,66 @@
+# Guardrails that run before a commit exists, not after it is pushed. Same set as
+# manifold_genetics, for the same reason: this code is trained on clusters that
+# hold controlled-access cohorts, and its outputs (HDF5 datasets, genotype
+# caches, weights) are built from them.
+#
+# Install once per clone:
+#
+#     uv sync --frozen --extra dev
+#     uv run pre-commit install
+#
+# Run over everything, which is worth doing after any bulk `git add`:
+#
+#     uv run pre-commit run --all-files
+#
+# On a many-core shared login node, set GOMAXPROCS=4 first (gitleaks asks for a
+# thread per core and hits the process limit).
+
+repos:
+  # The formatters run whatever the synced environment provides rather than
+  # versions pinned again here, so a commit that passes locally cannot fail CI
+  # for a version mismatch nobody can see.
+  - repo: local
+    hooks:
+      - id: sensitive-files
+        name: check for files that should not be shared
+        entry: python -m scripts.check_sensitive_files
+        language: system
+        pass_filenames: true
+
+      - id: black
+        name: black
+        entry: black
+        language: system
+        types: [python]
+
+      - id: isort
+        name: isort
+        entry: isort
+        language: system
+        types: [python]
+
+      - id: flake8
+        name: flake8
+        # Flags live in .flake8, so this matches the lint job exactly.
+        entry: flake8
+        language: system
+        types: [python]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: detect-private-key
+      # Genotype files are large before they are anything else, so a size limit
+      # catches them even if a suffix is unfamiliar.
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

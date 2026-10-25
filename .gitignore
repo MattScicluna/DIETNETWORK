@@ -34,4 +34,11 @@ bin/
 logs/
 preprocessed_plink/
 tests/outputs/
-uv.lock
+
+# Local environments and tool state
+.venv/
+.claude/
+.coverage
+coverage.xml
+# Written by the CI install step
+requirements-ci.txt
