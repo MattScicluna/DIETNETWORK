@@ -11,8 +11,9 @@ Per model SNP, against the cohort's .bim:
 * same A1/A2                      -> copy
 * A1 and A2 swapped               -> flip (2 - x; missing stays missing)
 * the same on the other strand    -> copy or flip, except for A/T and C/G SNPs,
-  whose strand cannot be told from the alleles: those are kept only when A1
-  matches outright
+  whose strand cannot be told from the alleles (a swap and the other strand
+  look the same): those are kept only when both alleles match outright, and
+  never flipped
 * otherwise, or absent            -> missing
 
 Missing SNPs then follow the published method (Rochefort-Boulanger, Scicluna
@@ -107,7 +108,9 @@ def align(model_snps: pd.DataFrame, cohort_prefix) -> Alignment:
     ambiguous = known_a2 & (a1m == _complement(a2m))
 
     same = (a1c == a1m) & (~known_a2 | (a2c == a2m))
-    swapped = (a2c == a1m) & (~known_a2 | (a1c == a2m))
+    # For an A/T or C/G SNP a swap looks exactly like the other strand, so
+    # only an outright match is trusted.
+    swapped = ~ambiguous & (a2c == a1m) & (~known_a2 | (a1c == a2m))
     strand_same = ~ambiguous & (_complement(a1c) == a1m) & (~known_a2 | (_complement(a2c) == a2m))
     strand_swapped = (
         ~ambiguous & (_complement(a2c) == a1m) & (~known_a2 | (_complement(a1c) == a2m))
