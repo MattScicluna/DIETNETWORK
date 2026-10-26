@@ -171,7 +171,8 @@ def write_matched(
     tmp = out.with_name(out.name + ".partial")
     with h5py.File(tmp, "w") as f:
         inputs = f.create_dataset("inputs", shape=(bed.n_samples, alignment.n_model), dtype=np.int8)
-        for start, dosages in bed.sample_blocks(alignment.source[present], block_bytes):
+        blocks = bed.sample_blocks(alignment.source[present], block_bytes, width=alignment.n_model)
+        for start, dosages in blocks:
             swapped = dosages[:, flipped]
             dosages[:, flipped] = np.where(swapped >= 0, 2 - swapped, swapped)
             block = np.full((len(dosages), alignment.n_model), -1, dtype=np.int8)

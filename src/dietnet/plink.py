@@ -129,21 +129,28 @@ class Bed:
         return raw.reshape(self.n_snps, self.bytes_per_snp)
 
     def sample_blocks(
-        self, rows=None, block_bytes: int = BLOCK_BYTES, load_bytes: int = LOAD_BYTES
+        self,
+        rows=None,
+        block_bytes: int = BLOCK_BYTES,
+        load_bytes: int = LOAD_BYTES,
+        width: int | None = None,
     ) -> Iterator[tuple[int, np.ndarray]]:
         """(first sample, samples x len(rows) int8 dosages) for consecutive blocks of samples.
 
         ``rows`` are .bim rows in the order wanted (default: all, in order). The
         output is sample-major, like upstream's ``inputs``, so each block is
-        written as one contiguous run of rows. A block never holds more than
-        about ``block_bytes`` dosages.
+        written as one contiguous run of rows. Blocks are sized so that
+        ``width`` dosages per sample (default: ``len(rows)``) fit ``block_bytes``:
+        a caller that widens each block -- the matched cohort is the model's
+        width, however few SNPs the cohort has -- passes that width, or a block
+        of a few matched SNPs would hold every sample of a biobank.
         """
         packed = self._packed(load_bytes)
         rows = np.arange(self.n_snps) if rows is None else np.asarray(rows, dtype=np.int64)
         order = np.argsort(rows, kind="stable")  # read in file order, place in requested order
         ordered = rows[order]
         # Four samples per byte: blocks start on a byte boundary.
-        per_block = max(4, block_bytes // max(len(rows), 1) // 4 * 4)
+        per_block = max(4, block_bytes // max(width or len(rows), 1) // 4 * 4)
 
         for s0 in range(0, self.n_samples, per_block):
             s1 = min(s0 + per_block, self.n_samples)

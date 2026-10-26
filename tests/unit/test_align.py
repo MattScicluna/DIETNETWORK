@@ -148,3 +148,32 @@ def test_bed_is_read_whole_in_chunks(kgp_mini):
     expected = np.fromfile(path, dtype=np.uint8, offset=3)
     got = _read_uncached(path, offset=3, size=len(expected), chunk=4099)
     np.testing.assert_array_equal(got, expected)
+
+
+def test_blocks_are_sized_by_the_model_width_not_the_matched_snps(
+    tmp_path, model, kgp_mini, monkeypatch
+):
+    """A cohort holding few of a wide model's SNPs: blocks still fit block_bytes.
+
+    Budgeting by matched SNPs instead let one UK Biobank block span 184,808
+    samples x 229,986 model SNPs (42 GB) when only 5,810 SNPs matched.
+    """
+    snps, genotypes = model
+    keep = np.arange(0, len(snps), 40)  # 50 of 2,000 SNPs
+    bim = raw_bim(kgp_mini.plink_prefix).iloc[keep]
+    write_cohort(tmp_path / "sparse", genotypes[:, keep], bim, kgp_mini.plink_prefix)
+
+    widths = []
+    original = Bed.sample_blocks
+
+    def spy(self, *args, **kwargs):
+        for start, block in original(self, *args, **kwargs):
+            widths.append(len(block) * len(snps))
+            yield start, block
+
+    monkeypatch.setattr(Bed, "sample_blocks", spy)
+    inputs, scale = matched(tmp_path, snps, tmp_path / "sparse")
+
+    assert max(widths) <= SMALL_BLOCKS + 4 * len(snps)
+    assert scale == pytest.approx(2000 / 50)
+    np.testing.assert_array_equal(inputs[:, keep], genotypes[:, keep])

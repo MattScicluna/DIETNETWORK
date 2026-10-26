@@ -187,6 +187,21 @@ _seeds = click.option("--seeds", multiple=True, callback=_ints, help="Only these
 _folds = click.option("--folds", multiple=True, callback=_ints, help="Only these folds.")
 
 
+# The published method's advice (Rochefort-Boulanger, Scicluna et al. 2026):
+# do not rely on predictions from fewer model SNPs than this.
+MIN_SNPS = 1000
+
+
+def _warn_if_sparse(counts: dict) -> None:
+    found = counts.get("model_snps", 0) - counts.get("missing", 0)
+    if found < MIN_SNPS:
+        click.echo(
+            f"WARNING: only {found} of the model's {counts.get('model_snps')} SNPs were found in "
+            f"the cohort; predictions from fewer than {MIN_SNPS} are not reliable.",
+            err=True,
+        )
+
+
 def _packages(model_dir, seeds, folds):
     from dietnet import package
 
@@ -229,6 +244,7 @@ def match(model_dir, plink_prefix, work_dir, seeds, folds):
     with h5py.File(matched) as f:
         counts = json.loads(f.attrs.get("alignment", "{}"))
     click.echo(f"matched in {time.perf_counter() - started:.0f}s: {json.dumps(counts)}")
+    _warn_if_sparse(counts)
     click.echo(f"wrote {matched}")
 
 
@@ -273,6 +289,7 @@ def predict(model_dir, plink_prefix, out, work_dir, seeds, folds, batch_size, de
         np.savez(scores, samples=result.samples, models=result.model_names,
                  classes=result.classes, scores=result.scores)  # fmt: skip
     counts = result.alignment
+    _warn_if_sparse(counts)
     click.echo(
         f"{len(result.samples)} samples, {len(packages)} model(s); "
         f"{counts.get('model_snps', 0) - counts.get('missing', 0)}/{counts.get('model_snps', '?')} "
