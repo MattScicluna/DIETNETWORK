@@ -118,7 +118,36 @@ filled the sample-major matched file a block of SNP *columns* at a time. Every
 write touched all 486,748 rows, and the file was still unfinished after 2 h.
 Both writers now go a block of *samples* at a time (`Bed.sample_blocks`):
 bounded memory (1 GiB per block), and each block is one contiguous run of
-rows. The rerun's timings go here.
+rows. Three further fixes came from runs and a memory profile on Narval:
+- read the packed `.bed` once (it is a quarter of the decoded matrix);
+- size blocks by the width they are written at;
+- have `predict` read each batch once for all models.
+
+UK Biobank (486,748 samples), after those fixes:
+
+| Step | Where | Wall time | Peak RSS |
+|---|---|---|---|
+| `match` onto the HGDP-panel model (169,829 SNPs) | CPU, 8 cores | ~21 min (was > 2 h) | — |
+| `match` onto the published models (229,986 SNPs) | CPU, 8 cores | 4 min 27 s | 23 GB (was 88 GB, OOM) |
+| `predict`, 1 model, before batching | A100 | 628 s | — |
+| `predict`, **15 published models** | A100 | **694 s** (12 min 56 s total) | memory-mapped file |
+
+Before these fixes, the old code's pyplink read of this cohort alone took
+6,339 s (1 h 45 min), on every command.
+
+**UK Biobank data caveat.** The UK Biobank fileset used here was cut down to
+the HGDP+1KGP panel's 169,829 SNPs. Only 5,810 of the published models'
+229,986 SNPs are among them (both GRCh38; a different SNP selection, not a
+build shift). So the run above measures scale only; its predictions use 2.5%
+of the model's SNPs, and `match`/`predict` now warn below 1,000. Real UK
+Biobank predictions from the published models need genotypes extracted at
+the published SNPs from the raw UK Biobank data (GRCh37, so lifted over).
+
+**Reference-panel caveat.** The HGDP+1KGP panel has 77 populations, some with
+1-2 samples. Upstream's embedding cannot learn a class absent from a fold's
+training split (NaN, or silently missing columns), so `dietnet` now stops
+at `generate-embedding` with the classes named. Training on that panel
+needs the small populations merged or dropped first.
 
 ## Phases from here
 
