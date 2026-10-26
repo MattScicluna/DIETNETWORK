@@ -48,6 +48,15 @@ def test_class_genotype_freq_alone_is_upstreams_embedding(tmp_path, prepared):
     assert meta["fold_dependent"] and meta["column_names"][0].endswith(":genotype0")
 
 
+def test_relative_paths_reach_upstreams_script(tmp_path, prepared, monkeypatch):
+    """Upstream's scripts run from their own directory; paths given relative to ours
+    must still find the dataset, as they do for generate-embedding."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "spec.yaml").write_text("blocks:\n  - provider: class_genotype_freq\n")
+    dietnet("build-embedding", dataset="d.h5", partition="p.npz", spec="spec.yaml", out="e.npz")
+    assert np.load(tmp_path / "e.npz")["emb"].shape[1] == len(ds.snp_table(prepared[0]))
+
+
 def test_effects_are_oriented_to_the_counted_allele(tmp_path, prepared):
     """+1 where the dataset counts ALT, -1 where it counts REF, missing where unknowable."""
     h5, partition = prepared
