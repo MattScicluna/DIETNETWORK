@@ -104,6 +104,37 @@ Each step after `create-dataset` is the upstream script of the same name; logs
 are under `exp/logs/`. Packages land in `exp/packages/seed_*/fold_*/`, with the
 fold's held-out predictions in `test_predictions.tsv`.
 
+## Other SNP features for the auxiliary network
+
+The auxiliary network turns per-SNP features into the main network's first
+layer. The published model uses genotype frequencies per population.
+`dietnet build-embedding` can replace or extend them, without changing
+upstream's model (it reads whatever matrix `embedding.npz` holds):
+
+```yaml
+# features.yaml
+blocks:
+  - provider: class_genotype_freq      # the published features (upstream's script)
+  - provider: precomputed              # any per-SNP table: chrom, pos, ref, alt, features...
+    path: scores.tsv
+    orient: effect                     # ALT-vs-REF values: flipped where A1 is REF
+    pca: 64                            # keep this block to 64 columns
+  - provider: random                   # control: same width, no information
+    columns: 64
+```
+
+```bash
+dietnet build-embedding --dataset dataset.h5 --partition partition.npz \
+                        --spec features.yaml --out embedding.npz
+```
+
+Then train with `--embedding embedding.npz` as usual. Blocks are matched to
+the dataset's SNPs by position and allele, on either strand. SNPs a table
+lacks are zeroed and flagged in a `<name>:missing` column. Packages record the
+blocks a model was trained on. `shuffled` (an earlier block with SNP rows
+permuted) is the other control. With only `class_genotype_freq`, the output
+is exactly the published embedding.
+
 ## How it is kept exact
 
 - `Dietnet_train_and_evaluate/` holds only the upstream files the CLI runs (the

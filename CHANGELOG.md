@@ -15,6 +15,19 @@ dropout was fixed at 0.5; the published config uses 0.1).
 
 ### Added
 
+- `dietnet build-embedding`: the auxiliary network's SNP features from several
+  sources: the published genotype frequencies, any precomputed per-SNP table
+  (oriented to the counted allele), and random or shuffled controls, with
+  per-block centring and PCA. Packages record which blocks a model used.
+- `dietnet match`: prepare a cohort on CPU; `predict` with the same `--work-dir`
+  goes straight to inference (for a GPU job).
+- `generate-embedding` and `train` refuse classes that have no training
+  samples in some fold: upstream's embedding is NaN for them (or silently
+  drops their columns).
+- `reproduction/`: the published split (seed 124, verified against Zenodo), the
+  published models' held-out accuracy (0.9214) pinned by a slow test, and the
+  SLURM jobs that retrained all 15 (0.9282).
+
 - `dietnet create-dataset`: PLINK straight to upstream's HDF5 schema, identical
   to upstream's `create_dataset.py` output and without the text round-trip.
 - `dietnet published`: the 15 published models (Zenodo

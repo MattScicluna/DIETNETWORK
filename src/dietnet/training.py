@@ -9,6 +9,7 @@ model package with the fold's held-out predictions next to it.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import h5py
@@ -114,6 +115,8 @@ def train(
     check_inputs(embedding, input_stats, dataset, partition, folds)
 
     emb_by_fold = np.load(embedding, allow_pickle=True)["emb"]
+    described = Path(f"{embedding}.json")
+    feature_meta = json.loads(described.read_text()) if described.exists() else None
     stats = np.load(input_stats, allow_pickle=True)
 
     packages = []
@@ -149,7 +152,7 @@ def train(
                 normalize=normalize,
                 seed=seed,
                 fold=fold,
-                extra={"results_dir": str(results)},
+                extra={"results_dir": str(results), "embedding": feature_meta},
             )
             _held_out_predictions(results, dataset, task).to_csv(
                 pkg.path / "test_predictions.tsv", sep="\t", index=False

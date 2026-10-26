@@ -5,6 +5,7 @@ Pipeline (each step writes one file the next reads)::
     dietnet create-dataset      PLINK + labels   -> dataset.h5       (this package)
     dietnet partition           dataset.h5       -> partition.npz    (upstream partition_data.py)
     dietnet generate-embedding  + partition      -> embedding.npz    (upstream generate_embedding.py)
+      or build-embedding --spec                  (several feature sources, see dietnet.features)
     dietnet compute-input-stats + partition      -> input_stats.npz  (upstream compute_input_features_statistics.py)
     dietnet train               all of the above -> model packages   (upstream train.py)
     dietnet match               packages + PLINK -> matched cohort   (optional, CPU: ahead of predict)
@@ -121,6 +122,32 @@ def generate_embedding(dataset_path, partition_path, out, ncpus):
         training.check_inputs(_npz(out), None, dataset_path, partition_path)
     except training.InputError as error:
         raise click.ClickException(str(error)) from None
+
+
+@main.command("build-embedding")
+@_dataset
+@_partition
+@click.option(
+    "--spec",
+    required=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="YAML list of feature blocks (see dietnet.features).",
+)
+@_out
+def build_embedding(dataset_path, partition_path, spec, out):
+    """SNP features for the auxiliary network from several sources (writes embedding.npz)."""
+    from dietnet import features, training
+
+    out = _npz(out)
+    try:
+        values, meta = features.build(spec, dataset_path, partition_path, out)
+        training.check_inputs(out, None, dataset_path, partition_path)
+    except (ValueError, training.InputError) as error:
+        raise click.ClickException(str(error)) from None
+    for block in meta["blocks"]:
+        start, stop = block["columns"]
+        click.echo(f"  {block['provider']:20s} columns {start}-{stop - 1}")
+    click.echo(f"wrote {out} {tuple(values.shape)} and {out}.json")
 
 
 @main.command("compute-input-stats")

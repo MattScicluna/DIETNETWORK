@@ -185,15 +185,18 @@ needs the small populations merged or dropped first.
 3. **Port what is still missing from the old CLI, only if used:**
    `analyze-population` plots and `preprocess-plink`. Allele-aware matching
    may make the latter unnecessary.
-4. **Pluggable SNP features (the aux-net input).** Upstream's `DietNetwork`
-   takes any SNPs × features matrix from `embedding.npz` (2-D or per-fold 3-D),
-   normalizing columns itself. So new features need no change to upstream
-   code; they need an embedding builder:
-   - providers (`class_genotype_freq`, which is upstream's `generate_embedding`;
-     `precomputed` tables keyed by `chr:pos:counted:other`; `random` /
-     `shuffled` controls);
-   - fold-dependence recorded explicitly;
-   - per-block normalization.
+4. **Pluggable SNP features (the aux-net input)** ✅. `dietnet build-embedding`
+   (`src/dietnet/features.py`) assembles `embedding.npz` from blocks:
+   `class_genotype_freq` (upstream's script; alone it is bit-identical to the
+   published embedding), `precomputed` (any per-SNP table, matched by position
+   and allele on either strand, `orient: effect` flipped where the dataset
+   counts REF, missing SNPs zeroed and flagged), and the `random` / `shuffled`
+   controls. Upstream's model reads any SNPs x features matrix and
+   L2-normalises each column itself, so no upstream change is needed, and
+   per-column scaling is pointless. The transforms that matter are `center`
+   and `pca: k`; the latter controls how many columns, and so how much weight,
+   a block brings. All-zero columns (NaN in the model) are refused. Packages
+   record the blocks.
 5. **AlphaGenome via the hosted API.**
    - A resumable, cached precompute writes a `precomputed` table of ALT − REF
      variant-effect scores.

@@ -10,8 +10,9 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
+import yaml
 from click.testing import CliRunner
-from support import SEED, dietnet, train_pipeline
+from support import CONFIG, SEED, dietnet, train_pipeline
 
 from dietnet import package
 from dietnet.cli import main
@@ -178,3 +179,45 @@ def test_a_class_too_small_for_every_fold_is_refused(tmp_path, synthetic, name):
     ])  # fmt: skip
     assert result.exit_code == 1
     assert f"no training samples for {name}" in result.output
+
+
+def test_train_and_predict_with_a_built_embedding(tmp_path, synthetic):
+    """build-embedding instead of generate-embedding: frequencies plus a random block.
+
+    Upstream's model takes the wider matrix as it is; the package records which
+    blocks it was trained on.
+    """
+    root = tmp_path / "run"
+    root.mkdir()
+    (root / "config.yaml").write_text(yaml.safe_dump(CONFIG))
+    (root / "features.yaml").write_text(
+        yaml.safe_dump(
+            {"blocks": [{"provider": "class_genotype_freq"}, {"provider": "random", "columns": 4}]}
+        )
+    )
+    dietnet(
+        "create-dataset", plink=synthetic.plink_prefix, labels=synthetic.labels, out=root / "d.h5"
+    )
+    common = dict(dataset=root / "d.h5", partition=root / "p.npz")
+    dietnet("partition", dataset=root / "d.h5", out=root / "p.npz")
+    dietnet("build-embedding", **common, spec=root / "features.yaml", out=root / "e.npz")
+    dietnet("compute-input-stats", **common, out=root / "s.npz")
+    dietnet(
+        "train",
+        **common,
+        embedding=root / "e.npz",
+        input_stats=root / "s.npz",
+        config=root / "config.yaml",
+        exp_dir=root / "exp",
+        seeds=SEED,
+        folds=0,
+    )
+
+    (pkg,) = package.find(root / "exp" / "packages")
+    blocks = pkg.metadata["embedding"]["blocks"]
+    assert [b["provider"] for b in blocks] == ["class_genotype_freq", "random"]
+    assert np.load(pkg.path / "embedding.npz")["emb"].shape == (500, 4 * 3 + 4)
+
+    dietnet("predict", model=root / "exp" / "packages", plink=synthetic.plink_prefix,
+            out=tmp_path / "p.tsv")  # fmt: skip
+    dietnet("check", predictions=tmp_path / "p.tsv", labels=synthetic.labels, min_accuracy=0.9)
