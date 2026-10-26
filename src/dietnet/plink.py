@@ -9,6 +9,7 @@ sample-major, one contiguous run of rows per block.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -56,6 +57,30 @@ def read_bim(prefix) -> pd.DataFrame:
     return bim
 
 
+def _read_uncached(path, offset: int, size: int, chunk: int = 2**28) -> np.ndarray:
+    """``size`` bytes of ``path`` from ``offset``, without keeping them in the page cache.
+
+    On a cluster the pages the kernel caches while a job reads a file are
+    charged to the job's memory limit. Read whole, a 19 GiB .bed then counts
+    twice -- the array and the cache -- and the job is killed at about twice
+    the file's size. Dropping each chunk's pages as it is copied in (Linux;
+    a no-op where posix_fadvise does not exist) leaves only the array.
+    """
+    out = np.empty(size, dtype=np.uint8)
+    view = memoryview(out)
+    with open(path, "rb", buffering=0) as f:
+        f.seek(offset)
+        done = 0
+        while done < size:
+            n = f.readinto(view[done : done + chunk])
+            if not n:
+                raise EOFError(f"{path}: expected {size} bytes after offset {offset}, got {done}")
+            if hasattr(os, "posix_fadvise"):
+                os.posix_fadvise(f.fileno(), offset + done, n, os.POSIX_FADV_DONTNEED)
+            done += n
+    return out
+
+
 @dataclass(frozen=True)
 class Bed:
     """A PLINK fileset opened for block reads."""
@@ -98,7 +123,7 @@ class Bed:
         """
         path = f"{self.prefix}.bed"
         if self.n_snps * self.bytes_per_snp <= load_bytes:
-            raw = np.fromfile(path, dtype=np.uint8, offset=3)
+            raw = _read_uncached(path, offset=3, size=self.n_snps * self.bytes_per_snp)
         else:
             raw = np.memmap(path, dtype=np.uint8, mode="r", offset=3)
         return raw.reshape(self.n_snps, self.bytes_per_snp)

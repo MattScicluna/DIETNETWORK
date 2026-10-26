@@ -138,3 +138,13 @@ def test_bed_reader_matches_pyplink(kgp_mini, block_bytes, load_bytes):
     blocks = list(bed.sample_blocks(rows, block_bytes, load_bytes))
     assert [start for start, _ in blocks] == list(range(0, bed.n_samples, len(blocks[0][1])))
     np.testing.assert_array_equal(np.concatenate([b for _, b in blocks]), expected)
+
+
+def test_bed_is_read_whole_in_chunks(kgp_mini):
+    """The page-cache-dropping reader returns the file's bytes, whatever the chunk size."""
+    from dietnet.plink import _read_uncached
+
+    path = f"{kgp_mini.plink_prefix}.bed"
+    expected = np.fromfile(path, dtype=np.uint8, offset=3)
+    got = _read_uncached(path, offset=3, size=len(expected), chunk=4099)
+    np.testing.assert_array_equal(got, expected)
