@@ -47,6 +47,10 @@ dev = [
 tracking = [
     "comet-ml>=3.33.0",
 ]
+# `dietnet alphagenome`: variant-effect features from the hosted AlphaGenome API.
+alphagenome = [
+    "alphagenome>=0.10",
+]
 
 [project.scripts]
 dietnet = "dietnet.cli:main"

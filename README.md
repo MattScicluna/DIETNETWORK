@@ -135,6 +135,31 @@ blocks a model was trained on. `shuffled` (an earlier block with SNP rows
 permuted) is the other control. With only `class_genotype_freq`, the output
 is exactly the published embedding.
 
+### AlphaGenome variant effects as features
+
+```bash
+pip install 'dietnetwork[alphagenome]'
+export ALPHAGENOME_API_KEY=...            # never in a file or config
+dietnet alphagenome --dataset dataset.h5 --out alphagenome.tsv   # resumable: rerun after an interruption
+```
+
+This scores every SNP through the hosted AlphaGenome API. Each row holds a
+signed ALT − REF effect per track (default scorers: ATAC, DNase, TF and
+histone ChIP, CAGE, RNA-seq; `--scorers` to choose). The result is a table
+for the `precomputed` provider:
+
+```yaml
+  - provider: precomputed
+    path: alphagenome.tsv
+    orient: effect     # flipped where the dataset counts REF (a quarter of the 1KGP SNPs)
+    pca: 64            # thousands of tracks -> 64 columns
+```
+
+SNP ids must be `chr:pos:REF:ALT` on GRCh38, as in the 1KGP data, because
+REF and ALT are not recorded in a `.bim`. For the experiments, compare it
+against the same spec with a `random` block of the same width, and with a
+`shuffled` copy of the AlphaGenome block.
+
 ## How it is kept exact
 
 - `Dietnet_train_and_evaluate/` holds only the upstream files the CLI runs (the

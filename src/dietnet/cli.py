@@ -5,7 +5,8 @@ Pipeline (each step writes one file the next reads)::
     dietnet create-dataset      PLINK + labels   -> dataset.h5       (this package)
     dietnet partition           dataset.h5       -> partition.npz    (upstream partition_data.py)
     dietnet generate-embedding  + partition      -> embedding.npz    (upstream generate_embedding.py)
-      or build-embedding --spec                  (several feature sources, see dietnet.features)
+      or build-embedding --spec                  (several feature sources, see dietnet.features;
+                                                  dietnet alphagenome makes one of them)
     dietnet compute-input-stats + partition      -> input_stats.npz  (upstream compute_input_features_statistics.py)
     dietnet train               all of the above -> model packages   (upstream train.py)
     dietnet match               packages + PLINK -> matched cohort   (optional, CPU: ahead of predict)
@@ -148,6 +149,49 @@ def build_embedding(dataset_path, partition_path, spec, out):
         start, stop = block["columns"]
         click.echo(f"  {block['provider']:20s} columns {start}-{stop - 1}")
     click.echo(f"wrote {out} {tuple(values.shape)} and {out}.json")
+
+
+@main.command("alphagenome")
+@_dataset
+@click.option("--out", required=True, type=click.Path(path_type=Path), help="Feature table (.tsv).")
+@click.option(
+    "--scorers",
+    default=",".join(("ATAC", "DNASE", "CHIP_TF", "CHIP_HISTONE", "CAGE", "RNA_SEQ")),
+    show_default=True,
+    help="AlphaGenome recommended scorers, comma-separated.",
+)
+@click.option(
+    "--sequence-length",
+    type=click.Choice(["16KB", "100KB", "500KB", "1MB"]),
+    default="1MB",
+    show_default=True,
+)
+@click.option("--chunk", default=200, show_default=True, help="SNPs per saved part.")
+@click.option("--max-workers", default=5, show_default=True, help="Parallel API requests.")
+def alphagenome_scores(dataset_path, out, scorers, sequence_length, chunk, max_workers):
+    """AlphaGenome variant effects for every SNP (hosted API; key in ALPHAGENOME_API_KEY).
+
+    Writes a table for build-embedding's precomputed provider (orient: effect).
+    Resumable: rerun the same command after an interruption.
+    """
+    from dietnet import alphagenome
+
+    try:
+        backend = alphagenome.AlphaGenomeAPI(
+            scorers=[s.strip() for s in scorers.split(",") if s.strip()],
+            sequence_length=sequence_length,
+            max_workers=max_workers,
+        )
+        alphagenome.score(
+            dataset_path,
+            out,
+            backend,
+            chunk=chunk,
+            progress=lambda n, total: click.echo(f"scored {n}/{total}", err=True),
+        )
+    except (ImportError, RuntimeError, ValueError) as error:
+        raise click.ClickException(str(error)) from None
+    click.echo(f"wrote {out}")
 
 
 @main.command("compute-input-stats")

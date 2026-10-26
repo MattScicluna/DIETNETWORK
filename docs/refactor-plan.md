@@ -197,10 +197,17 @@ needs the small populations merged or dropped first.
    and `pca: k`; the latter controls how many columns, and so how much weight,
    a block brings. All-zero columns (NaN in the model) are refused. Packages
    record the blocks.
-5. **AlphaGenome via the hosted API.**
-   - A resumable, cached precompute writes a `precomputed` table of ALT − REF
-     variant-effect scores.
-   - The sign is flipped per SNP where the counted allele is REF (24.5% of the
-     1KGP SNPs).
-   - Experiments: freq only, AlphaGenome only, both, random, shuffled, and an
-     MLP (upstream's `MlpHandler` exists).
+5. **AlphaGenome via the hosted API**: code ✅, not yet run.
+   `dietnet alphagenome` (`src/dietnet/alphagenome.py`, alphagenome client
+   v0.10) scores each SNP with `score_variants` and keeps the signed `raw_score`
+   per (output type, track). For gene-level tracks it keeps the gene with the
+   largest effect. Scoring is resumable (one part file per chunk), with the key
+   from `ALPHAGENOME_API_KEY` only. The output is a `precomputed` table, and
+   `orient: effect` flips the sign per SNP where the counted allele is REF.
+   Tested against a stand-in API and the real client's types; it has not been
+   run against the API.
+   - **To do:** score the 229,986 1KGP SNPs (resumable, rate-limited by the
+     service), then run the experiment grid on the published split:
+     freq only · AlphaGenome only · freq + AlphaGenome · freq + random (same
+     width) · freq + shuffled AlphaGenome · MLP. Upstream's `MlpHandler` exists,
+     but `train.py --model Mlp` is not wired into `dietnet train` yet.
