@@ -27,6 +27,54 @@ def fold_slice(array: np.ndarray, fold: int) -> np.ndarray:
     return array[fold] if array.ndim == 3 else array
 
 
+class InputError(ValueError):
+    """Training inputs upstream's model cannot learn from."""
+
+
+def check_inputs(embedding, input_stats, dataset, partition, folds=None) -> None:
+    """Refuse per-fold inputs upstream's model cannot learn from, saying why.
+
+    ``input_stats`` may be None: generate-embedding checks before they exist.
+
+    Upstream's generate_embedding.py divides each class's genotype counts by
+    the number of its samples in the fold's training split, and sizes the
+    embedding by the largest class index present. A class with no training
+    samples in a fold -- a population of one or two people, split five ways --
+    therefore either gives 0/0 (NaN, which spreads to every weight: the model
+    trains to NaN and predicts the first class for everyone) or, if it is the
+    last class, silently drops its columns. Either way the class cannot be
+    learned. Caught here, before any training time is spent.
+    """
+    emb = np.load(embedding, allow_pickle=True)["emb"]
+    stats = np.load(input_stats, allow_pickle=True) if input_stats else None
+    parts = np.load(partition, allow_pickle=True)["folds_indexes"]
+    with h5py.File(dataset, "r") as f:
+        labels = np.array(f["class_labels"]) if "class_labels" in f else None
+        names = np.array(f["class_label_names"]).astype(str) if "class_label_names" in f else None
+
+    problems = []
+    for fold in range(len(parts)) if folds is None else folds:
+        if labels is not None:
+            train = np.asarray(parts[fold][0], dtype=int)
+            absent = names[np.bincount(labels[train], minlength=len(names)) == 0]
+            if len(absent):
+                problems.append(f"fold {fold}: no training samples for {', '.join(absent)}")
+        nan = [] if not np.isnan(fold_slice(emb, fold)).any() else ["embedding"]
+        for key in ("means_by_fold", "sd_by_fold"):
+            if stats is not None and key in stats.files and np.isnan(stats[key][fold]).any():
+                nan.append(key)
+        if nan:
+            problems.append(f"fold {fold}: NaN in {', '.join(nan)}")
+
+    if problems:
+        raise InputError(
+            "the model cannot learn from these training inputs:\n  "
+            + "\n  ".join(problems)
+            + "\nMerge or drop classes too small to appear in every fold's training split "
+            "(at least nb-folds samples each), then rebuild the dataset and rerun."
+        )
+
+
 def _held_out_predictions(results_dir: Path, train_dataset: Path, task: str) -> pd.DataFrame:
     """Upstream's test_results_epoch*.npz as a table of sample ids."""
     (path,) = sorted(results_dir.glob("test_results_epoch*.npz"))
@@ -63,6 +111,7 @@ def train(
     embedding, input_stats = Path(embedding).resolve(), Path(input_stats).resolve()
     exp_dir = Path(exp_dir).resolve()
     base = yaml.safe_load(Path(config).read_text())
+    check_inputs(embedding, input_stats, dataset, partition, folds)
 
     emb_by_fold = np.load(embedding, allow_pickle=True)["emb"]
     stats = np.load(input_stats, allow_pickle=True)

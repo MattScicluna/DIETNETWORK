@@ -154,3 +154,27 @@ def test_match_then_predict_reuses_the_matched_cohort(tmp_path, trained, synthet
         work_dir=work,
     )
     assert matched.stat().st_mtime_ns == stamp
+
+
+@pytest.mark.parametrize("name", ["AAA_Singleton", "ZZZ_Singleton"])
+def test_a_class_too_small_for_every_fold_is_refused(tmp_path, synthetic, name):
+    """A class missing from a fold's training split cannot be learned.
+
+    Upstream's embedding gives it NaN columns (and the model trains to NaN), or,
+    when it sorts last, silently no columns at all. One sample relabelled into a
+    class of its own triggers both; dietnet stops at generate-embedding and
+    names the class.
+    """
+    labels = pd.read_csv(synthetic.labels, sep="\t")
+    labels.iloc[0, 1] = name
+    labels.to_csv(tmp_path / "labels.tsv", sep="\t", index=False)
+    dietnet("create-dataset", plink=synthetic.plink_prefix, labels=tmp_path / "labels.tsv",
+            out=tmp_path / "d.h5")  # fmt: skip
+    dietnet("partition", dataset=tmp_path / "d.h5", out=tmp_path / "p.npz")
+
+    result = CliRunner().invoke(main, [
+        "generate-embedding", "--dataset", str(tmp_path / "d.h5"),
+        "--partition", str(tmp_path / "p.npz"), "--out", str(tmp_path / "e.npz"),
+    ])  # fmt: skip
+    assert result.exit_code == 1
+    assert f"no training samples for {name}" in result.output

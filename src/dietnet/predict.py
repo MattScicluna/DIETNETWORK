@@ -9,8 +9,8 @@ What differs is the I/O around it. Upstream's script loads the whole cohort
 into memory, matches SNPs with a Python loop, and does both again for every
 model. Here the cohort is matched once (allele-aware, :mod:`dietnet.align`) into
 an HDF5 file under ``work_dir``, then memory-mapped -- possible because the file
-is contiguous -- so the operating system pages it in as the models read it,
-and every model shares the one copy.
+is contiguous -- and read once, a contiguous batch of samples at a time, with
+every model scoring each batch before the next is read.
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ import h5py
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import DataLoader
 
 from dietnet import align, dataset, upstream
 from dietnet.package import Package
@@ -84,11 +83,6 @@ def predict(packages: list[Package], matched: Path, batch_size: int = 1024, devi
         scale = float(f["scale"][0])
         alignment = json.loads(f.attrs.get("alignment", "{}"))
 
-    # Upstream's IndepTestDataset reads rows from a class attribute; a memory
-    # map there means no copy of the cohort in RAM.
-    m.dataset_utils.IndepTestDataset.data_x = dataset.memmap_inputs(matched)
-    cohort = m.dataset_utils.IndepTestDataset(range(len(samples)))
-
     tasks = {p.task for p in packages}
     if len(tasks) != 1:
         raise ValueError(f"packages mix tasks: {sorted(tasks)}")
@@ -97,24 +91,33 @@ def predict(packages: list[Package], matched: Path, batch_size: int = 1024, devi
         if pkg.classes != classes:
             raise ValueError(f"{pkg.path} predicts different classes than {packages[0].path}")
 
-    scores = []
-    for pkg in packages:
-        handler = pkg.handler(device)
-        mus, sds = pkg.stats(device)
-        loader = DataLoader(cohort, batch_size=batch_size, shuffle=False, num_workers=0)
-        with torch.no_grad():
-            results = m.mainloop_utils.indep_test_step(
-                handler, device, cohort, loader, mus, sds, pkg.normalize, None, 0, scale
-            )
-        if not np.array_equal(results["samples"].astype(int), np.arange(len(samples))):
-            raise RuntimeError("upstream's inference step returned samples out of order")
-        scores.append(results["scores"] if classes else results["preds"])
+    models = [(pkg.handler(device), *pkg.stats(device), pkg.normalize) for pkg in packages]
+    n = len(samples)
+    shape = (len(packages), n, len(classes)) if classes else (len(packages), n)
+    scores = np.empty(shape, dtype=np.float64)
+
+    # Each batch of samples is read once, as one contiguous slice of the memory
+    # map, and every model scores it with upstream's indep_test_step -- handed a
+    # one-batch loader, so the arithmetic is upstream's while the cohort is read
+    # once in total rather than once per model, row by row.
+    inputs = dataset.memmap_inputs(matched)
+    with torch.no_grad():
+        for start in range(0, n, batch_size):
+            stop = min(start + batch_size, n)
+            batch = [(torch.arange(start, stop), torch.from_numpy(np.asarray(inputs[start:stop])))]
+            for i, (handler, mus, sds, normalize) in enumerate(models):
+                results = m.mainloop_utils.indep_test_step(
+                    handler, device, range(stop - start), batch, mus, sds, normalize, None, 0, scale
+                )
+                if not np.array_equal(results["samples"].astype(int), np.arange(start, stop)):
+                    raise RuntimeError("upstream's inference step returned samples out of order")
+                scores[i, start:stop] = results["scores"] if classes else results["preds"]
 
     return Result(
         samples=samples,
         model_names=[p.name for p in packages],
         classes=classes,
-        scores=np.stack(scores),
+        scores=scores,
         alignment=alignment,
         scale=scale,
     )

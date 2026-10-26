@@ -114,7 +114,13 @@ _ncpus = click.option("--ncpus", default=1, show_default=True)
 @_ncpus
 def generate_embedding(dataset_path, partition_path, out, ncpus):
     """Per-fold genotype x class frequency embedding (upstream generate_embedding.py)."""
+    from dietnet import training
+
     _per_fold_step("generate_embedding.py", dataset_path, partition_path, out, ncpus)
+    try:
+        training.check_inputs(_npz(out), None, dataset_path, partition_path)
+    except training.InputError as error:
+        raise click.ClickException(str(error)) from None
 
 
 @main.command("compute-input-stats")
@@ -157,11 +163,14 @@ def train(
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
 
-    packages = training.train(
-        dataset=dataset_path, partition=partition_path, embedding=embedding,
-        input_stats=input_stats, config=config, exp_dir=exp_dir, seeds=seeds,
-        folds=folds, task=task, normalize=normalize,
-    )  # fmt: skip
+    try:
+        packages = training.train(
+            dataset=dataset_path, partition=partition_path, embedding=embedding,
+            input_stats=input_stats, config=config, exp_dir=exp_dir, seeds=seeds,
+            folds=folds, task=task, normalize=normalize,
+        )  # fmt: skip
+    except training.InputError as error:
+        raise click.ClickException(str(error)) from None
     for pkg in packages:
         click.echo(f"packaged {pkg.path}")
 
