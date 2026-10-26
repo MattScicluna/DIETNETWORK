@@ -7,6 +7,7 @@ Pipeline (each step writes one file the next reads)::
     dietnet generate-embedding  + partition      -> embedding.npz    (upstream generate_embedding.py)
     dietnet compute-input-stats + partition      -> input_stats.npz  (upstream compute_input_features_statistics.py)
     dietnet train               all of the above -> model packages   (upstream train.py)
+    dietnet match               packages + PLINK -> matched cohort   (optional, CPU: ahead of predict)
     dietnet predict             packages + PLINK -> predictions.tsv  (upstream model and inference step)
     dietnet check               predictions + labels -> accuracy
 
@@ -165,23 +166,74 @@ def train(
         click.echo(f"packaged {pkg.path}")
 
 
-@main.command()
-@click.option(
+_model = click.option(
     "--model",
     "model_dir",
     required=True,
     type=click.Path(exists=True, path_type=Path),
     help="A package or a directory of packages.",
 )
-@click.option("--plink", "plink_prefix", required=True, help="Cohort PLINK prefix.")
+_plink = click.option("--plink", "plink_prefix", required=True, help="Cohort PLINK prefix.")
+_seeds = click.option("--seeds", multiple=True, callback=_ints, help="Only these seeds.")
+_folds = click.option("--folds", multiple=True, callback=_ints, help="Only these folds.")
+
+
+def _packages(model_dir, seeds, folds):
+    from dietnet import package
+
+    packages = [
+        p
+        for p in package.find(model_dir)
+        if (not seeds or p.metadata["seed"] in seeds) and (not folds or p.metadata["fold"] in folds)
+    ]
+    if not packages:
+        raise click.UsageError("no package matches --seeds/--folds")
+    return packages
+
+
+@main.command()
+@_model
+@_plink
+@click.option(
+    "--work-dir",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="Where the matched cohort HDF5 goes.",
+)
+@_seeds
+@_folds
+def match(model_dir, plink_prefix, work_dir, seeds, folds):
+    """Match a cohort to the models' SNPs, ahead of predict.
+
+    CPU and I/O only. Run it as its own job, then `dietnet predict` with the
+    same --work-dir on a GPU: predict finds the matched cohort and goes
+    straight to inference.
+    """
+    import json
+
+    import h5py
+
+    from dietnet import predict as prediction
+
+    started = time.perf_counter()
+    matched = prediction.matched_dataset(_packages(model_dir, seeds, folds), plink_prefix, work_dir)
+    with h5py.File(matched) as f:
+        counts = json.loads(f.attrs.get("alignment", "{}"))
+    click.echo(f"matched in {time.perf_counter() - started:.0f}s: {json.dumps(counts)}")
+    click.echo(f"wrote {matched}")
+
+
+@main.command()
+@_model
+@_plink
 @click.option("--out", required=True, type=click.Path(path_type=Path), help="Predictions TSV.")
 @click.option(
     "--work-dir",
     type=click.Path(path_type=Path),
-    help="Where the matched cohort HDF5 goes (default: next to --out).",
+    help="Where the matched cohort HDF5 goes, or is already (default: next to --out).",
 )
-@click.option("--seeds", multiple=True, callback=_ints, help="Only these seeds.")
-@click.option("--folds", multiple=True, callback=_ints, help="Only these folds.")
+@_seeds
+@_folds
 @click.option("--batch-size", default=1024, show_default=True)
 @click.option("--device", default=None, help="cpu, cuda, ... (default: cuda if available).")
 @click.option(
@@ -193,17 +245,9 @@ def predict(model_dir, plink_prefix, out, work_dir, seeds, folds, batch_size, de
 
     import numpy as np
 
-    from dietnet import package
     from dietnet import predict as prediction
 
-    packages = [
-        p
-        for p in package.find(model_dir)
-        if (not seeds or p.metadata["seed"] in seeds) and (not folds or p.metadata["fold"] in folds)
-    ]
-    if not packages:
-        raise click.UsageError("no package matches --seeds/--folds")
-
+    packages = _packages(model_dir, seeds, folds)
     work_dir = work_dir or out.parent
     started = time.perf_counter()
     matched = prediction.matched_dataset(packages, plink_prefix, work_dir)

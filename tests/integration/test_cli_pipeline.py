@@ -136,3 +136,21 @@ def test_regression_end_to_end(tmp_path, synthetic):
 def test_info_reports_unmodified_upstream():
     out = dietnet("info")
     assert "identical to the pinned commit" in out
+
+
+def test_match_then_predict_reuses_the_matched_cohort(tmp_path, trained, synthetic):
+    """match (CPU job) then predict (GPU job): predict goes straight to inference."""
+    work = tmp_path / "work"
+    out = dietnet("match", model=trained(synthetic), plink=synthetic.plink_prefix, work_dir=work)
+    (matched,) = work.glob("*.matched.h5")
+    assert str(matched) in out
+    stamp = matched.stat().st_mtime_ns
+
+    dietnet(
+        "predict",
+        model=trained(synthetic),
+        plink=synthetic.plink_prefix,
+        out=tmp_path / "p.tsv",
+        work_dir=work,
+    )
+    assert matched.stat().st_mtime_ns == stamp

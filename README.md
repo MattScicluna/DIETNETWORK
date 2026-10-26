@@ -59,6 +59,12 @@ predictions with fewer than 1,000. `predictions.tsv` has one row per sample:
 Add `--scores scores.npz` for every model's probabilities, and `--seeds`/`--folds`
 to use a subset of models.
 
+On a cluster, split the two stages: `dietnet match` (CPU and I/O: reads the
+cohort and writes the matched copy to `--work-dir`) as one job, then
+`dietnet predict` with the same `--work-dir` on a GPU, which finds the matched
+copy and only runs the models. For UK Biobank (486,748 × 169,829), matching
+takes about 20 minutes on 8 CPUs.
+
 ## Train your own
 
 ```bash

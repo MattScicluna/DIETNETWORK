@@ -2,8 +2,8 @@
 # The dietnet pipeline at biobank scale: every step timed (wall time, peak RSS).
 #
 # Trains a throwaway one-fold model on a reference panel for a few epochs
-# (accuracy is not the point; the work per step is the same), then matches and
-# predicts every sample of a cohort. Inputs come from the environment, so no
+# (accuracy is not the point; the work per step is the same), then matches a
+# cohort to it. Inference is predict_gpu.sbatch. Inputs come from the environment, so no
 # cluster path is committed:
 #
 #   TRAIN_PREFIX=/path/panel TRAIN_LABELS=/path/panel_labels.tsv \
@@ -60,7 +60,8 @@ step generate-embedding "$DIETNET" generate-embedding --dataset dataset.h5 --par
 step compute-input-stats "$DIETNET" compute-input-stats --dataset dataset.h5 --partition partition.npz --out stats.npz --ncpus 8
 step train "$DIETNET" train --dataset dataset.h5 --partition partition.npz --embedding embedding.npz \
     --input-stats stats.npz --config config.yaml --exp-dir exp --seeds 78 --folds 0
-step predict "$DIETNET" predict --model exp/packages --plink "$TEST_PREFIX" --out predictions.tsv \
-    --work-dir work --device cpu
-tail -2 predict.log
+# Matching is CPU and I/O; inference goes to a GPU job (predict_gpu.sbatch) with
+# the same work dir, which reuses the matched cohort.
+step match "$DIETNET" match --model exp/packages --plink "$TEST_PREFIX" --work-dir work
+tail -2 match.log
 du -sh dataset.h5 work exp/packages
