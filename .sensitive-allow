@@ -1,0 +1,30 @@
+# Paths that scripts/check_sensitive_files.py would flag but which are safe to
+# share. One path per line, scoped to one rule (path:rule) wherever possible,
+# each with a comment saying who decided and why.
+#
+# This file exists so that overriding the check leaves a reviewable trace in the
+# repository. If it grows without comments, the check is being worked around
+# rather than used.
+
+# The check's own specification. It has to contain the things it detects: a
+# fixture script with a private header, and a fake cluster path.
+# Reviewed 2026-10-25.
+tests/unit/test_sensitive_file_check.py:private-marker
+tests/unit/test_sensitive_file_check.py:cluster-path
+
+# Test fixtures, built by tests/fixtures/build_fixtures.py. kgp_mini is 480
+# samples x 2,000 SNPs of the public 1000 Genomes test set this repository
+# already distributes by download link (Dietnet/pretrained_models.py); synthetic
+# is simulated. Neither carries cohort data. Reviewed 2026-10-25.
+tests/fixtures/kgp_mini.bed:genotype-data
+tests/fixtures/kgp_mini.bim:genotype-data
+tests/fixtures/kgp_mini.fam:genotype-data
+tests/fixtures/kgp_mini_upstream.hdf5:data-container
+tests/fixtures/synthetic.bed:genotype-data
+tests/fixtures/synthetic.bim:genotype-data
+tests/fixtures/synthetic.fam:genotype-data
+tests/fixtures/synthetic_upstream.hdf5:data-container
+
+# The published models' 5-fold split (sample row indices into the public 1KGP
+# dataset), needed to reproduce them; see reproduction/README.md. Reviewed 2026-10-25.
+reproduction/1kgp_partition_seed124.npz:data-container

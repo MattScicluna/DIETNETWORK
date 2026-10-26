@@ -14,24 +14,15 @@ Dietnet/Interpretability/experiment_scripts/*.sh
 DATA/
 EXPERIMENT_01/
 Test_dev/
+Dietnet/tests/filenames.py
 
-# Model cache and test data
-.cache/
-tests/data/
-tests/preprocessed_plink/
-tests/smoke_test_predictions.tsv
-tests/smoke_test_predictions_v2.tsv
-tests/single_model_predictions.tsv
-tests/single_model_predictions_v2.tsv
-tests/.ipynb_checkpoints/
+# Model weights
+Models_1KGP_24populations/
 
-# Distribution packages
-*.tar.gz
-
-# Deprecated files
-deprecated/
-bin/
-logs/
-preprocessed_plink/
-tests/outputs/
-uv.lock
+# Local environments and tool state
+.venv/
+.claude/
+.coverage
+coverage.xml
+# Written by the CI install step
+requirements-ci.txt

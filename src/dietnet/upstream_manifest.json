@@ -1,0 +1,53 @@
+{
+  "repository": "https://github.com/HussinLab/DIETNETWORK",
+  "commit": "5481556e472140c6d3a67363c1286f22109fb1ce",
+  "directories": [
+    "Dietnet_train_and_evaluate"
+  ],
+  "files": {
+    "Dietnet_train_and_evaluate/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "Dietnet_train_and_evaluate/compute_input_features_statistics.py": "e62ae9ffb387a2c89361c82c824769839c2bab075678d05c53bcd7d5c550add4",
+    "Dietnet_train_and_evaluate/generate_embedding.py": "db8493b19006e2769df1ddc06ea0644e74cb3af4729403e135759803cf5fb8e6",
+    "Dietnet_train_and_evaluate/helpers/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "Dietnet_train_and_evaluate/helpers/dataset_utils.py": "5f1ce07661075c4f3a93bd48fa1d3fb7d62cedd34b0b0903c4a01772f8cac2c8",
+    "Dietnet_train_and_evaluate/helpers/log_utils.py": "ad502bd020e8a41b33fae0f735d15f1137c46200887f7c55e439abfe272ced0c",
+    "Dietnet_train_and_evaluate/helpers/mainloop_utils.py": "d2fd8895750c0ec8e3e4d7e676955d293e6fd66735723afb7d20bdde8f83d7a6",
+    "Dietnet_train_and_evaluate/helpers/model.py": "649c76e7628c03c65687776c9a19befd7053fbbcb190390d358d7c3a9ce88379",
+    "Dietnet_train_and_evaluate/helpers/model_handlers.py": "0171b7cda274c0c8b75c949b7918019e62dffe1c7f91d1c65d4646631a1a3f7a",
+    "Dietnet_train_and_evaluate/helpers/task_handlers.py": "f2ed64b18a8b3d0c20c13d1fc08addb765cd1b4bf0a9b697b2b2d54a146281cf",
+    "Dietnet_train_and_evaluate/partition_data.py": "e5ab2110ae4fe095b7c40c45fdab9d431e51d15d49d58a0655c6fb1b9dfbd6cd",
+    "Dietnet_train_and_evaluate/train.py": "5f82f39c81ffff1bf7a021b4db1555640d482f9c36ce002e919a9afdf959de1f"
+  },
+  "removed": [
+    "Dietnet_inference/dietnet_infer_python3115_requirements.txt",
+    "Dietnet_inference/infer.sh",
+    "Dietnet_inference/inference.py",
+    "Dietnet_inference/inference_combine_results.py",
+    "Dietnet_inference/inference_dataset.py",
+    "Dietnet_train_and_evaluate/create_dataset.py",
+    "Dietnet_train_and_evaluate/depricated/DaskGenotype_dataloader.py",
+    "Dietnet_train_and_evaluate/depricated/DataLoader_comparison.py",
+    "Dietnet_train_and_evaluate/depricated/Interpretability/__init__.py",
+    "Dietnet_train_and_evaluate/depricated/Interpretability/attribution_manager.py",
+    "Dietnet_train_and_evaluate/depricated/Interpretability/custom_engine.py",
+    "Dietnet_train_and_evaluate/depricated/Interpretability/experiment_scripts/create_dataset_less_snps.py",
+    "Dietnet_train_and_evaluate/depricated/Interpretability/graph_attribution_manager.py",
+    "Dietnet_train_and_evaluate/depricated/Interpretability/utils.py",
+    "Dietnet_train_and_evaluate/depricated/compute_genotype_class_frq_emb.py",
+    "Dietnet_train_and_evaluate/depricated/evaluate.py",
+    "Dietnet_train_and_evaluate/depricated/generate_embedding_by_fold.py",
+    "Dietnet_train_and_evaluate/depricated/get_preprocessing_params.py",
+    "Dietnet_train_and_evaluate/depricated/make_attributions.py",
+    "Dietnet_train_and_evaluate/depricated/make_attributions_old.py",
+    "Dietnet_train_and_evaluate/depricated/optimize.py",
+    "Dietnet_train_and_evaluate/depricated/test_independent_dataset_nomatch.py",
+    "Dietnet_train_and_evaluate/depricated/train_multiGPU.py",
+    "Dietnet_train_and_evaluate/depricated/vae_train.py",
+    "Dietnet_train_and_evaluate/get_last_layer.py",
+    "Dietnet_train_and_evaluate/helpers/Quick_checks/check_partition.py",
+    "Dietnet_train_and_evaluate/helpers/create_dataset_utils.py",
+    "Dietnet_train_and_evaluate/helpers/test_indep_utils.py",
+    "Dietnet_train_and_evaluate/missing_snps_exp.py",
+    "Dietnet_train_and_evaluate/test_independent_dataset.py"
+  ]
+}

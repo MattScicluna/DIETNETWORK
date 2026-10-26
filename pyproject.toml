@@ -1,24 +1,25 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "dietnetwork"
-version = "0.2.0"
-description = "PyTorch implementation of DietNetwork for genetic ancestry classification"
+version = "0.3.0"
+description = "Diet Network for genetic ancestry prediction: HussinLab's published model behind a CLI, model packages and biobank-scale inference"
 readme = "README.md"
-requires-python = ">=3.10"
-license = {text = "MIT"}
-keywords = ["deep-learning", "genetics", "pytorch", "ancestry-classification"]
+requires-python = ">=3.10,<3.14"
+license = "MIT"
+authors = [
+    {name = "Matthew Scicluna", email = "mattcscicluna@gmail.com"},
+    {name = "Camille Rochefort-Boulanger"},
+]
+keywords = ["deep-learning", "genetics", "pytorch", "ancestry", "diet-network"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-
 dependencies = [
     "torch>=2.0.0",
     "numpy>=1.24.0",
@@ -26,8 +27,6 @@ dependencies = [
     "h5py>=3.8.0",
     "pyyaml>=6.0",
     "click>=8.1.0",
-    "pyplink>=1.3.0",
-    "scikit-learn>=1.3.0",
     "tqdm>=4.65.0",
     "matplotlib>=3.7.0",
 ]
@@ -37,36 +36,73 @@ dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "black>=23.7.0",
-    "ruff>=0.0.280",
-]
-interpretability = [
-    "captum>=0.6.0",
-    "matplotlib>=3.7.0",
-    "seaborn>=0.12.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    # Installs the guardrail hooks: uv run pre-commit install
+    "pre-commit>=3.5",
+    # Builds the test fixtures' reference HDF5 and reads .bed in the parity
+    # tests the way upstream-era code did; not needed at runtime.
+    "pyplink>=1.3.0",
 ]
 tracking = [
     "comet-ml>=3.33.0",
 ]
+# `dietnet alphagenome`: variant-effect features from the hosted AlphaGenome API.
+alphagenome = [
+    "alphagenome>=0.10",
+]
 
 [project.scripts]
-dietnet = "Dietnet.cli:main"
+dietnet = "dietnet.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/rochefca/DIETNETWORK"
-Documentation = "https://github.com/rochefca/DIETNETWORK"
-Repository = "https://github.com/rochefca/DIETNETWORK"
+Homepage = "https://github.com/MattScicluna/DIETNETWORK"
+Repository = "https://github.com/MattScicluna/DIETNETWORK"
+Upstream = "https://github.com/HussinLab/DIETNETWORK"
 
 [tool.hatch.build.targets.wheel]
-packages = ["Dietnet"]
+packages = ["src/dietnet"]
 
+# HussinLab's code ships inside the package, byte for byte, so an installed
+# `dietnet` runs exactly the published training and model code. It stays at the
+# repository root in the source tree so that upstream changes merge cleanly.
+[tool.hatch.build.targets.wheel.force-include]
+"Dietnet_train_and_evaluate" = "dietnet/_upstream/Dietnet_train_and_evaluate"
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src/dietnet",
+    "Dietnet_train_and_evaluate",
+    "reproduction",
+    "tests",
+    "scripts",
+    "README.md",
+    "CHANGELOG.md",
+    "pyproject.toml",
+    ".flake8",
+]
+
+# Upstream's directory is never reformatted or linted: they are kept
+# identical to HussinLab/DIETNETWORK (tests/unit/test_upstream_unchanged.py).
 [tool.black]
 line-length = 100
 target-version = ["py310"]
+extend-exclude = '^/Dietnet_train_and_evaluate/'
 
-[tool.ruff]
-line-length = 100
-target-version = "py310"
+[tool.isort]
+profile = "black"
+line_length = 100
+skip_glob = ["Dietnet_train_and_evaluate/*"]
+known_first_party = ["dietnet"]
 
 [tool.pytest.ini_options]
-testpaths = ["Dietnet/tests"]
-python_files = ["test_*.py", "*_test.py"]
+testpaths = ["tests"]
+# tests/ for `support`, the root for `scripts` (the sensitive-files check).
+pythonpath = ["tests", "."]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "slow: long-running (full 1KGP data, published-model reproduction)",
+    "integration: runs several pipeline steps end to end through the CLI",
+    "network: needs network access (downloads, remote data)",
+]
+xfail_strict = true

@@ -1,207 +1,190 @@
-# DIETNETWORK
+# Diet Network
 
-PyTorch implementation of DietNetwork (https://arxiv.org/abs/1611.09340) for genetic ancestry classification.
+A deep learning framework for genetic ancestry inference from SNP genotypes.
+The published models were trained on the 1000 Genomes Project (1KGP, WGS 30x,
+GRCh38) to classify individuals into 24 populations.
 
-## Installation
+> Rochefort-Boulanger C\*, Scicluna M\*, Poujol R, Grenier J-C, Carrier PL,
+> Lemieux S, Hussin JG. *A Transparent and Generalizable Deep Learning Framework
+> for Genomic Ancestry Prediction.* AJHG (2026),
+> [doi:10.1016/j.ajhg.2026.06.003](https://doi.org/10.1016/j.ajhg.2026.06.003).
+> Models: Zenodo [doi:10.5281/zenodo.16943452](https://doi.org/10.5281/zenodo.16943452).
 
-### Using uv (recommended)
+This repository is HussinLab's published code
+([HussinLab/DIETNETWORK](https://github.com/HussinLab/DIETNETWORK)) behind a
+command line, `dietnet`, that takes PLINK files in and gives predictions out:
 
-```bash
-# Install uv if you haven't already
-curl -LsSf https://astral.sh/uv/install.sh | sh
+- **The model and training are upstream's, unmodified.** The training scripts
+  in `Dietnet_train_and_evaluate/` are byte for byte HussinLab's, pinned to
+  one commit (`src/dietnet/upstream_manifest.json`, checked by the test suite).
+  `dietnet` runs them, and runs their model class for prediction.
+- **Biobank scale.** Cohorts are read straight from `.bed`. They are matched to
+  a model once and memory-mapped, and every model in an ensemble reads the
+  same copy.
+- **Safer matching.** New cohorts are matched to the model's SNPs by position
+  *and allele*. A SNP whose dosage counts the other allele is flipped, never
+  silently mirrored. Missing SNPs are scaled the published way, by D/(D−|C|).
+- **Portable model packages.** Each one is self-contained, and records its
+  preprocessing and the upstream commit that trained it.
 
-# Clone the repository
-git clone https://github.com/rochefca/DIETNETWORK.git
-cd DIETNETWORK
-
-# Create virtual environment and install package
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-bash setup.sh # installs virtual environment dependencies and external dependencies
-
-# Verify installation
-dietnet info
-```
-
-### Using pip
-
-```bash
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-# Install package
-pip install -e .
-```
-
-### Optional dependencies
+## Install
 
 ```bash
-# For interpretability features
-uv pip install -e ".[interpretability]"
-
-# For experiment tracking with Comet.ML
-uv pip install -e ".[tracking]"
-
-# For development
-uv pip install -e ".[dev]"
+git clone https://github.com/MattScicluna/DIETNETWORK && cd DIETNETWORK
+uv sync --frozen          # or: pip install -e .
+uv run dietnet info       # versions; confirms the upstream code is unmodified
 ```
 
-## Quick Start - Smoke Tests
+Tested on Python 3.10–3.12 (Linux and macOS). A GPU is optional; CPU is enough for prediction.
 
-Run the bundled smoke tests to verify the code works:
+## Predict with the published models
 
-- **Run immediately after cloning** (everything downloads on first run):  
-  ```bash
-  
-  # Downloads data and model and performs inference on data using a single model
-  bash tests/kgp_precomputed/run_smoke_test_single.sh
+```bash
+dietnet published --dest models/                 # the 15 published models (Zenodo, ~250 MB)
+dietnet predict --model models/packages --plink mycohort --out predictions.tsv \
+                --work-dir "$SCRATCH/dietnet"    # where the matched cohort copy goes
+```
 
-  # Performs inference using ensemble model
-  bash tests/kgp_precomputed/run_smoke_test.sh
+`mycohort.bed/.bim/.fam` can hold any SNP set. The output reports how many of
+the model's 229,986 SNPs were found; the paper suggests not relying on
+predictions with fewer than 1,000. `predictions.tsv` has one row per sample:
 
-  # Train + predict on the small bundled 1KGP subset (much slower, GPU is recommended)
-  bash tests/kgp_precomputed/run_train_smoke.sh
+| column | |
+|---|---|
+| `sample` | the .fam IID |
+| `prediction` | the population with the highest mean probability across models |
+| `probability` | that mean probability |
+| `model_agreement` | the fraction of models whose own top population it is |
 
+Add `--scores scores.npz` for every model's probabilities, and `--seeds`/`--folds`
+to use a subset of models.
+
+On a cluster, split the two stages: `dietnet match` (CPU and I/O: reads the
+cohort and writes the matched copy to `--work-dir`) as one job, then
+`dietnet predict` with the same `--work-dir` on a GPU, which finds the matched
+copy and only runs the models. For UK Biobank (486,748 × 169,829), matching
+takes about 20 minutes on 8 CPUs.
+
+## Train your own
+
+```bash
+dietnet create-dataset      --plink panel --labels labels.tsv --out dataset.h5
+dietnet partition           --dataset dataset.h5 --out partition.npz          # 5 folds, labels balanced
+dietnet generate-embedding  --dataset dataset.h5 --partition partition.npz --out embedding.npz
+dietnet compute-input-stats --dataset dataset.h5 --partition partition.npz --out stats.npz
+dietnet train --dataset dataset.h5 --partition partition.npz --embedding embedding.npz \
+              --input-stats stats.npz --config config.yaml --exp-dir exp \
+              --seeds 78,79,80 --folds 0,1,2,3,4
+dietnet check --packages exp/packages            # each model's held-out test accuracy
+```
+
+`--model mlp` trains upstream's MLP baseline instead: no auxiliary network, no
+`--embedding`. It's the comparison point for any change to the SNP features.
+
+- `labels.tsv`: a header row, then `sample id<TAB>label`. Every sample in the
+  .fam needs a label.
+- `config.yaml`: the published one is the default to start from:
+
+  ```yaml
+  batch_size: 138
+  epochs: 8000
+  input_dropout: 0.995
+  dropout_main: 0.1
+  lr_aux: 0.0006
+  lr_main: 0.0003
+  learning_rate_annealing: 0.99
+  nb_hidden_u_aux: [100, 100]
+  nb_hidden_u_main: [100]
+  patience: 2000
+  seed: 78          # overridden per --seeds
+  uniform_init_limit: 0.02
   ```
-  These commands stay within `tests/kgp_precomputed/` and manage their own cached data/model downloads.
+- Regression: give `create-dataset` both `--labels` (class labels; the
+  embedding is built from them, as upstream does) and `--regression-labels`,
+  then `train --task regression`.
 
+Each step after `create-dataset` is the upstream script of the same name; logs
+are under `exp/logs/`. Packages land in `exp/packages/seed_*/fold_*/`, with the
+fold's held-out predictions in `test_predictions.tsv`.
 
-All smoke tests download required assets on first run, then reuse cached data/models.
+## Other SNP features for the auxiliary network
 
+The auxiliary network turns per-SNP features into the main network's first
+layer. The published model uses genotype frequencies per population.
+`dietnet build-embedding` can replace or extend them, without changing
+upstream's model (it reads whatever matrix `embedding.npz` holds):
 
-## Train on PLINK Data (recommended)
-
-Train directly from PLINK files and produce packaged models (`seed_X/fold_Y` with `model.pt`, `metadata.json`, `snps.txt`, `input_stats.npz`, `embedding.npz`, `label_mapping.json`, `allpos.bim`):
-
-```bash
-# 1) Partition your PLINK dataset (optionally stratify by population)
-dietnet partition \
-    --exp-path /path/to/experiment_dir \
-    --dataset /path/to/train_prefix.bed \
-    --nb-folds 5 \
-    --stratify \
-    --label-file /path/to/labels.tsv   # required for stratified PLINK
-
-# 2) Compute embeddings per fold
-dietnet generate-embedding \
-    --exp-path /path/to/experiment_dir \
-    --dataset /path/to/train_prefix.bed \
-    --label-file /path/to/labels.tsv \
-    --output-name embedding.npz
-
-# 3) Compute input stats (means/stds) per fold via CLI
-dietnet compute-input-stats \
-    --exp-path /path/to/experiment_dir \
-    --dataset /path/to/train_prefix.bed \
-    --partition partitioned_idx.npz \
-    --output-name input_features_means.npz
-
-# 4) Train and package a single model (one fold)
-dietnet train \
-    --exp-path /path/to/experiment_dir \
-    --exp-name my_experiment \
-    --config config.yaml \
-    --plink-prefix /path/to/train_prefix \
-    --label-file /path/to/labels.tsv \
-    --folds 0   # pick one fold if you only want a single model
-
-# 5) Train an ensemble across seeds/folds
-dietnet train \
-    --exp-path /path/to/experiment_dir \
-    --exp-name my_experiment \
-    --config config.yaml \
-    --plink-prefix /path/to/train_prefix \
-    --label-file /path/to/labels.tsv \
-    --seeds 42,43,44 \
-    --folds 0,1,2,3,4 \
-    --output-dir /path/to/my_packages   # optional override
+```yaml
+# features.yaml
+blocks:
+  - provider: class_genotype_freq      # the published features (upstream's script)
+  - provider: precomputed              # any per-SNP table: chrom, pos, ref, alt, features...
+    path: scores.tsv
+    orient: effect                     # ALT-vs-REF values: flipped where A1 is REF
+    pca: 64                            # keep this block to 64 columns
+  - provider: random                   # control: same width, no information
+    columns: 64
 ```
 
-Packages land in `<exp-path>/<exp-name>_packages/seed_*/fold_*/` by default and are ready for `dietnet predict`.
-`--seeds` and `--folds` are Click “multiple” options: repeat the flag (`--seeds 42 --seeds 43`) or provide comma-separated values in one flag (`--seeds 42,43`). The same applies to `--folds`.
-
-## Evaluate Accuracy
-
 ```bash
-# Check accuracy on all predicted samples
-dietnet check \
-    --predictions predictions.tsv \
-    --labels /path/to/labels.tsv
-
-# Check accuracy on test-fold only (avoids train/val inflation)
-dietnet check \
-    --predictions predictions.tsv \
-    --labels /path/to/labels.tsv \
-    --partition-file /path/to/partitioned_idx.npz \
-    --fold 0
-
-# Assert accuracy is within expected range (exits non-zero if violated)
-dietnet check \
-    --predictions predictions.tsv \
-    --labels /path/to/labels.tsv \
-    --min-accuracy 0.85
+dietnet build-embedding --dataset dataset.h5 --partition partition.npz \
+                        --spec features.yaml --out embedding.npz
 ```
 
-## Using Pre-trained Model
+Then train with `--embedding embedding.npz` as usual. Blocks are matched to
+the dataset's SNPs by position and allele, on either strand. SNPs a table
+lacks are zeroed and flagged in a `<name>:missing` column. Packages record the
+blocks a model was trained on. `shuffled` (an earlier block with SNP rows
+permuted) is the other control. With only `class_genotype_freq`, the output
+is exactly the published embedding.
 
-### Preset models
-
-Specify an existing model to use (will download automatically if not present in `~/.cache/dietnet/`).
-
-```bash
-# Using a preset model (downloads automatically)
-dietnet predict --model 1kgp_default \
-                --plink-prefix /path/to/test_data \
-                --output predictions.tsv \
-                --temp-dir /path/to/test_data
-```
-`--temp-dir` controls where preprocessed PLINK files **and** the genotype cache are written (default: alongside `--plink-prefix`, e.g., `/path/to/test_data`).
-
-**Available presets:**
-- `1kgp_default`: 1000 Genomes Phase 3 (24 populations, single model)
-- `hgdp_ukbb`: HGDP+1KGP for UKBB inference (coming soon)
-
-### Your own packaged models
-Point `--model` to the directory that contains `seed_*` folders (the parent of the packages):
+### AlphaGenome variant effects as features
 
 ```bash
-# Using a local model package
-dietnet predict --model /path/to/pretrained/model \
-                --plink-prefix /path/to/test_data \
-                --output predictions.tsv \
-                --temp-dir /path/to/test_data
+pip install 'dietnetwork[alphagenome]'
+export ALPHAGENOME_API_KEY=...            # never in a file or config
+dietnet alphagenome --dataset dataset.h5 --out alphagenome.tsv   # resumable: rerun after an interruption
 ```
 
-As with training, adding `--seeds` and `--folds` specifies which models to train on.
+This scores every SNP through the hosted AlphaGenome API. Each row holds a
+signed ALT − REF effect per track (default scorers: ATAC, DNase, TF and
+histone ChIP, CAGE, RNA-seq; `--scorers` to choose). The result is a table
+for the `precomputed` provider:
 
-### Get help
+```yaml
+  - provider: precomputed
+    path: alphagenome.tsv
+    orient: effect     # flipped where the dataset counts REF (a quarter of the 1KGP SNPs)
+    pca: 64            # thousands of tracks -> 64 columns
+```
+
+SNP ids must be `chr:pos:REF:ALT` on GRCh38, as in the 1KGP data, because
+REF and ALT are not recorded in a `.bim`. For the experiments, compare it
+against the same spec with a `random` block of the same width, and with a
+`shuffled` copy of the AlphaGenome block.
+
+## How it is kept exact
+
+- `Dietnet_train_and_evaluate/` holds only the upstream files the CLI runs (the
+  four scripts and their imports), unedited. The rest of upstream (deprecated
+  code, experiments, its own inference scripts) is not kept; the manifest lists
+  it.
+- `tests/parity/` checks, against a full upstream checkout at the pinned
+  commit, that:
+  - `create-dataset` writes the same HDF5 as upstream's `create_dataset.py`;
+  - `predict` gives the same scores as upstream's `test_independent_dataset.py`,
+    including when upstream does its own SNP matching;
+  - with the published models, `predict` gives the same scores as upstream's
+    `Dietnet_inference/inference.py`.
+- To take newer upstream code: `git merge upstream/main`, delete any removed
+  file it brings back, run `python scripts/upstream_manifest.py --commit
+  upstream/main`, then the tests.
+
+## Development
 
 ```bash
-# General help
-dietnet --help
-
-# Command-specific help
-dietnet train --help
-dietnet predict --help
+uv sync --frozen --extra dev && uv run pre-commit install
+uv run pytest                                   # see tests/README.md for the parity tests
 ```
 
-## FAQ
-
-### How do I run this on my data?
-
-We provided 2 scripts that you can use as a template for your research:
-- `scripts/predict_external.sh` for inference on your dataset
-- `scripts/train_predict.sh` to train on a reference dataset and do inference on another
-
-### I can't download the data or model since my compute node has no access to the internet
-
-You can run this prior to running the smoke tests:
-```bash
-bash tests/kgp_precomputed/download_test_data.sh
-```
-
-Likewise the models can be downloaded using the following:
-```bash
-bash tests/kgp_precomputed/download_model.sh
-```
+See `CLAUDE.md` for conventions and `docs/refactor-plan.md` for the plan.
