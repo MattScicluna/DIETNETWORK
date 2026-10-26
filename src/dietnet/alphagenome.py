@@ -60,10 +60,14 @@ def _retrying(call):
             time.sleep(RETRY_WAIT * 2**attempt)
 
 
-def variants_of(dataset) -> pd.DataFrame:
-    """chrom (``chr``-prefixed), 1-based pos, ref, alt for every SNP in a dataset."""
-    snps = ds.snp_table(dataset)
-    parts = snps["snp"].str.split(":", expand=True)
+def variants_of(source) -> pd.DataFrame:
+    """chrom (``chr``-prefixed), 1-based pos, ref, alt for every SNP in a dataset, or
+    in a PLINK ``.bim``: only its SNP ids are read, so no genotypes are needed."""
+    if Path(source).suffix == ".bim":
+        ids = pd.read_csv(source, sep=r"\s+", header=None, usecols=[1], dtype=str)[1]
+    else:
+        ids = ds.snp_table(source)["snp"]
+    parts = ids.str.split(":", expand=True)
     if parts.shape[1] != 4 or not parts[1].str.fullmatch(r"\d+").all():
         raise ValueError(
             "SNP ids are not chr:pos:REF:ALT, so REF and ALT are unknown; "
@@ -164,7 +168,7 @@ def _parts(out: Path) -> Path:
 
 
 def score(dataset, out, backend: Backend, chunk: int = 200, progress=None) -> Path:
-    """Score every SNP of ``dataset``, then write the feature table ``out``.
+    """Score every SNP of ``dataset`` (or a ``.bim``), then write the feature table ``out``.
 
     Each chunk's scores go to their own file under ``<out>.parts/`` as soon as
     they arrive; a rerun scores only the SNPs no part holds yet. When all are

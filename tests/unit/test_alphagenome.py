@@ -58,6 +58,11 @@ def test_variants_come_from_chr_pos_ref_alt_ids(dataset):
     assert len(variants) == 2000
 
 
+def test_a_bim_gives_the_same_variants_as_the_dataset_built_from_it(dataset, kgp_mini):
+    from_bim = alphagenome.variants_of(f"{kgp_mini.plink_prefix}.bim")
+    pd.testing.assert_frame_equal(from_bim, alphagenome.variants_of(dataset))
+
+
 def test_score_writes_one_row_per_snp_with_the_strongest_gene_effect(tmp_path, dataset):
     out = alphagenome.score(dataset, tmp_path / "ag.tsv", FakeAPI(), chunk=300)
     table = pd.read_csv(out, sep="\t")
