@@ -117,12 +117,12 @@ than once.
 filled the sample-major matched file a block of SNP *columns* at a time. Every
 write touched all 486,748 rows, and the file was still unfinished after 2 h.
 Both writers now go a block of *samples* at a time (`Bed.sample_blocks`):
-bounded memory (4 GiB per block), and each block is one contiguous run of
+bounded memory (1 GiB per block), and each block is one contiguous run of
 rows. The rerun's timings go here.
 
 ## Phases from here
 
-1. **Reproduce, then retrain** (in progress).
+1. **Reproduce, then retrain** ✅.
    - ✅ **The published split is recovered.** It is upstream's `partition_data.py
      --balance-class --seed 124`. The file was taken from the lab's 1KGP
      directory on the cluster and is now `reproduction/1kgp_partition_seed124.npz`.
@@ -139,11 +139,14 @@ rows. The rerun's timings go here.
      (plink 1.9's default). They differ at 56,195 SNPs (24%), which
      allele-aware matching flips back; same accuracy either way. Matching by
      SNP id alone would feed those SNPs mirror-coded.
-   - **Retrain:** 15 models on GPUs with the published configs and split
-     (`reproduction/submit_retrain.sh`), then compare per (seed, fold) with
-     the published models. Identical weights are not expected (GPU
-     nondeterminism, torch version), so the comparison is accuracy and
-     prediction agreement.
+   - ✅ **Retrained.** All 15 retrained with `dietnet train` on Narval A100s,
+     using the published configs and split. Held-out accuracy 0.9282 against
+     the published 0.9214. Paired by (seed, fold) that is +0.67 points (sd 1.1),
+     higher in 11 of 15. Retrained and published models of the same
+     (seed, fold) agree on 96.1% of samples. Weights are not identical (GPU
+     nondeterminism, newer torch); the method's accuracy reproduces. Per-model
+     table in `reproduction/README.md`.
+   - **Phase 1 is done.**
 2. **Scale.**
    - UK Biobank on Narval end to end: time and peak memory per step
      (`benchmarks/slurm/bench_predict.sbatch`).

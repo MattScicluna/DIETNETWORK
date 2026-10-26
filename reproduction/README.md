@@ -62,3 +62,35 @@ unless they equal Zenodo's; `retrain.sbatch` is a 15-task array, one
 ```bash
 dietnet check --packages $EXP_DIR/exp/packages
 ```
+
+## Retrained with dietnet (2026-10-26)
+
+All 15 retrained on Narval A100s (19-58 min each) with `submit_retrain.sh`:
+upstream's train.py through `dietnet train`, the published configs and this
+split. The recomputed per-fold embedding, means and SDs equalled Zenodo's
+exactly. Held-out accuracy on the same test folds, and how often the retrained
+and published model of the same (seed, fold) predict the same population:
+
+| seed | fold | published | retrained | agreement |
+|---|---|---|---|---|
+| 78 | 0 | 0.9185 | 0.9442 | 0.9528 |
+| 78 | 1 | 0.9224 | 0.9246 | 0.9612 |
+| 78 | 2 | 0.9336 | 0.9400 | 0.9593 |
+| 78 | 3 | 0.9289 | 0.9332 | 0.9806 |
+| 78 | 4 | 0.9089 | 0.8980 | 0.9436 |
+| 79 | 0 | 0.9206 | 0.9356 | 0.9592 |
+| 79 | 1 | 0.9073 | 0.9353 | 0.9569 |
+| 79 | 2 | 0.9315 | 0.9422 | 0.9700 |
+| 79 | 3 | 0.9095 | 0.9138 | 0.9461 |
+| 79 | 4 | 0.9002 | 0.9132 | 0.9219 |
+| 80 | 0 | 0.9356 | 0.9335 | 0.9850 |
+| 80 | 1 | 0.9289 | 0.9332 | 0.9526 |
+| 80 | 2 | 0.9465 | 0.9400 | 0.9807 |
+| 80 | 3 | 0.9246 | 0.9203 | 0.9784 |
+| 80 | 4 | 0.9046 | 0.9154 | 0.9631 |
+| | **mean** | **0.9214** (sd 0.013) | **0.9282** (sd 0.013) | **0.9608** |
+
+Retrained minus published, paired by (seed, fold): +0.0067 (sd 0.011),
+retrained higher in 11 of 15. Identical weights were not expected -- GPU
+nondeterminism, and torch 2.14 here against the original's older torch -- and
+the reproduction is of the method's accuracy, which holds.

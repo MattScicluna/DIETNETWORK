@@ -23,7 +23,7 @@ CODES = np.array([2, -1, 1, 0], dtype=np.int8)
 BYTE_TO_DOSAGES = CODES[np.stack([(np.arange(256) >> s) & 3 for s in (0, 2, 4, 6)], axis=-1)]
 # A block of samples holds at most this many dosages (int8 bytes), decoded a
 # chunk of SNPs at a time.
-BLOCK_BYTES = 2**32
+BLOCK_BYTES = 2**30
 SNP_CHUNK = 8192
 # Packed .bed files up to this size are read into memory once (see Bed._packed).
 LOAD_BYTES = 64 * 2**30
