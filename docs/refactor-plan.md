@@ -2,6 +2,34 @@
 
 Living document: each pull request that moves the plan updates it.
 
+## Status and next steps (2026-10-26)
+
+| Phase | State |
+|---|---|
+| Rebuild on upstream `main`, CLI on top | ✅ PR #8 (CI green); waiting to be merged |
+| 1. Reproduce published models, retrain | ✅ split recovered (seed 124); published 0.9214, retrained 0.9282 |
+| 2. Scale (UK Biobank, 486,748 samples) | ✅ match 4.5 min (CPU), 15 models 13 min (one A100) |
+| 3. Port remaining old-CLI features | dropped unless needed (`analyze-population`, `preprocess-plink`) |
+| 4. Pluggable SNP features (`build-embedding`) | ✅ |
+| 5. AlphaGenome (`dietnet alphagenome`) | code ✅, not run: no API key yet |
+
+Next, in order:
+1. Merge PR #8 into `master`.
+2. When an AlphaGenome key exists: score the 229,986 1KGP SNPs
+   (`dietnet alphagenome`, resumable).
+3. Run the experiment grid on the published split, 15 models per
+   configuration, A100s, about 6 GPU-hours each: freq · AlphaGenome · freq +
+   AlphaGenome · freq + random · freq + shuffled AlphaGenome · MLP. The MLP
+   baseline needs nothing else and can run first.
+4. Optional, needs data decisions: UK Biobank genotypes at the published SNPs,
+   to apply the published models to UK Biobank; or the HGDP+1KGP panel with
+   its smallest populations merged or dropped, to train a panel model.
+
+Cluster notes: Narval jobs go through SLURM, never the login node. CPU is
+fine up to about an hour; anything longer goes to a GPU. Inputs and runs from
+this work are in the user's Narval scratch (`dietnet_refactor/`,
+`dietnet_published/`).
+
 ## Where things stand (2026-10-25)
 
 **Strategy: rebuild on upstream, not alongside it.** This repository is now
