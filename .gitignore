@@ -26,3 +26,7 @@ Models_1KGP_24populations/
 coverage.xml
 # Written by the CI install step
 requirements-ci.txt
+
+# The documentation site (uv run mkdocs build)
+site/
+.cache/
