@@ -214,7 +214,9 @@ def _transform(block: Block, spec: dict) -> Block:
 def build(spec, dataset, partition, out) -> tuple[np.ndarray, dict]:
     """Write ``out`` (upstream's embedding.npz) and ``<out>.json`` from a spec."""
     spec = yaml.safe_load(Path(spec).read_text()) if not isinstance(spec, dict) else spec
-    dataset, partition, out = Path(dataset), Path(partition), Path(out)
+    # Resolved: upstream's scripts run from their own directory, where a path
+    # relative to the caller's would not be found.
+    dataset, partition, out = Path(dataset).resolve(), Path(partition).resolve(), Path(out)
     n_folds = len(np.load(partition, allow_pickle=True)["folds_indexes"])
     ctx = Context(dataset, partition, ds.snp_table(dataset), n_folds, [])
 

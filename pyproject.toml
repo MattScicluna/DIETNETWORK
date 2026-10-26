@@ -64,6 +64,21 @@ tracking = [
 alphagenome = [
     "alphagenome>=0.10",
 ]
+# The documentation site (mkdocs.yml): uv run mkdocs serve
+docs = [
+    "mkdocs>=1.6,<2",  # 2.0 drops the plugin system this site uses
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.25",
+    # 12.x changed Highlight's constructor, which mkdocstrings 1.0.6 (the
+    # newest that resolves on Python 3.10) still calls the old way.
+    "pymdown-extensions>=10.7,<12",
+    # Renders docs/tutorial.ipynb; the docs workflow executes it on every build
+    # (on the test fixtures, no network), so the tutorial cannot quietly rot.
+    "mkdocs-jupyter>=0.24",
+    "ipykernel>=6.29",
+    # mkdocstrings formats the API page's signatures with it.
+    "black>=23.7.0",
+]
 
 [project.scripts]
 dietnet = "dietnet.cli:main"

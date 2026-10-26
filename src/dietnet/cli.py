@@ -29,7 +29,7 @@ from dietnet import __version__
 
 
 def _ints(ctx, param, value):
-    """Accept --seeds 78 79, --seeds 78,79 or repeated flags."""
+    """Accept --seeds 78,79 or repeated flags (--seeds 78 --seeds 79)."""
     out = []
     for item in value or ():
         out += [int(v) for v in str(item).replace(",", " ").split()]

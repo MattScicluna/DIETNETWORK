@@ -63,6 +63,17 @@ dropout was fixed at 0.5; the published config uses 0.1).
   push with `--no-verify`.
 - `LICENSE` (BSD 3-Clause) and `NOTICE`, which keeps HussinLab's upstream code
   outside that licence; `py.typed`.
+- A documentation site (mkdocs-material, `docs/`, the `docs` extra), built
+  strictly on every pull request and deployed to GitHub Pages from `master`.
+  Its tutorial runs the whole pipeline on the `kgp_mini` fixture on every
+  build, and a test keeps `docs/cli.md` naming exactly the CLI's commands and
+  options.
+
+### Fixed
+
+- `build-embedding` with a `class_genotype_freq` block failed when
+  `--dataset` or `--partition` was a relative path: upstream's script runs from
+  its own directory and could not find them.
 
 ### Changed
 
