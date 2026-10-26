@@ -27,6 +27,7 @@ dropout was fixed at 0.5; the published config uses 0.1).
 - `reproduction/`: the published split (seed 124, verified against Zenodo), the
   published models' held-out accuracy (0.9214) pinned by a slow test, and the
   SLURM jobs that retrained all 15 (0.9282).
+- `dietnet train --model mlp`: upstream's MLP baseline (no auxiliary network).
 - `dietnet alphagenome`: AlphaGenome variant effects for every SNP through the
   hosted API, resumable, as a feature table for `build-embedding`
   (`pip install 'dietnetwork[alphagenome]'`).

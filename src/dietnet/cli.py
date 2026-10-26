@@ -207,7 +207,11 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus):
 @main.command()
 @_dataset
 @_partition
-@click.option("--embedding", required=True, type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--embedding",
+    type=click.Path(exists=True, path_type=Path),
+    help="Auxiliary-network input (required for the Diet Network; unused by the MLP).",
+)
 @click.option("--input-stats", required=True, type=click.Path(exists=True, path_type=Path))
 @click.option("--config", required=True, type=click.Path(exists=True, path_type=Path))
 @click.option(
@@ -219,6 +223,13 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus):
     "--task", type=click.Choice(["classification", "regression"]), default="classification"
 )
 @click.option("--normalize/--no-normalize", default=True, show_default=True)
+@click.option(
+    "--model",
+    type=click.Choice(["dietnet", "mlp"]),
+    default="dietnet",
+    show_default=True,
+    help="Upstream's Diet Network, or its MLP baseline (no auxiliary network).",
+)
 def train(
     dataset_path,
     partition_path,
@@ -230,6 +241,7 @@ def train(
     folds,
     task,
     normalize,
+    model,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -239,8 +251,9 @@ def train(
             dataset=dataset_path, partition=partition_path, embedding=embedding,
             input_stats=input_stats, config=config, exp_dir=exp_dir, seeds=seeds,
             folds=folds, task=task, normalize=normalize,
+            model={"dietnet": "Dietnet", "mlp": "Mlp"}[model],
         )  # fmt: skip
-    except training.InputError as error:
+    except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None
     for pkg in packages:
         click.echo(f"packaged {pkg.path}")

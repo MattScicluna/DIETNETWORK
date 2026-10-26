@@ -209,5 +209,4 @@ needs the small populations merged or dropped first.
    - **To do:** score the 229,986 1KGP SNPs (resumable, rate-limited by the
      service), then run the experiment grid on the published split:
      freq only · AlphaGenome only · freq + AlphaGenome · freq + random (same
-     width) · freq + shuffled AlphaGenome · MLP. Upstream's `MlpHandler` exists,
-     but `train.py --model Mlp` is not wired into `dietnet train` yet.
+     width) · freq + shuffled AlphaGenome · MLP (`dietnet train --model mlp`).

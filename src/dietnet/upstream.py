@@ -151,7 +151,11 @@ def modules() -> SimpleNamespace:
     return SimpleNamespace(**loaded)
 
 
-def exp_identifier(config: dict, fold: int, task: str) -> str:
+MODELS = {"Dietnet": "DietNetworkHandler", "Mlp": "MlpHandler"}
+
+
+def exp_identifier(config: dict, fold: int, task: str, model: str = "Dietnet") -> str:
     """The results-directory name upstream's train.py uses, from upstream's own method."""
     handler = SimpleNamespace(task_handler=SimpleNamespace(name=task))
-    return modules().model_handlers.DietNetworkHandler.get_exp_identifier(handler, config, fold)
+    cls = getattr(modules().model_handlers, MODELS[model])
+    return cls.get_exp_identifier(handler, config, fold)

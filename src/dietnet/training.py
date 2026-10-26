@@ -35,7 +35,8 @@ class InputError(ValueError):
 def check_inputs(embedding, input_stats, dataset, partition, folds=None) -> None:
     """Refuse per-fold inputs upstream's model cannot learn from, saying why.
 
-    ``input_stats`` may be None: generate-embedding checks before they exist.
+    ``input_stats`` may be None: generate-embedding checks before they exist;
+    ``embedding`` may be None: the MLP baseline has none.
 
     Upstream's generate_embedding.py divides each class's genotype counts by
     the number of its samples in the fold's training split, and sizes the
@@ -46,7 +47,7 @@ def check_inputs(embedding, input_stats, dataset, partition, folds=None) -> None
     last class, silently drops its columns. Either way the class cannot be
     learned. Caught here, before any training time is spent.
     """
-    emb = np.load(embedding, allow_pickle=True)["emb"]
+    emb = np.load(embedding, allow_pickle=True)["emb"] if embedding else None
     stats = np.load(input_stats, allow_pickle=True) if input_stats else None
     parts = np.load(partition, allow_pickle=True)["folds_indexes"]
     with h5py.File(dataset, "r") as f:
@@ -60,7 +61,7 @@ def check_inputs(embedding, input_stats, dataset, partition, folds=None) -> None
             absent = names[np.bincount(labels[train], minlength=len(names)) == 0]
             if len(absent):
                 problems.append(f"fold {fold}: no training samples for {', '.join(absent)}")
-        nan = [] if not np.isnan(fold_slice(emb, fold)).any() else ["embedding"]
+        nan = ["embedding"] if emb is not None and np.isnan(fold_slice(emb, fold)).any() else []
         for key in ("means_by_fold", "sd_by_fold"):
             if stats is not None and key in stats.files and np.isnan(stats[key][fold]).any():
                 nan.append(key)
@@ -106,17 +107,27 @@ def train(
     folds,
     task="classification",
     normalize=True,
+    model="Dietnet",
 ) -> list[package.Package]:
-    """Train every (seed, fold) with upstream's train.py; return their packages."""
+    """Train every (seed, fold) with upstream's train.py; return their packages.
+
+    ``model`` is upstream's: "Dietnet", or "Mlp", the baseline without an
+    auxiliary network, which takes no embedding.
+    """
+    if model not in upstream.MODELS:
+        raise ValueError(f"model must be one of {sorted(upstream.MODELS)}")
+    if (embedding is None) != (model == "Mlp"):
+        raise ValueError("an embedding is needed for the Diet Network, and unused by the MLP")
     dataset, partition = Path(dataset).resolve(), Path(partition).resolve()
-    embedding, input_stats = Path(embedding).resolve(), Path(input_stats).resolve()
+    embedding = Path(embedding).resolve() if embedding else None
+    input_stats = Path(input_stats).resolve()
     exp_dir = Path(exp_dir).resolve()
     base = yaml.safe_load(Path(config).read_text())
     check_inputs(embedding, input_stats, dataset, partition, folds)
 
-    emb_by_fold = np.load(embedding, allow_pickle=True)["emb"]
-    described = Path(f"{embedding}.json")
-    feature_meta = json.loads(described.read_text()) if described.exists() else None
+    emb_by_fold = np.load(embedding, allow_pickle=True)["emb"] if embedding else None
+    described = Path(f"{embedding}.json") if embedding else None
+    feature_meta = json.loads(described.read_text()) if described and described.exists() else None
     stats = np.load(input_stats, allow_pickle=True)
 
     packages = []
@@ -129,8 +140,9 @@ def train(
         for fold in folds:
             args = [
                 "--exp-path", exp_dir, "--exp-name", "runs", "--config", cfg_path,
-                "--model", "Dietnet", "--dataset", dataset, "--partition", partition,
-                "--embedding", embedding, "--input-features-stats", input_stats,
+                "--model", model, "--dataset", dataset, "--partition", partition,
+                # Required by train.py, read only for the Diet Network.
+                "--embedding", embedding or "none", "--input-features-stats", input_stats,
                 "--task", task, "--which-fold", fold,
             ]  # fmt: skip
             if normalize:
@@ -139,12 +151,14 @@ def train(
                 "train.py", args, log=exp_dir / "logs" / f"train_seed{seed}_fold{fold}.log"
             )
 
-            results = exp_dir / "runs" / f"RESULTS_{upstream.exp_identifier(cfg, fold, task)}"
+            results = (
+                exp_dir / "runs" / f"RESULTS_{upstream.exp_identifier(cfg, fold, task, model)}"
+            )
             pkg = package.build(
                 exp_dir / "packages" / f"seed_{seed}" / f"fold_{fold}",
                 checkpoint=results / "best_model.pt",
                 config=cfg,
-                embedding=fold_slice(emb_by_fold, fold),
+                embedding=None if emb_by_fold is None else fold_slice(emb_by_fold, fold),
                 means=stats["means_by_fold"][fold],
                 sds=stats["sd_by_fold"][fold] if "sd_by_fold" in stats.files else None,
                 train_dataset=dataset,
@@ -152,6 +166,7 @@ def train(
                 normalize=normalize,
                 seed=seed,
                 fold=fold,
+                model=model,
                 extra={"results_dir": str(results), "embedding": feature_meta},
             )
             _held_out_predictions(results, dataset, task).to_csv(

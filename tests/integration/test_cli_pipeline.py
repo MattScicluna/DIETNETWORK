@@ -221,3 +221,43 @@ def test_train_and_predict_with_a_built_embedding(tmp_path, synthetic):
     dietnet("predict", model=root / "exp" / "packages", plink=synthetic.plink_prefix,
             out=tmp_path / "p.tsv")  # fmt: skip
     dietnet("check", predictions=tmp_path / "p.tsv", labels=synthetic.labels, min_accuracy=0.9)
+
+
+def test_the_mlp_baseline_trains_and_predicts_without_an_embedding(tmp_path, synthetic):
+    """Upstream's MLP: the experiments' baseline without an auxiliary network."""
+    root = tmp_path / "mlp"
+    root.mkdir()
+    (root / "config.yaml").write_text(yaml.safe_dump(CONFIG))
+    dietnet(
+        "create-dataset", plink=synthetic.plink_prefix, labels=synthetic.labels, out=root / "d.h5"
+    )
+    common = dict(dataset=root / "d.h5", partition=root / "p.npz")
+    dietnet("partition", dataset=root / "d.h5", out=root / "p.npz")
+    dietnet("compute-input-stats", **common, out=root / "s.npz")
+    dietnet(
+        "train",
+        **common,
+        input_stats=root / "s.npz",
+        config=root / "config.yaml",
+        exp_dir=root / "exp",
+        seeds=SEED,
+        folds=0,
+        model="mlp",
+    )
+
+    (pkg,) = package.find(root / "exp" / "packages")
+    assert pkg.metadata["model"] == "Mlp" and not (pkg.path / "embedding.npz").exists()
+    dietnet("predict", model=root / "exp" / "packages", plink=synthetic.plink_prefix,
+            out=tmp_path / "p.tsv")  # fmt: skip
+    dietnet("check", predictions=tmp_path / "p.tsv", labels=synthetic.labels, min_accuracy=0.9)
+
+
+@pytest.mark.parametrize("model, embedding", [("Dietnet", None), ("Mlp", "e.npz")])
+def test_an_embedding_goes_with_the_diet_network_only(tmp_path, model, embedding):
+    from dietnet import training
+
+    with pytest.raises(ValueError, match="embedding"):
+        training.train(
+            dataset="d.h5", partition="p.npz", embedding=embedding, input_stats="s.npz",
+            config="c.yaml", exp_dir=tmp_path, seeds=[1], folds=[0], model=model,
+        )  # fmt: skip

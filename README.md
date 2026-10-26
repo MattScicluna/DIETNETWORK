@@ -78,6 +78,9 @@ dietnet train --dataset dataset.h5 --partition partition.npz --embedding embeddi
 dietnet check --packages exp/packages            # each model's held-out test accuracy
 ```
 
+`--model mlp` trains upstream's MLP baseline instead: no auxiliary network, no
+`--embedding`. It's the comparison point for any change to the SNP features.
+
 - `labels.tsv`: a header row, then `sample id<TAB>label`. Every sample in the
   .fam needs a label.
 - `config.yaml`: the published one is the default to start from:

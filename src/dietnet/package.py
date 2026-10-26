@@ -5,7 +5,8 @@ prediction never needs the training data or the experiment directory::
 
     model.pt                  upstream's best_model.pt, as train.py saved it
     config.yaml               the training config (seed included)
-    embedding.npz             ``emb``: this fold's SNP embedding (SNPs x features)
+    embedding.npz             ``emb``: this fold's SNP embedding (SNPs x features);
+                              absent for the MLP baseline, which has no auxiliary net
     input_features_stats.npz  ``means_by_fold`` / ``sd_by_fold`` for this fold only
     train_header.h5           ``snp_names``, ``class_label_names``, ``snps/``: the
                               parts of the training dataset upstream's classes read
@@ -50,7 +51,7 @@ def build(
     *,
     checkpoint,
     config: dict,
-    embedding: np.ndarray,
+    embedding: np.ndarray | None,
     means: np.ndarray,
     sds: np.ndarray | None,
     train_dataset,
@@ -58,9 +59,14 @@ def build(
     normalize: bool,
     seed: int,
     fold: int,
+    model: str = "Dietnet",
     extra: dict | None = None,
 ) -> "Package":
-    """Assemble a package from a finished upstream training run."""
+    """Assemble a package from a finished upstream training run.
+
+    ``embedding`` is the fold's auxiliary-network input; None for the MLP,
+    which has no auxiliary network.
+    """
     out = Path(out)
     if out.exists():
         shutil.rmtree(out)
@@ -68,7 +74,8 @@ def build(
 
     shutil.copy(checkpoint, out / "model.pt")
     (out / "config.yaml").write_text(yaml.safe_dump(config, sort_keys=False))
-    np.savez(out / "embedding.npz", emb=np.asarray(embedding))
+    if embedding is not None:
+        np.savez(out / "embedding.npz", emb=np.asarray(embedding))
     stats = {"means_by_fold": np.asarray(means)[None]}
     if sds is not None:
         stats["sd_by_fold"] = np.asarray(sds)[None]
@@ -80,11 +87,12 @@ def build(
         classes = (
             list(np.array(f["class_label_names"]).astype(str)) if task == "classification" else []
         )
-    if np.asarray(embedding).shape[0] != n_snps:
+    if embedding is not None and np.asarray(embedding).shape[0] != n_snps:
         raise ValueError(f"embedding has {np.asarray(embedding).shape[0]} rows for {n_snps} SNPs")
 
     metadata = {
         "format_version": FORMAT_VERSION,
+        "model": model,
         "task": task,
         "classes": classes,
         "preprocessing": {"normalize": bool(normalize), "missing_snps": "scale D/(D-|C|)"},
@@ -122,6 +130,10 @@ class Package:
         return self.metadata["task"]
 
     @property
+    def model(self) -> str:
+        return self.metadata.get("model", "Dietnet")
+
+    @property
     def normalize(self) -> bool:
         return self.metadata["preprocessing"]["normalize"]
 
@@ -153,9 +165,12 @@ class Package:
             task = m.task_handlers.ClassificationHandler(header, nn.CrossEntropyLoss())
         else:
             task = m.task_handlers.RegressionHandler(header, nn.MSELoss())
-        handler = m.model_handlers.DietNetworkHandler(
-            task, 0, str(self.path / "embedding.npz"), device, header, self.config, None
-        )
+        if self.model == "Mlp":
+            handler = m.model_handlers.MlpHandler(task, header, self.config)
+        else:
+            handler = m.model_handlers.DietNetworkHandler(
+                task, 0, str(self.path / "embedding.npz"), device, header, self.config, None
+            )
         checkpoint = torch.load(self.path / "model.pt", map_location=device, weights_only=False)
         handler.model.load_state_dict(checkpoint["model_state_dict"], strict=True)
         handler.model.to(device)
