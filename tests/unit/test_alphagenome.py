@@ -123,19 +123,20 @@ def test_the_api_backend_needs_a_key(monkeypatch):
 def test_the_api_backend_maps_scores_back_to_snps(monkeypatch):
     """AlphaGenomeAPI.score with the client's network calls replaced.
 
-    Real Variant objects, a fake score_variants and tidy_scores: checks the
+    Real Variant objects, a fake score_variant and tidy_scores: checks the
     glue -- requests in 1-based chr coordinates at the chosen length, and each
     tidy row mapped back to the SNP it scores.
     """
     pytest.importorskip("alphagenome")
     from alphagenome.models import dna_client, variant_scorers
 
-    seen = {}
+    seen = {"intervals": [], "variants": []}
 
     class Client:
-        def score_variants(self, intervals, variants, scorers, **kwargs):
-            seen.update(intervals=intervals, variants=variants, scorers=scorers, **kwargs)
-            return [[v] for v in variants]
+        def score_variant(self, interval, variant, variant_scorers):
+            seen["intervals"].append(interval)
+            seen["variants"].append(variant)
+            return [variant]
 
     def tidy(results):
         return pd.DataFrame(
@@ -152,7 +153,46 @@ def test_the_api_backend_maps_scores_back_to_snps(monkeypatch):
     )
     scored = api.score(variants)
 
-    assert [str(v) for v in seen["variants"]] == ["chr1:858952:G>A", "chr2:1000:A>T"]
+    assert {str(v) for v in seen["variants"]} == {"chr1:858952:G>A", "chr2:1000:A>T"}
     assert all(i.width == 2**14 for i in seen["intervals"])
     assert list(scored["pos"]) == [858952, 1000] and list(scored["alt"]) == ["A", "T"]
     np.testing.assert_allclose(scored["raw_score"], [0.858952, 0.001])
+
+
+class _GrpcError(Exception):
+    """Stands in for a gRPC error: ``code()`` returns a status with a ``name``."""
+
+    def __init__(self, status):
+        super().__init__(status)
+        self._status = status
+
+    def code(self):
+        return type("Status", (), {"name": self._status})()
+
+
+def test_transient_api_errors_are_retried_and_others_raised(monkeypatch):
+    monkeypatch.setattr(alphagenome, "RETRY_WAIT", 0)
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise _GrpcError("INTERNAL")
+        return "scored"
+
+    assert alphagenome._retrying(flaky) == "scored" and len(calls) == 3
+
+    def refused():
+        calls.append(1)
+        raise _GrpcError("PERMISSION_DENIED")
+
+    calls.clear()
+    with pytest.raises(_GrpcError):
+        alphagenome._retrying(refused)
+    assert len(calls) == 1
+
+    def always_down():
+        raise _GrpcError("UNAVAILABLE")
+
+    with pytest.raises(_GrpcError):
+        alphagenome._retrying(always_down)

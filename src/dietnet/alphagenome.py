@@ -27,6 +27,8 @@ reference. Coordinates must be GRCh38, which is what AlphaGenome uses.
 from __future__ import annotations
 
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Protocol
 
@@ -38,6 +40,24 @@ API_KEY_ENV = "ALPHAGENOME_API_KEY"
 KEYS = ["chrom", "pos", "ref", "alt"]
 DEFAULT_SCORERS = ("ATAC", "DNASE", "CHIP_TF", "CHIP_HISTONE", "CAGE", "RNA_SEQ")
 SEQUENCE_LENGTHS = ("16KB", "100KB", "500KB", "1MB")
+# gRPC statuses the service returns for a call that succeeds when repeated: about 2% of
+# calls fail with INTERNAL, at random (2026-10-26).
+TRANSIENT = ("INTERNAL", "UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED")
+RETRIES = 6
+RETRY_WAIT = 2.0  # seconds, doubled after each failed attempt
+
+
+def _retrying(call):
+    """``call()``, repeated after a transient gRPC error; other errors raise at once."""
+    for attempt in range(RETRIES + 1):
+        try:
+            return call()
+        except Exception as error:
+            code = getattr(error, "code", None)
+            status = getattr(code(), "name", None) if callable(code) else None
+            if status not in TRANSIENT or attempt == RETRIES:
+                raise
+            time.sleep(RETRY_WAIT * 2**attempt)
 
 
 def variants_of(dataset) -> pd.DataFrame:
@@ -102,10 +122,21 @@ class AlphaGenomeAPI:
             )
             for row in variants.itertuples()
         ]  # fmt: skip
-        intervals = [v.reference_interval.resize(self._length) for v in objects]
-        results = self._client.score_variants(
-            intervals, objects, self._scorers, progress_bar=False, max_workers=self._max_workers
-        )
+
+        # One request per variant, not the client's score_variants: that fails the whole
+        # batch when any one request does, and with ~2% of requests failing transiently a
+        # chunk of 200 almost never succeeds.
+        def one(variant):
+            return _retrying(
+                lambda: self._client.score_variant(
+                    interval=variant.reference_interval.resize(self._length),
+                    variant=variant,
+                    variant_scorers=self._scorers,
+                )
+            )
+
+        with ThreadPoolExecutor(self._max_workers) as pool:
+            results = list(pool.map(one, objects))
         tidy = self._scorers_lib.tidy_scores(results)
         keys = {str(v): row for v, row in zip(objects, variants.itertuples())}
         rows = tidy["variant_id"].astype(str).map(keys)
