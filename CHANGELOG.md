@@ -46,7 +46,23 @@ dropout was fixed at 0.5; the published config uses 0.1).
   `test_independent_dataset.py`, and the published models vs
   `Dietnet_inference/inference.py`.
 - Tooling as in manifold_genetics: uv lock, black/isort/flake8, pre-commit with
-  a sensitive-files guard and gitleaks, CI on Python 3.10–3.12 and macOS.
+  a sensitive-files guard and gitleaks, CI on Python 3.10–3.13 and macOS.
+- Released as `dietnetwork` on PyPI: `release.yml` publishes on a version tag
+  through trusted publishing, after checking the tag, a dated CHANGELOG entry,
+  the artefacts' contents and a clean-room install (`dietnet info` must find
+  the bundled upstream code byte for byte the pinned commit).
+- Tests of what would be published: package metadata
+  (`tests/unit/test_package_metadata.py`) and the sdist and wheel themselves
+  (`tests/integration/test_sdist_contents.py`: no untracked file, nothing the
+  sensitive-files check would flag, upstream code identical), run in a CI
+  `package` job.
+- A Claude Code data-egress hook (`.claude/hooks/egress_guard.py`, run by the
+  project's `.claude/settings.json`): agents are asked for approval before any
+  copy from a remote host, any dump of a genotype or data file over ssh, or any
+  upload of one to a host that is not an Alliance cluster, and cannot commit or
+  push with `--no-verify`.
+- `LICENSE` (BSD 3-Clause) and `NOTICE`, which keeps HussinLab's upstream code
+  outside that licence; `py.typed`.
 
 ### Changed
 

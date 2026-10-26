@@ -12,10 +12,16 @@
 tests/unit/test_sensitive_file_check.py:private-marker
 tests/unit/test_sensitive_file_check.py:cluster-path
 
+# The shared Claude Code project settings and the data-egress hook they run
+# (tests/unit/test_egress_guard.py). No local state: paths come from
+# $CLAUDE_PROJECT_DIR. settings.local.json stays ignored. Reviewed 2026-10-26.
+.claude/settings.json:local-state
+.claude/hooks/egress_guard.py:local-state
+
 # Test fixtures, built by tests/fixtures/build_fixtures.py. kgp_mini is 480
-# samples x 2,000 SNPs of the public 1000 Genomes test set this repository
-# already distributes by download link (Dietnet/pretrained_models.py); synthetic
-# is simulated. Neither carries cohort data. Reviewed 2026-10-25.
+# samples x 2,000 SNPs of the public 1000 Genomes data that the published
+# Zenodo release distributes (`dietnet published`); synthetic is simulated.
+# Neither carries cohort data. Reviewed 2026-10-25, comment updated 2026-10-26.
 tests/fixtures/kgp_mini.bed:genotype-data
 tests/fixtures/kgp_mini.bim:genotype-data
 tests/fixtures/kgp_mini.fam:genotype-data

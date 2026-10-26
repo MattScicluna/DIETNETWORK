@@ -1,0 +1,15 @@
+DietNetwork
+
+The BSD 3-Clause License in LICENSE covers this repository's own code: the
+`dietnet` package in src/dietnet/, its tests, scripts and documentation.
+
+Dietnet_train_and_evaluate/ (shipped inside the wheel as
+dietnet/_upstream/Dietnet_train_and_evaluate) is HussinLab's code, unmodified,
+from https://github.com/HussinLab/DIETNETWORK, the implementation behind
+
+    Rochefort-Boulanger, Scicluna et al. (2026), American Journal of Human
+    Genetics.
+
+It is redistributed here so that an installed `dietnet` runs exactly the
+published training and model code. Its copyright remains with its authors, and
+the licence above does not cover it.

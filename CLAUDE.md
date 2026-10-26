@@ -59,5 +59,9 @@ DIETNET_UPSTREAM_DIR=/path/to/full/upstream/checkout uv run pytest   # parity te
   (except the fixtures in `.sensitive-allow`), and never absolute cluster paths.
 - On the cluster, heavy work goes to SLURM jobs on compute nodes, never the
   login node. Cohort data and outputs derived from it stay on the cluster.
+  `.claude/hooks/egress_guard.py` (wired in `.claude/settings.json`) asks the
+  person before any copy off a remote host or upload of a data file elsewhere,
+  and refuses `--no-verify`. Don't route around it; if it asks, say why the
+  copy is needed.
 - Work on a branch, with a PR into `master`. No PRs to HussinLab/DIETNETWORK
   for now.
