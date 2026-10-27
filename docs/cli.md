@@ -86,7 +86,8 @@ and alleles to Google's API; see [SNP features](features.md#alphagenome-variant-
 
 | option | | default |
 |---|---|---|
-| `--dataset PATH` | *existing* dataset; SNP ids must be `chr:pos:REF:ALT` on GRCh38 | required |
+| `--dataset PATH` | *existing* dataset; SNP ids must be `chr:pos:REF:ALT` on GRCh38 | one of these two |
+| `--bim PATH` | a PLINK `.bim` instead: only its SNP ids are read (same `chr:pos:REF:ALT` form), so no genotypes are needed | one of these two |
 | `--out PATH` | feature table (`.tsv`) | required |
 | `--scorers TEXT` | AlphaGenome recommended scorers, comma-separated | `ATAC,DNASE,CHIP_TF,CHIP_HISTONE,CAGE,RNA_SEQ` |
 | `--sequence-length` | context around each variant: `16KB`, `100KB`, `500KB` or `1MB` | `1MB` |

@@ -100,7 +100,15 @@ dataset into a table for the `precomputed` provider.
 uv sync --frozen --extra alphagenome      # or: pip install -e '.[alphagenome]'
 export ALPHAGENOME_API_KEY=...            # never in a file or config
 dietnet alphagenome --dataset dataset.h5 --out alphagenome.tsv
+dietnet alphagenome --bim cohort.bim --out alphagenome.tsv   # SNP list only, no genotypes
 ```
+
+`--bim` reads only the SNP ids, so a cohort's variant list can be scored on a
+machine that can reach the API while its genotypes stay where they are. The ids
+must really be `chr:pos:REF:ALT` with REF the GRCh38 reference base: some
+pipelines write `chr:pos:A1:A2` or put REF in A2 after `bcftools +fixref`, and
+scoring those as written asks about the reverse mutation. Check a sample of
+positions against the reference before a long run.
 
 The key is read only from `ALPHAGENOME_API_KEY`. Each output row is a SNP
 (`chrom`, `pos`, `ref`, `alt`) and one column per track,
