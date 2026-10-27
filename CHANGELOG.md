@@ -61,6 +61,10 @@ dropout was fixed at 0.5; the published config uses 0.1).
   with `--labels`.
 - Commands use `--plink` and `--out`. The old CLI's `--exp-path`-relative file
   names are gone.
+- `dietnet alphagenome` sends one request per SNP and retries transient API
+  errors with backoff. About 2% of requests fail at random with gRPC
+  `INTERNAL`, and the client's batch call failed a whole 200-SNP chunk on any
+  one of them, so a run never got past its first chunk.
 
 ### Removed
 

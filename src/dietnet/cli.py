@@ -152,7 +152,12 @@ def build_embedding(dataset_path, partition_path, spec, out):
 
 
 @main.command("alphagenome")
-@_dataset
+@click.option("--dataset", "dataset_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--bim",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Score a PLINK .bim's SNPs instead of a dataset's (needs only the SNP ids).",
+)
 @click.option("--out", required=True, type=click.Path(path_type=Path), help="Feature table (.tsv).")
 @click.option(
     "--scorers",
@@ -168,7 +173,7 @@ def build_embedding(dataset_path, partition_path, spec, out):
 )
 @click.option("--chunk", default=200, show_default=True, help="SNPs per saved part.")
 @click.option("--max-workers", default=5, show_default=True, help="Parallel API requests.")
-def alphagenome_scores(dataset_path, out, scorers, sequence_length, chunk, max_workers):
+def alphagenome_scores(dataset_path, bim, out, scorers, sequence_length, chunk, max_workers):
     """AlphaGenome variant effects for every SNP (hosted API; key in ALPHAGENOME_API_KEY).
 
     Writes a table for build-embedding's precomputed provider (orient: effect).
@@ -176,6 +181,8 @@ def alphagenome_scores(dataset_path, out, scorers, sequence_length, chunk, max_w
     """
     from dietnet import alphagenome
 
+    if (dataset_path is None) == (bim is None):
+        raise click.UsageError("give exactly one of --dataset or --bim")
     try:
         backend = alphagenome.AlphaGenomeAPI(
             scorers=[s.strip() for s in scorers.split(",") if s.strip()],
@@ -183,7 +190,7 @@ def alphagenome_scores(dataset_path, out, scorers, sequence_length, chunk, max_w
             max_workers=max_workers,
         )
         alphagenome.score(
-            dataset_path,
+            dataset_path or bim,
             out,
             backend,
             chunk=chunk,
