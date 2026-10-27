@@ -138,6 +138,7 @@ Train each (seed, fold) with upstream `train.py`; package the results under
 | `--loader` | `fast` reads each batch in one call with loader workers and fills missing values in one operation; `upstream` leaves train.py's loader alone. Same model | fast |
 | `--workers INTEGER` | loader processes for `--loader fast` | the CPUs available, less one, at most 8 |
 | `--gpus INTEGER` | above 1, train each model data-parallel over this many GPUs on one node (CPU processes where there are none): upstream's model and epoch logic, the config's `batch_size` split across them; not bit-identical to train.py, see Scaling | 1 |
+| `--engine` | `upstream`: train.py itself, unmodified (bit-identical model); `dietnet`: upstream's model and epoch logic in dietnet's own loop, packed genotypes decoded on the GPU, without train.py's per-batch bookkeeping (much faster; not bit-identical) | `upstream` on one GPU, `dietnet` for `--gpus` > 1 |
 
 ## `dietnet match`
 

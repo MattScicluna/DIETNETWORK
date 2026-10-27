@@ -44,6 +44,8 @@ from torch.utils.data import BatchSampler, DataLoader, DistributedSampler, Seque
 from dietnet import genotypes, upstream
 from dietnet._launch import _fill_missing
 
+EVAL_BATCH = 2048
+
 
 class Split(torch.utils.data.Dataset):
     """Samples ``rows`` (dataset row numbers) of a genotype store, read a batch at a
@@ -169,9 +171,14 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
     sampler = DistributedSampler(train, num_replicas=world, rank=rank, shuffle=True, seed=seed)
     train_loader = _loader(train, BatchSampler(sampler, per_rank, drop_last=False), args.workers)
 
+    # Evaluation has no dropout, so its batch size changes no prediction, only how
+    # many batches upstream's eval_step does its per-batch bookkeeping for.
+    eval_batch = max(batch_size, EVAL_BATCH)
+
     def eval_loader(rows):
         split = Split(store, labels, rows)
-        return split, _loader(split, BatchSampler(SequentialSampler(split), batch_size, False), 0)
+        sampler = BatchSampler(SequentialSampler(split), eval_batch, False)
+        return split, _loader(split, sampler, args.workers)
 
     valid_set, valid_loader = eval_loader(valid_rows)
     results = Path(args.exp_path) / args.exp_name

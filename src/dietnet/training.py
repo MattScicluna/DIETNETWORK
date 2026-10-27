@@ -186,12 +186,15 @@ def train(
     loader="fast",
     workers: int | None = None,
     gpus: int = 1,
+    engine: str | None = None,
 ) -> list[package.Package]:
-    """Train every (seed, fold) with upstream's train.py; return their packages.
+    """Train every (seed, fold); return their packages.
 
     ``model`` is upstream's: "Dietnet", or "Mlp", the baseline without an
-    auxiliary network, which takes no embedding. How train.py is fed, which
-    leaves the trained model bit-identical:
+    auxiliary network, which takes no embedding.
+
+    ``engine`` "upstream" (the default on one GPU) runs upstream's train.py,
+    unmodified, fed so that the trained model is bit-identical to train.py's:
 
     - ``inputs``: the genotype store it reads (:mod:`dietnet.genotypes`): "ram"
       (upstream's copy of the whole dataset), "memmap", "packed", or "auto".
@@ -199,16 +202,23 @@ def train(
       processes (default :func:`default_workers`) and fills missing values in
       one operation; "upstream" leaves train.py's own loader alone.
 
-    With ``gpus`` > 1, each model trains data-parallel instead
-    (:mod:`dietnet.parallel`): upstream's model and epoch logic, the config's
-    batch split across GPUs. Its weights differ from train.py's.
+    ``engine`` "dietnet" (the default, and the only choice, for ``gpus`` > 1)
+    trains with :mod:`dietnet.parallel`: upstream's model and epoch logic in a
+    loop of its own, data-parallel over ``gpus``, packed genotypes decoded on the
+    GPU, without train.py's per-batch bookkeeping; on Mila's A100 its training
+    pass ran ~20x upstream's (docs/scaling.md). Its weights differ from train.py's.
     """
+    engine = engine or ("dietnet" if gpus > 1 else "upstream")
+    if engine not in ("upstream", "dietnet"):
+        raise ValueError(f"engine must be 'upstream' or 'dietnet', not {engine!r}")
     if loader not in ("fast", "upstream"):
         raise ValueError(f"loader must be 'fast' or 'upstream', not {loader!r}")
     if gpus < 1:
         raise ValueError("gpus must be at least 1")
-    if gpus > 1 and loader == "upstream":
-        raise ValueError("--loader upstream is train.py's own loop, on one GPU")
+    if gpus > 1 and engine == "upstream":
+        raise ValueError("engine 'upstream' is train.py's own loop, on one GPU")
+    if engine == "dietnet" and loader == "upstream":
+        raise ValueError("--loader upstream applies to engine 'upstream' only")
     if model not in upstream.MODELS:
         raise ValueError(f"model must be one of {sorted(upstream.MODELS)}")
     if (embedding is None) != (model == "Mlp"):
@@ -250,7 +260,7 @@ def train(
             if normalize:
                 args.append("--normalize")
             log = exp_dir / "logs" / f"train_seed{seed}_fold{fold}.log"
-            if gpus > 1:
+            if engine == "dietnet":
                 args += ["--inputs", env[_launch.INPUTS_ENV], "--workers", workers]
                 _run_parallel(args, gpus, log)
             else:

@@ -283,6 +283,14 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus):
     "CPU processes where there are no GPUs): upstream's model and epoch logic, the config's "
     "batch_size split across them. Not bit-identical to train.py.",
 )
+@click.option(
+    "--engine",
+    type=click.Choice(["upstream", "dietnet"]),
+    help="'upstream': train.py itself, unmodified (bit-identical model). 'dietnet': upstream's "
+    "model and epoch logic in dietnet's own loop, packed genotypes decoded on the GPU, without "
+    "train.py's per-batch bookkeeping (~20x faster training pass; not bit-identical). Default: "
+    "'upstream' on one GPU, 'dietnet' for --gpus > 1.",
+)
 def train(
     dataset_path,
     partition_path,
@@ -299,6 +307,7 @@ def train(
     loader,
     workers,
     gpus,
+    engine,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -309,7 +318,7 @@ def train(
             input_stats=input_stats, config=config, exp_dir=exp_dir, seeds=seeds,
             folds=folds, task=task, normalize=normalize,
             model={"dietnet": "Dietnet", "mlp": "Mlp"}[model],
-            inputs=inputs, loader=loader, workers=workers, gpus=gpus,
+            inputs=inputs, loader=loader, workers=workers, gpus=gpus, engine=engine,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None
