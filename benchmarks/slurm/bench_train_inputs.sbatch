@@ -51,5 +51,5 @@ EOF
     --input-stats "$BENCH_DIR/stats.npz" --config "$RUN/config.yaml" --exp-dir "$RUN/exp" \
     --seeds 78 --folds 0 --inputs "$INPUTS" 2> "$RUN/time.txt" || true
 grep -E "Elapsed \(wall|Maximum resident" "$RUN/time.txt"
-grep -h -E "^dietnet:|Epoch [0-9]+ of|Epoch execution time|Traceback|Error" \
+grep -h -E "^dietnet:|Loaded data in|Epoch [0-9]+ of|Train step time|Epoch execution time|Traceback|Error" \
     "$RUN"/exp/logs/train_*.log | tail -20
