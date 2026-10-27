@@ -135,6 +135,8 @@ Train each (seed, fold) with upstream `train.py`; package the results under
 | `--normalize / --no-normalize` | standardise inputs with the fold's means and SDs | normalize |
 | `--model` | `dietnet`, upstream's Diet Network, or `mlp`, its MLP baseline (no auxiliary network) | dietnet |
 | `--inputs` | where training reads genotypes: `ram` copies them all into memory first (upstream), `memmap` reads each batch from the dataset file, `packed` from its 2-bit copy (`pack-genotypes`); same model in every case. `auto` uses the packed copy if there is one, else memory-maps above 2 GiB | auto |
+| `--loader` | `fast` reads each batch in one call with loader workers and fills missing values in one operation; `upstream` leaves train.py's loader alone. Same model | fast |
+| `--workers INTEGER` | loader processes for `--loader fast` | the CPUs available, less one, at most 8 |
 
 ## `dietnet match`
 

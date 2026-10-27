@@ -261,6 +261,19 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus):
     "copy (pack-genotypes). Same model; 'auto' uses the packed copy if there is one, else "
     "memory-maps above 2 GiB.",
 )
+@click.option(
+    "--loader",
+    type=click.Choice(["fast", "upstream"]),
+    default="fast",
+    show_default=True,
+    help="'fast' reads each batch in one call with loader workers and fills missing values "
+    "in one operation; 'upstream' leaves train.py's loader alone. Same model.",
+)
+@click.option(
+    "--workers",
+    type=click.IntRange(min=0),
+    help="Loader processes for --loader fast. Default: the CPUs available, less one, at most 8.",
+)
 def train(
     dataset_path,
     partition_path,
@@ -274,6 +287,8 @@ def train(
     normalize,
     model,
     inputs,
+    loader,
+    workers,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -284,7 +299,7 @@ def train(
             input_stats=input_stats, config=config, exp_dir=exp_dir, seeds=seeds,
             folds=folds, task=task, normalize=normalize,
             model={"dietnet": "Dietnet", "mlp": "Mlp"}[model],
-            inputs=inputs,
+            inputs=inputs, loader=loader, workers=workers,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

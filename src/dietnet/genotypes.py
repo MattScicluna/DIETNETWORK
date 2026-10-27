@@ -126,10 +126,20 @@ class PackedStore:
             raise ValueError(
                 f"{dataset} has no up-to-date packed copy; run `dietnet pack-genotypes`"
             )
-        self.packed = np.load(packed_path(dataset), mmap_mode="r")
+        self.dataset = Path(dataset)
         self.n_snps = json.loads(_meta_path(dataset).read_text())["n_snps"]
+        self._packed = None
         self.shape = (len(self.packed), self.n_snps)
         self.dtype = np.dtype(np.int8)
+
+    @property
+    def packed(self) -> np.ndarray:
+        if self._packed is None:  # opened where it is used: a loader worker maps its own
+            self._packed = np.load(packed_path(self.dataset), mmap_mode="r")
+        return self._packed
+
+    def __getstate__(self):
+        return {**self.__dict__, "_packed": None}
 
     def __len__(self) -> int:
         return self.shape[0]
@@ -141,6 +151,48 @@ class PackedStore:
         if np.ndim(rows) == 0:
             return decode(self.packed[int(rows)], self.n_snps)[0]
         return decode(self.packed_rows(rows), self.n_snps)
+
+
+class MemmapStore:
+    """int8 rows read through a memory map of the dataset's ``inputs``.
+
+    Indexes like the array it wraps; unlike an ``np.memmap``, it pickles as its
+    path, so a loader worker maps the file itself instead of being sent a copy.
+    """
+
+    def __init__(self, dataset):
+        self.dataset = Path(dataset)
+        self._x = None
+        self.shape, self.dtype = self.x.shape, self.x.dtype
+
+    @property
+    def x(self) -> np.ndarray:
+        if self._x is None:
+            self._x = memmap_inputs(self.dataset)
+        return self._x
+
+    def __getstate__(self):
+        return {**self.__dict__, "_x": None}
+
+    def __len__(self) -> int:
+        return self.shape[0]
+
+    def __getitem__(self, rows) -> np.ndarray:
+        return self.x[rows]
+
+
+def read_rows(store, indices) -> np.ndarray:
+    """``store``'s rows ``indices``, in that order, read in one pass in file order.
+
+    Batches come from a shuffled sampler; reading them sorted turns random reads
+    into forward ones, and the rows are then put back in the sampler's order.
+    """
+    indices = np.asarray(indices)
+    order = np.argsort(indices, kind="stable")
+    rows = np.asarray(store[indices[order]])
+    out = np.empty_like(rows)
+    out[order] = rows
+    return out
 
 
 def choose(dataset, mode: str = "auto") -> str:
@@ -175,7 +227,7 @@ def open_store(dataset: str | Path, mode: str):
     if mode == "packed":
         return PackedStore(dataset)
     if mode == "memmap":
-        return memmap_inputs(dataset)
+        return MemmapStore(dataset)
     if mode == "ram":
         with h5py.File(dataset, "r") as f:
             return np.array(f["inputs"], dtype=np.int8)

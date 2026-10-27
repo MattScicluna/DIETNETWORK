@@ -10,6 +10,7 @@ model package with the fold's held-out predictions next to it.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import h5py
@@ -18,6 +19,17 @@ import pandas as pd
 import yaml
 
 from dietnet import _launch, genotypes, package, upstream
+
+
+def default_workers() -> int:
+    """Loader processes: the CPUs this process may use (a SLURM allocation's, not
+    the node's), less one for training itself, at most 8. Past ~8 the disk, not
+    the CPUs, sets the pace (docs/scaling.md)."""
+    try:
+        cpus = len(os.sched_getaffinity(0))
+    except AttributeError:  # macOS
+        cpus = os.cpu_count() or 1
+    return max(0, min(8, cpus - 1))
 
 
 def fold_slice(array: np.ndarray, fold: int) -> np.ndarray:
@@ -109,15 +121,23 @@ def train(
     normalize=True,
     model="Dietnet",
     inputs="auto",
+    loader="fast",
+    workers: int | None = None,
 ) -> list[package.Package]:
     """Train every (seed, fold) with upstream's train.py; return their packages.
 
     ``model`` is upstream's: "Dietnet", or "Mlp", the baseline without an
-    auxiliary network, which takes no embedding. ``inputs``: the genotype store
-    train.py reads (:mod:`dietnet.genotypes`): "ram" (upstream's copy of the
-    whole dataset), "memmap" (a batch at a time from the file), or "auto". The
-    model is the same either way.
+    auxiliary network, which takes no embedding. How train.py is fed, which
+    leaves the trained model bit-identical:
+
+    - ``inputs``: the genotype store it reads (:mod:`dietnet.genotypes`): "ram"
+      (upstream's copy of the whole dataset), "memmap", "packed", or "auto".
+    - ``loader``: "fast" reads each batch in one call with ``workers`` loader
+      processes (default :func:`default_workers`) and fills missing values in
+      one operation; "upstream" leaves train.py's own loader alone.
     """
+    if loader not in ("fast", "upstream"):
+        raise ValueError(f"loader must be 'fast' or 'upstream', not {loader!r}")
     if model not in upstream.MODELS:
         raise ValueError(f"model must be one of {sorted(upstream.MODELS)}")
     if (embedding is None) != (model == "Mlp"):
@@ -132,6 +152,9 @@ def train(
         env = {_launch.INPUTS_ENV: genotypes.choose(dataset, inputs)}
     except ValueError as error:
         raise InputError(str(error)) from None
+    if loader == "fast":
+        workers = default_workers() if workers is None else workers
+        env.update({_launch.LOADER_ENV: "fast", _launch.WORKERS_ENV: str(workers)})
 
     emb_by_fold = np.load(embedding, allow_pickle=True)["emb"] if embedding else None
     described = Path(f"{embedding}.json") if embedding else None
