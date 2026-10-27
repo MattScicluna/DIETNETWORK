@@ -167,7 +167,7 @@ def main() -> None:
     kinds = ["per-sample", "batched"]
     if genotypes.is_packed(dataset):
         kinds += ["packed-cpu", "packed-gpu"]
-    decode = torch.from_numpy(genotypes._DECODE).to(device)
+    decode = torch.from_numpy(genotypes.DECODE_TABLE).to(device)
     n_snps = mus.numel()
 
     print("table\tbatch_size\tloader\tworkers\tmissing\tsamples_per_s")

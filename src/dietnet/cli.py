@@ -274,6 +274,15 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus):
     type=click.IntRange(min=0),
     help="Loader processes for --loader fast. Default: the CPUs available, less one, at most 8.",
 )
+@click.option(
+    "--gpus",
+    type=click.IntRange(min=1),
+    default=1,
+    show_default=True,
+    help="Above 1, train each model data-parallel over this many GPUs (one process each; "
+    "CPU processes where there are no GPUs): upstream's model and epoch logic, the config's "
+    "batch_size split across them. Not bit-identical to train.py.",
+)
 def train(
     dataset_path,
     partition_path,
@@ -289,6 +298,7 @@ def train(
     inputs,
     loader,
     workers,
+    gpus,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -299,7 +309,7 @@ def train(
             input_stats=input_stats, config=config, exp_dir=exp_dir, seeds=seeds,
             folds=folds, task=task, normalize=normalize,
             model={"dietnet": "Dietnet", "mlp": "Mlp"}[model],
-            inputs=inputs, loader=loader, workers=workers,
+            inputs=inputs, loader=loader, workers=workers, gpus=gpus,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

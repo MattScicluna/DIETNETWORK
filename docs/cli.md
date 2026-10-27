@@ -137,6 +137,7 @@ Train each (seed, fold) with upstream `train.py`; package the results under
 | `--inputs` | where training reads genotypes: `ram` copies them all into memory first (upstream), `memmap` reads each batch from the dataset file, `packed` from its 2-bit copy (`pack-genotypes`); same model in every case. `auto` uses the packed copy if there is one, else memory-maps above 2 GiB | auto |
 | `--loader` | `fast` reads each batch in one call with loader workers and fills missing values in one operation; `upstream` leaves train.py's loader alone. Same model | fast |
 | `--workers INTEGER` | loader processes for `--loader fast` | the CPUs available, less one, at most 8 |
+| `--gpus INTEGER` | above 1, train each model data-parallel over this many GPUs on one node (CPU processes where there are none): upstream's model and epoch logic, the config's `batch_size` split across them; not bit-identical to train.py, see Scaling | 1 |
 
 ## `dietnet match`
 

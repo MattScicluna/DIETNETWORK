@@ -28,6 +28,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `DataLoader` workers and pinned memory; sampler, shuffling and random-number
   use are untouched, so the model is bit-identical to train.py left alone
   (`--loader upstream`), from every genotype store and with workers.
+- `dietnet train --gpus N`: data-parallel training on one node
+  (`dietnet.parallel`, DDP). Upstream's model, task handlers, epoch logic
+  (baseline, annealing, best-model rule, patience) and result files, so packages
+  come out as from train.py; each GPU reads its share of every epoch's samples
+  a batch at a time, packed genotypes are decoded on the GPU, and the config's
+  `batch_size` is the global batch. Not bit-identical to train.py; judged on
+  held-out accuracy.
 - `benchmarks/`: training time by genotype store, and training throughput by
   loader, workers, missing-value fill and batch size, on real or simulated
   genotypes at any shape.
