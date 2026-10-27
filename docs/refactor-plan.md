@@ -6,22 +6,22 @@ Living document: each pull request that moves the plan updates it.
 
 | Phase | State |
 |---|---|
-| Rebuild on upstream `main`, CLI on top | ✅ PR #8 (CI green); waiting to be merged |
+| Rebuild on upstream `main`, CLI on top | ✅ PR #8, merged |
 | 1. Reproduce published models, retrain | ✅ split recovered (seed 124); published 0.9214, retrained 0.9282 |
 | 2. Scale (UK Biobank, 486,748 samples) | ✅ match 4.5 min (CPU), 15 models 13 min (one A100) |
 | 3. Port remaining old-CLI features | dropped unless needed (`analyze-population`, `preprocess-plink`) |
 | 4. Pluggable SNP features (`build-embedding`) | ✅ |
 | 5. AlphaGenome (`dietnet alphagenome`) | code ✅, not run: no API key yet |
+| MLP baseline (published split) | ✅ 0.9117 vs Diet Network 0.9282 retrained (−1.65 points paired, 1 of 15 higher) |
 
 Next, in order:
-1. Merge PR #8 into `master`.
-2. When an AlphaGenome key exists: score the 229,986 1KGP SNPs
+1. When an AlphaGenome key exists: score the 229,986 1KGP SNPs
    (`dietnet alphagenome`, resumable).
-3. Run the experiment grid on the published split, 15 models per
+2. Run the experiment grid on the published split, 15 models per
    configuration, A100s, about 6 GPU-hours each: freq · AlphaGenome · freq +
-   AlphaGenome · freq + random · freq + shuffled AlphaGenome · MLP. The MLP
-   baseline needs nothing else and can run first.
-4. Optional, needs data decisions: UK Biobank genotypes at the published SNPs,
+   AlphaGenome · freq + random · freq + shuffled AlphaGenome. The MLP
+   baseline is done (`reproduction/README.md`); freq is the retrain.
+3. Optional, needs data decisions: UK Biobank genotypes at the published SNPs,
    to apply the published models to UK Biobank; or the HGDP+1KGP panel with
    its smallest populations merged or dropped, to train a panel model.
 
