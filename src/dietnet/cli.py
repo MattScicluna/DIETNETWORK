@@ -237,6 +237,15 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus):
     show_default=True,
     help="Upstream's Diet Network, or its MLP baseline (no auxiliary network).",
 )
+@click.option(
+    "--inputs",
+    type=click.Choice(["auto", "ram", "memmap"]),
+    default="auto",
+    show_default=True,
+    help="Where training reads genotypes: 'ram' copies all of them into memory first "
+    "(upstream), 'memmap' reads each batch from the dataset file. Same model; 'auto' "
+    "memory-maps above 2 GiB.",
+)
 def train(
     dataset_path,
     partition_path,
@@ -249,6 +258,7 @@ def train(
     task,
     normalize,
     model,
+    inputs,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -259,6 +269,7 @@ def train(
             input_stats=input_stats, config=config, exp_dir=exp_dir, seeds=seeds,
             folds=folds, task=task, normalize=normalize,
             model={"dietnet": "Dietnet", "mlp": "Mlp"}[model],
+            inputs=inputs,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

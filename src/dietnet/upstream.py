@@ -83,8 +83,11 @@ def script(name: str) -> Path:
     return root() / TRAIN_DIR / name
 
 
-def run(name: str, args: list, log: Path | None = None) -> None:
+def run(name: str, args: list, log: Path | None = None, env: dict | None = None) -> None:
     """Run upstream script ``name`` with ``args``, as its README does.
+
+    ``env``: extra environment variables for the script's process (e.g.
+    :data:`dietnet._launch.MEMMAP_ENV`).
 
     The working directory is the script's own, for its ``import helpers``.
     PYTHONHASHSEED is fixed because partition_data.py iterates over ``set(labels)``:
@@ -102,7 +105,7 @@ def run(name: str, args: list, log: Path | None = None) -> None:
         str(script(name)),
         *[str(a) for a in args],
     ]
-    env = {**os.environ, "PYTHONHASHSEED": "0"}
+    env = {**os.environ, **(env or {}), "PYTHONHASHSEED": "0"}
     if log is None:
         result = subprocess.run(cmd, cwd=script(name).parent, env=env)
         if result.returncode != 0:

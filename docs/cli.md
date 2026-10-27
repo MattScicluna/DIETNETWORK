@@ -123,6 +123,7 @@ Train each (seed, fold) with upstream `train.py`; package the results under
 | `--task` | `classification` or `regression` | classification |
 | `--normalize / --no-normalize` | standardise inputs with the fold's means and SDs | normalize |
 | `--model` | `dietnet`, upstream's Diet Network, or `mlp`, its MLP baseline (no auxiliary network) | dietnet |
+| `--inputs` | where training reads genotypes: `ram` copies them all into memory first (upstream), `memmap` reads each batch from the dataset file; same model either way. `auto` memory-maps above 2 GiB | auto |
 
 ## `dietnet match`
 
