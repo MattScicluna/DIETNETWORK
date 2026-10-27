@@ -198,11 +198,36 @@ def score(dataset, out, backend: Backend, chunk: int = 200, progress=None) -> Pa
         if progress:
             progress(min(start + chunk, len(todo)), len(todo))
 
-    table = pd.concat(
-        [pd.read_csv(p, sep="\t") for p in sorted(parts.glob("part-*.tsv"))], ignore_index=True
-    )
-    tracks = sorted(c for c in table.columns if c not in KEYS)
-    table = table[KEYS + tracks].fillna({t: 0.0 for t in tracks})
-    order = variants.reset_index(names="row").merge(table, on=KEYS)
-    order.sort_values("row").drop(columns="row").to_csv(out, sep="\t", index=False)
+    _combine(sorted(parts.glob("part-*.tsv")), variants, out)
     return out
+
+
+def _combine(paths: list[Path], variants: pd.DataFrame, out: Path) -> None:
+    """Write the parts as one table, holding one part in memory at a time.
+
+    A biobank array is ~500,000 SNPs x ~4,000 tracks: 15 GB as float64, and
+    reading every part at once (then copying it to fill, merge and sort) needs
+    several times that. The tracks are the union of the parts' headers; rows
+    follow the dataset's SNP order, parts sorted by their first SNP. Rows of
+    SNPs the dataset no longer has are left out.
+    """
+    tracks = sorted(
+        {c for p in paths for c in pd.read_csv(p, sep="\t", nrows=0).columns} - set(KEYS)
+    )
+    rank = {key: i for i, key in enumerate(variants[KEYS].itertuples(index=False, name=None))}
+
+    def ranks(frame):
+        keys = frame[KEYS].astype({"chrom": str, "pos": int}).itertuples(index=False, name=None)
+        return pd.Series([rank.get(k, -1) for k in keys], index=frame.index)
+
+    firsts = {p: ranks(pd.read_csv(p, sep="\t", usecols=KEYS, nrows=1)).iloc[0] for p in paths}
+    tmp = out.with_name(out.name + ".partial")
+    with open(tmp, "w") as handle:
+        handle.write("\t".join(KEYS + tracks) + "\n")
+        for path in sorted(paths, key=firsts.get):
+            part = pd.read_csv(path, sep="\t")
+            part = part.assign(_row=ranks(part))
+            part = part[part["_row"] >= 0].sort_values("_row")
+            part = part.reindex(columns=KEYS + tracks).fillna({t: 0.0 for t in tracks})
+            part.to_csv(handle, sep="\t", index=False, header=False)
+    tmp.replace(out)

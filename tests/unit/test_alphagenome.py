@@ -93,6 +93,27 @@ def test_an_interrupted_run_resumes_without_rescoring(tmp_path, dataset):
     assert len(pd.read_csv(tmp_path / "ag.tsv", sep="\t")) == 2000
 
 
+def test_the_table_follows_the_dataset_whatever_order_the_parts_are_in(tmp_path, dataset):
+    """Parts are combined one at a time, sorted by their first SNP, so the file
+    numbering does not matter; a part's SNP the dataset no longer has is dropped."""
+    out = alphagenome.score(dataset, tmp_path / "ag.tsv", FakeAPI(), chunk=300)
+    expected = pd.read_csv(out, sep="\t")
+
+    parts = sorted(alphagenome._parts(out).glob("part-*.tsv"))
+    for i, path in enumerate(parts):  # renumber them in reverse
+        path.rename(path.with_name(f"tmp-{len(parts) - i:06d}.tsv"))
+    for path in alphagenome._parts(out).glob("tmp-*.tsv"):
+        path.rename(path.with_name(path.name.replace("tmp-", "part-")))
+    stale = expected.iloc[:1].assign(pos=1)  # a SNP at chr:1 the dataset does not have
+    stale.to_csv(alphagenome._parts(out) / "part-999999.tsv", sep="\t", index=False)
+
+    again = FakeAPI()
+    alphagenome.score(dataset, out, again, chunk=300)
+
+    assert again.scored == 0
+    pd.testing.assert_frame_equal(pd.read_csv(out, sep="\t"), expected)
+
+
 def test_tracks_appearing_later_are_zero_where_unscored(tmp_path, dataset):
     alphagenome.score(dataset, tmp_path / "ag.tsv", FakeAPI(extra_track_from_call=2), chunk=500)
     table = pd.read_csv(tmp_path / "ag.tsv", sep="\t")
