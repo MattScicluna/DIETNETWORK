@@ -23,13 +23,22 @@ FOLDS = 5
 
 
 def _simulate(dst, n_samples, n_snps, block, rng) -> None:
-    """Genotypes drawn per SNP from binomial(2, p), p in [0.05, 0.5], ~1% missing."""
-    freq = rng.uniform(0.05, 0.5, n_snps)
+    """Genotypes from binomial(2, p) per SNP, p in [0.05, 0.5], ~0.4% missing.
+
+    One random byte per genotype, thresholded per SNP: below t0 is 0 (probability
+    ~(1-p)^2), from t2 on is 2 (~p^2), 255 is missing. numpy's binomial with a p
+    per column took over 6 h of CPU for a UK Biobank-sized matrix; this takes
+    minutes.
+    """
+    p = rng.uniform(0.05, 0.5, n_snps)
+    t0 = np.round(255 * (1 - p) ** 2).astype(np.uint8)
+    t2 = np.round(255 * (1 - p**2)).astype(np.uint8)
     inputs = dst.create_dataset("inputs", shape=(n_samples, n_snps), dtype=np.int8)
     for start in range(0, n_samples, block):
         rows = min(block, n_samples - start)
-        g = rng.binomial(2, freq, size=(rows, n_snps)).astype(np.int8)
-        g[rng.random((rows, n_snps)) < 0.01] = -1
+        r = rng.integers(0, 256, size=(rows, n_snps), dtype=np.uint8)
+        g = (r >= t0).astype(np.int8) + (r >= t2)
+        g[r == 255] = -1
         inputs[start : start + rows] = g
     dst.create_dataset("samples", data=np.array([f"sim{i}" for i in range(n_samples)], "S"))
     dst.create_dataset("snp_names", data=np.array([f"snp{j}" for j in range(n_snps)], "S"))
