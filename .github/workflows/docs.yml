@@ -1,0 +1,100 @@
+name: Docs
+
+# Builds the site on every pull request and deploys it to GitHub Pages from
+# master. The build executes docs/tutorial.ipynb (the whole pipeline on the
+# kgp_mini fixture, under a minute, no network) and runs with strict: true, so
+# a tutorial that stopped working or a broken internal link fails this workflow
+# rather than shipping.
+#
+# Deployment needs Pages enabled once, under Settings -> Pages, with the source
+# set to "GitHub Actions".
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # As in ci.yml.
+  UV_VERSION: "0.12.13"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # The default job limit is six hours. A notebook cell that hangs should cost
+    # minutes, not that.
+    timeout-minutes: 25
+    env:
+      # Runners have two cores; oversubscribed native thread pools can deadlock
+      # rather than merely run slowly.
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      # Material's banner about MkDocs 2.0; pyproject pins mkdocs below 2.
+      NO_MKDOCS_2_WARNING: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Cache uv dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-docs-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: uv-docs-${{ runner.os }}-
+
+      - name: Install (locked versions, CPU torch; see ci.yml)
+        # Every version comes from uv.lock. The locked Linux torch pulls ~3 GB of
+        # CUDA libraries a CPU runner cannot use, so those lines are dropped and
+        # torch comes from the CPU index at the same version.
+        run: |
+          uv venv --python 3.12
+          uv export --frozen --extra docs --no-emit-project --no-hashes \
+            | grep -v -E '^(nvidia-|cuda-|triton==)' > requirements-ci.txt
+          uv pip install --torch-backend=cpu -r requirements-ci.txt
+          uv pip install --no-deps -e .
+
+      # Executed here rather than inside mkdocs-jupyter so that a cell which
+      # hangs fails with a per-cell timeout and a log line naming it, instead of
+      # sitting silently until the job's limit. mkdocs then renders the outputs
+      # this step produced.
+      - name: Execute the tutorial
+        run: |
+          uv run --no-sync jupyter nbconvert --to notebook --inplace --execute \
+            --ExecutePreprocessor.timeout=300 docs/tutorial.ipynb
+
+      - name: Build
+        run: uv run --no-sync mkdocs build --strict
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

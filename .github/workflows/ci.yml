@@ -27,6 +27,31 @@ jobs:
       - name: Check every tracked file
         run: python -m scripts.check_sensitive_files --tracked
 
+  # What would be published: metadata, and the sdist and wheel built from this
+  # checkout. These tests build with uv and so are `network`, which the test job
+  # deselects; they run here instead.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Install (locked versions, CPU torch; see the test job)
+        run: |
+          uv venv
+          uv export --frozen --extra dev --no-emit-project --no-hashes \
+            | grep -v -E '^(nvidia-|cuda-|triton==)' > requirements-ci.txt
+          uv pip install --torch-backend=cpu -r requirements-ci.txt
+          uv pip install --no-deps -e .
+      - name: Verify package metadata and distribution contents
+        run: |
+          uv run --no-sync pytest tests/unit/test_package_metadata.py \
+            tests/integration/test_sdist_contents.py -m "network or not network"
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -60,7 +85,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
         include:
           # People run predict on their laptops; the .bed reader and the
           # genotype cache are the platform-sensitive parts.

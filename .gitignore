@@ -21,8 +21,16 @@ Models_1KGP_24populations/
 
 # Local environments and tool state
 .venv/
-.claude/
+.claude/*
+# The project's Claude Code settings and the data-egress hook they run are
+# shared; everything else under .claude/ (local settings, worktrees) is not.
+!.claude/settings.json
+!.claude/hooks/
 .coverage
 coverage.xml
 # Written by the CI install step
 requirements-ci.txt
+
+# The documentation site (uv run mkdocs build)
+site/
+.cache/

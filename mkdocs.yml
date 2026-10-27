@@ -1,0 +1,97 @@
+site_name: DietNetwork
+site_description: HussinLab's published Diet Network for genetic ancestry prediction, behind a command line
+site_url: https://mattscicluna.github.io/DIETNETWORK/
+repo_url: https://github.com/MattScicluna/DIETNETWORK
+repo_name: MattScicluna/DIETNETWORK
+edit_uri: edit/master/docs/
+
+# A broken link in the docs is a broken link on the site, so treat it as an
+# error rather than a line in a build log nobody reads.
+strict: true
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+  - mkdocs-jupyter:
+      # The notebook is executed by a separate step in .github/workflows/docs.yml
+      # rather than here: doing it there gives a per-cell timeout and a log line
+      # naming the cell, where a hang inside this plugin is silent. It is still
+      # executed on every build, so the tutorial still cannot rot.
+      #
+      # Locally, `mkdocs serve` therefore shows it without outputs. To see them:
+      #   uv run jupyter nbconvert --to notebook --inplace --execute \
+      #       docs/tutorial.ipynb
+      execute: false
+      allow_errors: false
+      include_source: true
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            # The docstrings are prose with ``literals``, not Google sections.
+            docstring_style: sphinx
+            show_source: true
+            show_root_heading: true
+            members_order: source
+            separate_signature: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Quickstart: quickstart.md
+  - Training: training.md
+  - Tutorial: tutorial.ipynb
+  - SNP features: features.md
+  - Formats: formats.md
+  - Parity with upstream: parity.md
+  - Scaling: scaling.md
+  - Command line: cli.md
+  - Python API: api.md
+  - Development:
+      - Refactor plan: refactor-plan.md

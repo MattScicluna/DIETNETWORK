@@ -1,0 +1,188 @@
+name: Release
+
+# Publishing is deliberately hard to do by accident and impossible to do from a
+# laptop: a tag push builds and publishes, and nothing else does. The artefacts
+# are built from a fresh checkout, which is the structural reason an untracked
+# local file (a cohort .bed, an HDF5 cache, cohort-trained weights) cannot reach
+# an index; tests/integration/test_sdist_contents.py checks the artefacts too.
+#
+# Trusted publishing (OIDC) is used rather than an API token, so there is no
+# long-lived secret in this repository. It needs configuring once per index, at
+# https://pypi.org/manage/account/publishing/ (a "pending publisher" before the
+# first release) and the same on test.pypi.org:
+#
+#   PyPI project:  dietnetwork
+#   Owner/repo:    MattScicluna/DIETNETWORK
+#   Workflow:      release.yml
+#   Environment:   pypi     (and `testpypi` on test.pypi.org)
+#
+# To rehearse without releasing: run this workflow manually from the Actions tab
+# with target=testpypi. TestPyPI accepts a version only once, same as PyPI, so
+# rehearse with the version you actually intend to ship.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Index to publish to"
+        type: choice
+        options:
+          - testpypi
+          - pypi
+        default: testpypi
+
+env:
+  UV_VERSION: "0.12.13"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Check the tag matches the declared version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          declared=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          if [ "$tag" != "$declared" ]; then
+            echo "tag v$tag does not match pyproject version $declared" >&2
+            exit 1
+          fi
+          echo "releasing $declared"
+
+      - name: Check the changelog has a dated entry for this version
+        # "Unreleased" is how the CHANGELOG marks work in progress; publishing
+        # one would put a release on PyPI whose notes say it does not exist.
+        run: |
+          declared=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          grep -E "^## \[$declared\] - [0-9]{4}-[0-9]{2}-[0-9]{2}" CHANGELOG.md
+
+      - name: Install (locked versions, CPU torch; see ci.yml)
+        run: |
+          uv venv
+          uv export --frozen --extra dev --no-emit-project --no-hashes \
+            | grep -v -E '^(nvidia-|cuda-|triton==)' > requirements-ci.txt
+          uv pip install --torch-backend=cpu -r requirements-ci.txt
+          uv pip install --no-deps -e .
+
+      # The tests that check the artefacts themselves: the declared licence
+      # matches LICENSE, no untracked or sensitive file is packaged, the upstream
+      # code ships byte for byte. A release is the one thing that cannot be undone.
+      - name: Verify package metadata and distribution contents
+        run: |
+          uv run --no-sync pytest tests/unit/test_package_metadata.py \
+            tests/integration/test_sdist_contents.py -m "network or not network"
+
+      - name: Build
+        run: |
+          rm -rf dist
+          uv build
+
+      - name: Check the metadata renders
+        run: uv run --no-sync --with twine twine check --strict dist/*
+
+      # Printed into the log so the contents of a release are inspectable after
+      # the fact, without re-downloading the artefacts.
+      - name: Show what will be published
+        run: |
+          ls -l dist
+          for f in dist/*.tar.gz; do echo "== $f"; tar -tzf "$f" | sort; done
+          for f in dist/*.whl; do echo "== $f"; unzip -Z1 "$f" | sort; done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # A clean-room install: no repository, no dev extras, nothing but the wheel.
+  # This is the check that `pip install dietnetwork` works.
+  smoke-test:
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the wheel into a clean virtualenv
+        # CPU torch on Linux: the default build pulls ~3 GB of CUDA libraries a
+        # runner cannot use. macOS wheels are CPU-only already.
+        run: |
+          python -m venv "$RUNNER_TEMP/clean"
+          "$RUNNER_TEMP/clean/bin/python" -m pip install --quiet --upgrade pip
+          if [ "$RUNNER_OS" = Linux ]; then
+            extra=(--extra-index-url https://download.pytorch.org/whl/cpu)
+          fi
+          "$RUNNER_TEMP/clean/bin/python" -m pip install "${extra[@]}" dist/*.whl
+
+      # `dietnet info` exits non-zero unless the bundled upstream code is byte
+      # for byte the pinned HussinLab commit; importing its modules checks that
+      # the published training and model code runs with the installed torch.
+      - name: The console script runs and ships the exact upstream code
+        run: |
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/clean/bin/dietnet" --help
+          "$RUNNER_TEMP/clean/bin/dietnet" info
+          "$RUNNER_TEMP/clean/bin/python" -c "
+          import dietnet
+          from dietnet import upstream
+          mods = upstream.modules()
+          print('dietnet', dietnet.__version__, 'upstream modules:', sorted(vars(mods)))
+          "
+
+  publish-testpypi:
+    needs: [build, smoke-test]
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  publish-pypi:
+    needs: [build, smoke-test]
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Re-running a release must not fail on files already uploaded; an
+          # index cannot be overwritten, so this only ever skips work done.
+          skip-existing: true

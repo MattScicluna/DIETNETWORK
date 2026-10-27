@@ -5,7 +5,7 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - Unreleased
+## [0.3.0] - 2026-10-26
 
 Rebuilt on HussinLab/DIETNETWORK `main` (`5481556e`). The training code is
 upstream's, unmodified. The `dietnet` command line, model packages and
@@ -46,7 +46,34 @@ dropout was fixed at 0.5; the published config uses 0.1).
   `test_independent_dataset.py`, and the published models vs
   `Dietnet_inference/inference.py`.
 - Tooling as in manifold_genetics: uv lock, black/isort/flake8, pre-commit with
-  a sensitive-files guard and gitleaks, CI on Python 3.10–3.12 and macOS.
+  a sensitive-files guard and gitleaks, CI on Python 3.10–3.13 and macOS.
+- Released as `dietnetwork` on PyPI: `release.yml` publishes on a version tag
+  through trusted publishing, after checking the tag, a dated CHANGELOG entry,
+  the artefacts' contents and a clean-room install (`dietnet info` must find
+  the bundled upstream code byte for byte the pinned commit).
+- Tests of what would be published: package metadata
+  (`tests/unit/test_package_metadata.py`) and the sdist and wheel themselves
+  (`tests/integration/test_sdist_contents.py`: no untracked file, nothing the
+  sensitive-files check would flag, upstream code identical), run in a CI
+  `package` job.
+- A Claude Code data-egress hook (`.claude/hooks/egress_guard.py`, run by the
+  project's `.claude/settings.json`): agents are asked for approval before any
+  copy from a remote host, any dump of a genotype or data file over ssh, or any
+  upload of one to a host that is not an Alliance cluster, and cannot commit or
+  push with `--no-verify`.
+- `LICENSE` (BSD 3-Clause) and `NOTICE`, which keeps HussinLab's upstream code
+  outside that licence; `py.typed`.
+- A documentation site (mkdocs-material, `docs/`, the `docs` extra), built
+  strictly on every pull request and deployed to GitHub Pages from `master`.
+  Its tutorial runs the whole pipeline on the `kgp_mini` fixture on every
+  build, and a test keeps `docs/cli.md` naming exactly the CLI's commands and
+  options.
+
+### Fixed
+
+- `build-embedding` with a `class_genotype_freq` block failed when
+  `--dataset` or `--partition` was a relative path: upstream's script runs from
+  its own directory and could not find them.
 
 ### Changed
 
