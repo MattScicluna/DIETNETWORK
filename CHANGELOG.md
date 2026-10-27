@@ -5,6 +5,15 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `dietnet alphagenome` combines its parts one at a time instead of reading
+  them all into memory and copying them three times. For a biobank array
+  (~485,000 SNPs x ~3,850 tracks, ~15 GB as float64) the old combine needed
+  several times a laptop's memory, at the end of a day of API calls.
+
 ## [0.3.0] - 2026-10-26
 
 Rebuilt on HussinLab/DIETNETWORK `main` (`5481556e`). The training code is

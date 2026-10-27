@@ -1,5 +1,10 @@
 # Diet Network
 
+<a href="https://github.com/MattScicluna/DIETNETWORK/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/MattScicluna/DIETNETWORK/ci.yml?branch=master&label=CI"></a>
+<a href="https://coveralls.io/github/MattScicluna/DIETNETWORK?branch=master"><img alt="Coverage Status" src="https://img.shields.io/coverallsCoverage/github/MattScicluna/DIETNETWORK?branch=master"></a>
+<a href="https://pypi.org/project/dietnetwork/"><img alt="PyPI" src="https://img.shields.io/pypi/v/dietnetwork"></a>
+<a href="https://mattscicluna.github.io/DIETNETWORK/"><img alt="Documentation" src="https://img.shields.io/badge/docs-mkdocs--material-teal"></a>
+
 A deep learning framework for genetic ancestry inference from SNP genotypes.
 The published models were trained on the 1000 Genomes Project (1KGP, WGS 30x,
 GRCh38) to classify individuals into 24 populations.

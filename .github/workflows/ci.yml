@@ -127,7 +127,20 @@ jobs:
       - name: Run tests
         env:
           DIETNET_UPSTREAM_DIR: ${{ github.workspace }}/upstream
-        run: uv run --no-sync pytest -m "not slow and not network" --cov=dietnet --cov-report=term-missing
+        run: >-
+          uv run --no-sync pytest -m "not slow and not network"
+          --cov=dietnet --cov-report=term-missing --cov-report=lcov
+
+      # The README's Coverage Status badge. Informational, not a gate: a
+      # third-party outage must not block a merge (as in manifold_genetics).
+      - name: Upload coverage to Coveralls
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        uses: coverallsapp/github-action@v2
+        with:
+          # LCOV keeps coverage.py's line data exactly.
+          file: coverage.lcov
+          format: lcov
 
       - name: Debug info on failure
         if: failure()
