@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Training time per epoch by genotype store: upstream's copy in RAM, or a memory
-# map read a batch at a time, from Lustre or staged to the node's local disk.
-# BENCH_DIR comes from benchmarks/make_train_bench.py + `dietnet partition`.
+# Time per epoch of upstream's train.py by how it is fed: genotype store (RAM,
+# memory map, packed copy), loader (upstream's or fast, with workers), and data
+# on network storage or staged to the node's local disk.
+# BENCH_DIR comes from benchmarks/make_train_bench.py + `dietnet partition`
+# (+ `dietnet pack-genotypes` for INPUTS=packed).
 #
-#   BENCH_DIR=/path/bench DIETNET_VENV=/path/.venv INPUTS=memmap STAGE=1 \
-#   sbatch --account=ACCOUNT --mem=32G benchmarks/slurm/bench_train_inputs.sbatch
+#   BENCH_DIR=/path/bench DIETNET_VENV=/path/.venv INPUTS=packed LOADER=fast WORKERS=7 \
+#   STAGE=1 sbatch --account=ACCOUNT --mem=32G benchmarks/slurm/bench_train_inputs.sbatch
 #
-# INPUTS: ram | memmap.  STAGE=1 copies dataset.h5 to $SLURM_TMPDIR first.
+# INPUTS: ram | memmap | packed.  LOADER: upstream (default) | fast.
+# STAGE=1 copies the dataset (and its packed copy) to $SLURM_TMPDIR first.
 #SBATCH --job-name=dietnet_bench_train
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
@@ -16,17 +19,24 @@
 
 set -euo pipefail
 : "${BENCH_DIR:?}" "${DIETNET_VENV:?}" "${INPUTS:?}"
+LOADER="${LOADER:-upstream}"
 TIME="$(type -P time)"
-RUN="$BENCH_DIR/run_${INPUTS}_stage${STAGE:-0}_${SLURM_JOB_ID}"
+RUN="$BENCH_DIR/run_${INPUTS}_${LOADER}_stage${STAGE:-0}_${SLURM_JOB_ID}"
 mkdir -p "$RUN"
 
-echo "node $(hostname), inputs $INPUTS, stage ${STAGE:-0}, mem ${SLURM_MEM_PER_NODE:-?} MB"
+echo "node $(hostname), inputs $INPUTS, loader $LOADER (workers ${WORKERS:-default})," \
+    "stage ${STAGE:-0}, mem ${SLURM_MEM_PER_NODE:-?} MB"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 DATASET="$BENCH_DIR/dataset.h5"
 if [ "${STAGE:-0}" = 1 ]; then
     df -h "$SLURM_TMPDIR" | tail -1
     start=$(date +%s)
-    cp "$DATASET" "$SLURM_TMPDIR/dataset.h5"
+    # -p keeps modification times: a packed copy is checked against its dataset's.
+    if [ "$INPUTS" = packed ]; then
+        cp -p "$DATASET" "$DATASET".packed.* "$SLURM_TMPDIR/"
+    else
+        cp -p "$DATASET" "$SLURM_TMPDIR/"
+    fi
     echo "staged to local disk in $(( $(date +%s) - start )) s"
     DATASET="$SLURM_TMPDIR/dataset.h5"
 fi
@@ -46,10 +56,13 @@ seed: 78
 uniform_init_limit: 0.02
 EOF
 
+EXTRA=()
+[ -n "${WORKERS:-}" ] && EXTRA=(--workers "$WORKERS")
 "$TIME" -v "$DIETNET_VENV/bin/dietnet" train --dataset "$DATASET" \
     --partition "$BENCH_DIR/partition.npz" --embedding "$BENCH_DIR/embedding.npz" \
     --input-stats "$BENCH_DIR/stats.npz" --config "$RUN/config.yaml" --exp-dir "$RUN/exp" \
-    --seeds 78 --folds 0 --inputs "$INPUTS" 2> "$RUN/time.txt" || true
+    --seeds 78 --folds 0 --inputs "$INPUTS" --loader "$LOADER" "${EXTRA[@]}" \
+    2> "$RUN/time.txt" || true
 grep -E "Elapsed \(wall|Maximum resident" "$RUN/time.txt"
 grep -h -E "^dietnet:|Loaded data in|Epoch [0-9]+ of|Train step time|Epoch execution time|Traceback|Error" \
     "$RUN"/exp/logs/train_*.log | tail -20
