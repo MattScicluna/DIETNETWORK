@@ -76,6 +76,40 @@ time the shared filesystem. It needs about 2.2× the int8 matrix (samples × SNP
 bytes) in memory. The outcome, contiguous HDF5, and the numbers are in the
 [plan](refactor-plan.md#on-disk-intermediate-benchmark).
 
+## Training on a biobank: where genotypes are read from
+
+Upstream's train.py copies every genotype into RAM before training. For a
+UK Biobank-sized matrix that is ~83 GB (486,748 × 169,829 int8) plus the job,
+so it needs a large-memory node. `dietnet train --inputs memmap` reads each
+batch's rows from the dataset file instead (`auto` does so above 2 GiB); the
+trained model is bit-identical. Stage the dataset to the node's local disk
+first: from network storage an epoch takes tens of minutes.
+
+Simulated genotypes of that shape, one A100 40 GB, upstream's train.py
+(`benchmarks/slurm/bench_train_inputs.sbatch`, Mila, 2026-10-27):
+
+| genotypes from | memory | before training | training pass | whole epoch |
+|---|---|---|---|---|
+| RAM (`--inputs ram`) | 120 GB requested, 82 GB used | 346 s load | 32–35 s | 65–78 s |
+| memmap, local NVMe | 32 GB | 167 s staging | 128–148 s | 295–311 s |
+| memmap, network scratch | 32 GB | 0 s | | 2,923 s |
+
+The GPU was ~87% idle in every case: upstream reads one sample per Python call
+in a single process and fills missing values with a Python loop over the
+batch. With the same model, reading each batch's rows in one sorted read with
+8 loader workers and a vectorised fill trains at ~10,000 samples/s from local
+NVMe, against ~2,200 for upstream's path and ~9,000 for upstream entirely in
+RAM (`benchmarks/bench_train_throughput.py`):
+
+| batch size | upstream's data path | batched, 8 workers | batched, 8 workers, vectorised fill |
+|---|---|---|---|
+| 138 | 2,172 | 4,246 | 10,547 |
+| 512 | 2,242 | 6,616 | 11,207 |
+| 2,048 | 1,844 | 9,204 | 9,835 |
+
+At that rate the local disk (~1.8 GB/s) is the limit, which a packed 2-bit
+store addresses next.
+
 ## Reproducing the published models
 
 `reproduction/` retrains the 15 published models on a SLURM cluster from the

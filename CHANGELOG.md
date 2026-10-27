@@ -7,6 +7,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- `dietnet train --inputs auto|ram|memmap`: where training reads genotypes.
+  Upstream's train.py copies the whole matrix into RAM first (~83 GB for a
+  UK Biobank-sized one); `memmap` reads each batch's rows from the dataset
+  file instead, through a genotype store (`dietnet.genotypes`) the launcher
+  installs in train.py's `FoldDataset`. The model is bit-identical. `auto`
+  memory-maps above 2 GiB. Stage the dataset to local disk: from network
+  storage an epoch took 45x longer (benchmarks in `docs/scaling.md`).
+- `benchmarks/`: training time by genotype store, and training throughput by
+  loader, workers, missing-value fill and batch size, on real or simulated
+  genotypes at any shape.
+
 ### Fixed
 
 - `dietnet alphagenome` combines its parts one at a time instead of reading
