@@ -201,6 +201,20 @@ def alphagenome_scores(dataset_path, bim, out, scorers, sequence_length, chunk, 
     click.echo(f"wrote {out}")
 
 
+@main.command("pack-genotypes")
+@_dataset
+def pack_genotypes(dataset_path):
+    """Write a 2-bit copy of the dataset's genotypes, for `train --inputs packed`.
+
+    A quarter of the bytes, so training from disk reads 4x less. Written next to
+    the dataset (<dataset>.packed.npy); rerun after the dataset changes.
+    """
+    from dietnet import genotypes
+
+    out = genotypes.pack(dataset_path)
+    click.echo(f"wrote {out}")
+
+
 @main.command("compute-input-stats")
 @_dataset
 @_partition
@@ -239,11 +253,12 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus):
 )
 @click.option(
     "--inputs",
-    type=click.Choice(["auto", "ram", "memmap"]),
+    type=click.Choice(["auto", "ram", "memmap", "packed"]),
     default="auto",
     show_default=True,
     help="Where training reads genotypes: 'ram' copies all of them into memory first "
-    "(upstream), 'memmap' reads each batch from the dataset file. Same model; 'auto' "
+    "(upstream), 'memmap' reads each batch from the dataset file, 'packed' from its 2-bit "
+    "copy (pack-genotypes). Same model; 'auto' uses the packed copy if there is one, else "
     "memory-maps above 2 GiB.",
 )
 def train(

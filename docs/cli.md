@@ -94,6 +94,17 @@ and alleles to Google's API; see [SNP features](features.md#alphagenome-variant-
 | `--chunk INTEGER` | SNPs per saved part | 200 |
 | `--max-workers INTEGER` | parallel API requests | 5 |
 
+## `dietnet pack-genotypes`
+
+Write a 2-bit copy of the dataset's genotypes next to it
+(`<dataset>.packed.npy`, with a `.packed.json` recording what it was built
+from), for `train --inputs packed`: a quarter of the bytes, read a batch at a
+time. Rerun it after the dataset changes; a stale copy is refused.
+
+| option | | default |
+|---|---|---|
+| `--dataset PATH` | *existing* dataset | required |
+
 ## `dietnet compute-input-stats`
 
 Per-fold SNP means and SDs (upstream `compute_input_features_statistics.py`).
@@ -123,7 +134,7 @@ Train each (seed, fold) with upstream `train.py`; package the results under
 | `--task` | `classification` or `regression` | classification |
 | `--normalize / --no-normalize` | standardise inputs with the fold's means and SDs | normalize |
 | `--model` | `dietnet`, upstream's Diet Network, or `mlp`, its MLP baseline (no auxiliary network) | dietnet |
-| `--inputs` | where training reads genotypes: `ram` copies them all into memory first (upstream), `memmap` reads each batch from the dataset file; same model either way. `auto` memory-maps above 2 GiB | auto |
+| `--inputs` | where training reads genotypes: `ram` copies them all into memory first (upstream), `memmap` reads each batch from the dataset file, `packed` from its 2-bit copy (`pack-genotypes`); same model in every case. `auto` uses the packed copy if there is one, else memory-maps above 2 GiB | auto |
 
 ## `dietnet match`
 

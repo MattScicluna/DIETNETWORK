@@ -1,14 +1,14 @@
-"""Training from a memory map is training: the same model, bit for bit.
+"""Training from a memory map or a packed copy is training: the same model, bit for bit.
 
-``dietnet train --inputs memmap`` replaces upstream's copy of every genotype in
-RAM with a memory map of the dataset file (dietnet.genotypes, via the
-launcher). The rows, their values and the batch order are unchanged, so the
-weights must be identical, not merely close.
+``dietnet train --inputs memmap|packed`` replaces upstream's copy of every
+genotype in RAM with a genotype store (dietnet.genotypes, via the launcher).
+The rows, their values and the batch order are unchanged, so the weights must
+be identical, not merely close.
 """
 
 import pytest
 import torch
-from support import DATASETS, train_pipeline
+from support import DATASETS, SEED, dietnet, train_pipeline
 
 pytestmark = pytest.mark.integration
 
@@ -37,6 +37,28 @@ def test_a_memory_mapped_run_trains_the_same_model(tmp_path):
     ]
     assert ram.keys() == mapped.keys()
     differ = [name for name in ram if not torch.equal(ram[name], mapped[name])]
+    assert differ == []
+
+    # The same inputs again, from the 2-bit copy.
+    root = tmp_path / "ram"
+    dietnet("pack-genotypes", dataset=root / "dataset.h5")
+    dietnet(
+        "train",
+        dataset=root / "dataset.h5",
+        partition=root / "partition.npz",
+        embedding=root / "embedding.npz",
+        input_stats=root / "stats.npz",
+        config=root / "config.yaml",
+        exp_dir=tmp_path / "packed" / "exp",
+        seeds=SEED,
+        folds="0",
+        inputs="packed",
+    )
+    packed = _weights(tmp_path / "packed" / "exp" / "packages")
+    assert _store_line(tmp_path / "packed") == [
+        "dietnet: train.py reads genotypes from the packed store"
+    ]
+    differ = [name for name in ram if not torch.equal(ram[name], packed[name])]
     assert differ == []
 
 

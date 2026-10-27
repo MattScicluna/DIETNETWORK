@@ -86,6 +86,10 @@ dietnet check --packages exp/packages            # each model's held-out test ac
 `--model mlp` trains upstream's MLP baseline instead: no auxiliary network, no
 `--embedding`. It's the comparison point for any change to the SNP features.
 
+For a biobank-sized dataset, `dietnet pack-genotypes --dataset dataset.h5` once,
+then `train --inputs packed` reads a 2-bit copy a batch at a time instead of
+loading every genotype into RAM (see the docs' Scaling page).
+
 - `labels.tsv`: a header row, then `sample id<TAB>label`. Every sample in the
   .fam needs a label.
 - `config.yaml`: the published one is the default to start from:
