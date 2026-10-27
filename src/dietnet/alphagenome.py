@@ -27,6 +27,8 @@ reference. Coordinates must be GRCh38, which is what AlphaGenome uses.
 from __future__ import annotations
 
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Protocol
 
@@ -38,12 +40,34 @@ API_KEY_ENV = "ALPHAGENOME_API_KEY"
 KEYS = ["chrom", "pos", "ref", "alt"]
 DEFAULT_SCORERS = ("ATAC", "DNASE", "CHIP_TF", "CHIP_HISTONE", "CAGE", "RNA_SEQ")
 SEQUENCE_LENGTHS = ("16KB", "100KB", "500KB", "1MB")
+# gRPC statuses the service returns for a call that succeeds when repeated: about 2% of
+# calls fail with INTERNAL, at random (2026-10-26).
+TRANSIENT = ("INTERNAL", "UNAVAILABLE", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED")
+RETRIES = 6
+RETRY_WAIT = 2.0  # seconds, doubled after each failed attempt
 
 
-def variants_of(dataset) -> pd.DataFrame:
-    """chrom (``chr``-prefixed), 1-based pos, ref, alt for every SNP in a dataset."""
-    snps = ds.snp_table(dataset)
-    parts = snps["snp"].str.split(":", expand=True)
+def _retrying(call):
+    """``call()``, repeated after a transient gRPC error; other errors raise at once."""
+    for attempt in range(RETRIES + 1):
+        try:
+            return call()
+        except Exception as error:
+            code = getattr(error, "code", None)
+            status = getattr(code(), "name", None) if callable(code) else None
+            if status not in TRANSIENT or attempt == RETRIES:
+                raise
+            time.sleep(RETRY_WAIT * 2**attempt)
+
+
+def variants_of(source) -> pd.DataFrame:
+    """chrom (``chr``-prefixed), 1-based pos, ref, alt for every SNP in a dataset, or
+    in a PLINK ``.bim``: only its SNP ids are read, so no genotypes are needed."""
+    if Path(source).suffix == ".bim":
+        ids = pd.read_csv(source, sep=r"\s+", header=None, usecols=[1], dtype=str)[1]
+    else:
+        ids = ds.snp_table(source)["snp"]
+    parts = ids.str.split(":", expand=True)
     if parts.shape[1] != 4 or not parts[1].str.fullmatch(r"\d+").all():
         raise ValueError(
             "SNP ids are not chr:pos:REF:ALT, so REF and ALT are unknown; "
@@ -102,10 +126,21 @@ class AlphaGenomeAPI:
             )
             for row in variants.itertuples()
         ]  # fmt: skip
-        intervals = [v.reference_interval.resize(self._length) for v in objects]
-        results = self._client.score_variants(
-            intervals, objects, self._scorers, progress_bar=False, max_workers=self._max_workers
-        )
+
+        # One request per variant, not the client's score_variants: that fails the whole
+        # batch when any one request does, and with ~2% of requests failing transiently a
+        # chunk of 200 almost never succeeds.
+        def one(variant):
+            return _retrying(
+                lambda: self._client.score_variant(
+                    interval=variant.reference_interval.resize(self._length),
+                    variant=variant,
+                    variant_scorers=self._scorers,
+                )
+            )
+
+        with ThreadPoolExecutor(self._max_workers) as pool:
+            results = list(pool.map(one, objects))
         tidy = self._scorers_lib.tidy_scores(results)
         keys = {str(v): row for v, row in zip(objects, variants.itertuples())}
         rows = tidy["variant_id"].astype(str).map(keys)
@@ -133,7 +168,7 @@ def _parts(out: Path) -> Path:
 
 
 def score(dataset, out, backend: Backend, chunk: int = 200, progress=None) -> Path:
-    """Score every SNP of ``dataset``, then write the feature table ``out``.
+    """Score every SNP of ``dataset`` (or a ``.bim``), then write the feature table ``out``.
 
     Each chunk's scores go to their own file under ``<out>.parts/`` as soon as
     they arrive; a rerun scores only the SNPs no part holds yet. When all are

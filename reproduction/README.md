@@ -94,3 +94,35 @@ Retrained minus published, paired by (seed, fold): +0.0067 (sd 0.011),
 retrained higher in 11 of 15. Identical weights were not expected -- GPU
 nondeterminism, and torch 2.14 here against the original's older torch -- and
 the reproduction is of the method's accuracy, which holds.
+
+## MLP baseline (2026-10-26)
+
+Upstream's MLP on the same split, configs and per-fold statistics, with no
+auxiliary network: `MODEL=mlp` on `retrain.sbatch`, with `stats.npz` and
+`configs/` from the retrain run and no embedding. One hidden layer of 100, input
+dropout 0.995, as configured for the Diet Network. All 15 trained on Narval
+A100s in 20-64 min, early-stopped at epochs 2,024-6,235.
+
+| seed | fold | published | retrained | MLP | MLP agrees with retrained |
+|---|---|---|---|---|---|
+| 78 | 0 | 0.9185 | 0.9442 | 0.9313 | 0.9464 |
+| 78 | 1 | 0.9224 | 0.9246 | 0.9181 | 0.9353 |
+| 78 | 2 | 0.9336 | 0.9400 | 0.9379 | 0.9358 |
+| 78 | 3 | 0.9289 | 0.9332 | 0.9224 | 0.9353 |
+| 78 | 4 | 0.9089 | 0.8980 | 0.9262 | 0.9306 |
+| 79 | 0 | 0.9206 | 0.9356 | 0.9034 | 0.9120 |
+| 79 | 1 | 0.9073 | 0.9353 | 0.9159 | 0.9246 |
+| 79 | 2 | 0.9315 | 0.9422 | 0.9036 | 0.9443 |
+| 79 | 3 | 0.9095 | 0.9138 | 0.8966 | 0.9116 |
+| 79 | 4 | 0.9002 | 0.9132 | 0.9024 | 0.9111 |
+| 80 | 0 | 0.9356 | 0.9335 | 0.9185 | 0.9227 |
+| 80 | 1 | 0.9289 | 0.9332 | 0.9095 | 0.9353 |
+| 80 | 2 | 0.9465 | 0.9400 | 0.8994 | 0.9229 |
+| 80 | 3 | 0.9246 | 0.9203 | 0.8879 | 0.9009 |
+| 80 | 4 | 0.9046 | 0.9154 | 0.9024 | 0.9241 |
+| | **mean** | **0.9214** | **0.9282** | **0.9117** (sd 0.014) | **0.9262** |
+
+Paired by (seed, fold), the MLP is 1.65 points below the retrained Diet Network
+(sd 1.7; MLP higher in 1 of 15) and 0.97 below the published models (sd 1.8;
+higher in 5 of 15). This is the reference for the SNP-feature experiments: a
+feature set earns its place by how much of that gap it keeps or widens.
