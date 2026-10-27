@@ -57,12 +57,14 @@ uniform_init_limit: 0.02
 EOF
 
 EXTRA=()
-[ -n "${WORKERS:-}" ] && EXTRA=(--workers "$WORKERS")
+[ -n "${WORKERS:-}" ] && EXTRA+=(--workers "$WORKERS")
+# GPUS > 1: data-parallel (request as many GPUs, e.g. --gres=gpu:a100:4).
+[ -n "${GPUS:-}" ] && EXTRA+=(--gpus "$GPUS")
 "$TIME" -v "$DIETNET_VENV/bin/dietnet" train --dataset "$DATASET" \
     --partition "$BENCH_DIR/partition.npz" --embedding "$BENCH_DIR/embedding.npz" \
     --input-stats "$BENCH_DIR/stats.npz" --config "$RUN/config.yaml" --exp-dir "$RUN/exp" \
     --seeds 78 --folds 0 --inputs "$INPUTS" --loader "$LOADER" "${EXTRA[@]}" \
     2> "$RUN/time.txt" || true
 grep -E "Elapsed \(wall|Maximum resident" "$RUN/time.txt"
-grep -h -E "^dietnet:|Loaded data in|Epoch [0-9]+ of|Train step time|Epoch execution time|Traceback|Error" \
-    "$RUN"/exp/logs/train_*.log | tail -20
+grep -h -E "^dietnet:|Loaded data in|Epoch [0-9]+|Train step time|Epoch execution time|Traceback|Error" \
+    "$RUN"/exp/logs/train_*.log* | tail -20
