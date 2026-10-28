@@ -12,7 +12,8 @@
 #SBATCH --array=0-24
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=24G
-#SBATCH --gres=gpu:1
+# Turing or newer: the locked torch (CUDA 13) has no kernels for V100s.
+#SBATCH --gres=gpu:a100:1
 #SBATCH --time=04:00:00
 #SBATCH --output=%x.%A_%a.out
 
@@ -34,9 +35,10 @@ import yaml
 release, batch, scale, out = sys.argv[1], int(sys.argv[2]), float(sys.argv[3]), sys.argv[4]
 cfg = yaml.safe_load(open(f"{release}/supporting_files/config_rep1models.yaml"))
 cfg.update(batch_size=batch, lr_aux=cfg["lr_aux"] * scale, lr_main=cfg["lr_main"] * scale)
-open(out + ".partial", "w").write(yaml.safe_dump(cfg, sort_keys=False))
 import os
-os.replace(out + ".partial", out)
+partial = f"{out}.{os.getpid()}.partial"  # the setting's 5 tasks may start together
+open(partial, "w").write(yaml.safe_dump(cfg, sort_keys=False))
+os.replace(partial, out)
 PY
 SEED=$(grep '^seed:' "$CONFIG" | awk '{print $2}')
 
