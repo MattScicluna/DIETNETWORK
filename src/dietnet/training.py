@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from dietnet import package, upstream
+from dietnet import _launch, genotypes, package, upstream
 
 
 def fold_slice(array: np.ndarray, fold: int) -> np.ndarray:
@@ -108,11 +108,15 @@ def train(
     task="classification",
     normalize=True,
     model="Dietnet",
+    inputs="auto",
 ) -> list[package.Package]:
     """Train every (seed, fold) with upstream's train.py; return their packages.
 
     ``model`` is upstream's: "Dietnet", or "Mlp", the baseline without an
-    auxiliary network, which takes no embedding.
+    auxiliary network, which takes no embedding. ``inputs``: the genotype store
+    train.py reads (:mod:`dietnet.genotypes`): "ram" (upstream's copy of the
+    whole dataset), "memmap" (a batch at a time from the file), or "auto". The
+    model is the same either way.
     """
     if model not in upstream.MODELS:
         raise ValueError(f"model must be one of {sorted(upstream.MODELS)}")
@@ -124,6 +128,10 @@ def train(
     exp_dir = Path(exp_dir).resolve()
     base = yaml.safe_load(Path(config).read_text())
     check_inputs(embedding, input_stats, dataset, partition, folds)
+    try:
+        env = {_launch.INPUTS_ENV: genotypes.choose(dataset, inputs)}
+    except ValueError as error:
+        raise InputError(str(error)) from None
 
     emb_by_fold = np.load(embedding, allow_pickle=True)["emb"] if embedding else None
     described = Path(f"{embedding}.json") if embedding else None
@@ -148,7 +156,10 @@ def train(
             if normalize:
                 args.append("--normalize")
             upstream.run(
-                "train.py", args, log=exp_dir / "logs" / f"train_seed{seed}_fold{fold}.log"
+                "train.py",
+                args,
+                log=exp_dir / "logs" / f"train_seed{seed}_fold{fold}.log",
+                env=env,
             )
 
             results = (
