@@ -43,6 +43,9 @@ Providers:
     Another block with its SNP rows permuted (``of``: that block's index): the
     control for "this information" rather than "information of this shape".
 
+A block with ``include: false`` is built, so a later ``shuffled`` block can
+copy it, but left out of the matrix: a shuffled control without the original.
+
 Transforms per block, applied after the provider: ``center: true`` subtracts
 each column's mean over SNPs; ``pca: k`` keeps the first k principal
 components over SNPs (computed per fold for a per-fold block). Upstream's
@@ -273,16 +276,19 @@ def build(spec, dataset, partition, out) -> tuple[np.ndarray, dict]:
         ctx.built.append(block)
         described.append({"provider": provider, "spec": block_spec, **block.info})
 
-    if any(b.fold_dependent for b in ctx.built):
+    kept = [b for b, s in zip(ctx.built, spec["blocks"]) if s.get("include", True)]
+    if not kept:
+        raise ValueError("every block has include: false; nothing to write")
+    if any(b.fold_dependent for b in kept):
         values = np.concatenate(
             [b.values if b.fold_dependent else np.broadcast_to(b.values, (n_folds, *b.values.shape))
-             for b in ctx.built],
+             for b in kept],
             axis=-1,
         )  # fmt: skip
     else:
-        values = np.concatenate([b.values for b in ctx.built], axis=-1)
+        values = np.concatenate([b.values for b in kept], axis=-1)
 
-    columns = [c for b in ctx.built for c in b.columns]
+    columns = [c for b in kept for c in b.columns]
     flat = values.reshape(-1, values.shape[-2], values.shape[-1])
     constant = sorted(
         {columns[j] for v in flat for j in np.flatnonzero(np.abs(v).sum(axis=0) == 0)}
@@ -295,6 +301,9 @@ def build(spec, dataset, partition, out) -> tuple[np.ndarray, dict]:
 
     start = 0
     for entry, block in zip(described, ctx.built):
+        if not entry["spec"].get("include", True):
+            entry["columns"] = None  # built for a later block, not in the matrix
+            continue
         entry["columns"] = [start, start + len(block.columns)]
         start += len(block.columns)
     meta = {

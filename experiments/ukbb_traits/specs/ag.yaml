@@ -1,0 +1,7 @@
+# AlphaGenome variant effects alone, reduced to 64 components.
+blocks:
+  - provider: precomputed
+    path: alphagenome.tsv.gz
+    name: alphagenome
+    orient: effect
+    pca: 64
