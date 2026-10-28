@@ -2,7 +2,7 @@
 
 Living document: each pull request that moves the plan updates it.
 
-## Status and next steps (2026-10-26)
+## Status and next steps (2026-10-27)
 
 | Phase | State |
 |---|---|
@@ -11,12 +11,16 @@ Living document: each pull request that moves the plan updates it.
 | 2. Scale (UK Biobank, 486,748 samples) | ✅ match 4.5 min (CPU), 15 models 13 min (one A100) |
 | 3. Port remaining old-CLI features | dropped unless needed (`analyze-population`, `preprocess-plink`) |
 | 4. Pluggable SNP features (`build-embedding`) | ✅ |
-| 5. AlphaGenome (`dietnet alphagenome`) | code ✅, not run: no API key yet |
+| 5. AlphaGenome (`dietnet alphagenome`) | ✅ UK Biobank array scored (485,516 SNPs × 3,849 tracks), table on Narval |
+| 6. Training at biobank scale | ✅ `--inputs memmap/packed`, fast loader (bit-identical), `--engine dietnet` (13.5 s/epoch vs 65–80 s, 8 GB vs 82 GB), DDP; batch study: 552 with √-scaled LR keeps accuracy (docs/scaling.md) |
 | MLP baseline (published split) | ✅ 0.9117 vs Diet Network 0.9282 retrained (−1.65 points paired, 1 of 15 higher) |
 
 Next, in order:
-1. When an AlphaGenome key exists: score the 229,986 1KGP SNPs
-   (`dietnet alphagenome`, resumable).
+1. When Narval is back (2026-11-03): the UKBB complex-phenotype model. Needs
+   decisions: phenotype and task, the genotype set and samples, the auxiliary
+   features' baseline (AlphaGenome, random, shuffled, allele frequencies).
+   Then: create-dataset, pack-genotypes, one GPU job per (seed, fold) with
+   `--engine dietnet --inputs packed`; a pilot fold at batch 138 vs 552.
 2. Run the experiment grid on the published split, 15 models per
    configuration, A100s, about 6 GPU-hours each: freq · AlphaGenome · freq +
    AlphaGenome · freq + random · freq + shuffled AlphaGenome. The MLP

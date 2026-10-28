@@ -39,10 +39,10 @@ AUTO_MEMMAP_ABOVE_BYTES = 2 * 2**30
 
 # 2-bit codes: dosage 0, 1, 2 as themselves, missing (-1) as 3. Four genotypes per
 # byte, the first in the lowest bits; rows padded to whole bytes.
-_DECODE = np.array(
+DECODE_TABLE = np.array(
     [[(byte >> (2 * k)) & 3 for k in range(4)] for byte in range(256)], dtype=np.int8
 )
-_DECODE[_DECODE == 3] = -1
+DECODE_TABLE[DECODE_TABLE == 3] = -1
 
 
 def packed_path(dataset) -> Path:
@@ -80,7 +80,7 @@ def encode(rows: np.ndarray) -> np.ndarray:
 def decode(packed: np.ndarray, n_snps: int) -> np.ndarray:
     """Packed rows back to int8 rows (samples x n_snps)."""
     packed = np.atleast_2d(packed)
-    rows = _DECODE[packed].reshape(len(packed), -1)
+    rows = DECODE_TABLE[packed].reshape(len(packed), -1)
     return rows if rows.shape[1] == n_snps else np.ascontiguousarray(rows[:, :n_snps])
 
 

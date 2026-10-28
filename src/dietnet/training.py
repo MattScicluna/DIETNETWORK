@@ -11,6 +11,10 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import h5py
@@ -19,6 +23,64 @@ import pandas as pd
 import yaml
 
 from dietnet import _launch, genotypes, package, upstream
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _loopback() -> str | None:
+    """The loopback interface's name (lo on Linux, lo0 on macOS), if there is one."""
+    names = [name for _, name in socket.if_nameindex()]
+    return next((n for n in names if n.startswith("lo")), None)
+
+
+def _run_parallel(args: list, processes: int, log: Path) -> None:
+    """One data-parallel training run (:mod:`dietnet.parallel`): one process per
+    GPU on this node, meeting at 127.0.0.1 (torchrun's own rendezvous resolves the
+    host's name, which some machines cannot reach). Rank 0 writes ``log``, rank k
+    ``log.rank<k>``; if one process fails the others are stopped."""
+    cmd = [sys.executable, "-u", "-m", "dietnet.parallel", *[str(a) for a in args]]
+    log.parent.mkdir(parents=True, exist_ok=True)
+    base = {
+        **os.environ,
+        "PYTHONHASHSEED": "0",
+        "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS", "1"),
+        "MASTER_ADDR": "127.0.0.1",
+        "MASTER_PORT": str(_free_port()),
+        "WORLD_SIZE": str(processes),
+    }
+    # The processes share this node; gloo (CPU runs) otherwise picks the interface
+    # of the host's name, which on some machines does not resolve back to it.
+    if "GLOO_SOCKET_IFNAME" not in base and _loopback():
+        base["GLOO_SOCKET_IFNAME"] = _loopback()
+    logs = [log] + [log.with_name(f"{log.name}.rank{k}") for k in range(1, processes)]
+    handles = [open(path, "w") for path in logs]
+    procs = []
+    try:
+        for rank, handle in enumerate(handles):
+            env = {**base, "RANK": str(rank), "LOCAL_RANK": str(rank)}
+            procs.append(subprocess.Popen(cmd, env=env, stdout=handle, stderr=subprocess.STDOUT))
+        failed = None
+        while failed is None and any(p.poll() is None for p in procs):
+            failed = next((p for p in procs if p.poll() not in (None, 0)), None)
+            time.sleep(1)
+        failed = failed or next((p for p in procs if p.returncode != 0), None)
+    finally:
+        for p in procs:
+            if p.poll() is None:
+                p.kill()
+                p.wait()
+        for handle in handles:
+            handle.close()
+    if failed is not None:
+        path = logs[procs.index(failed)]
+        tail = "".join(path.read_text().splitlines(keepends=True)[-25:])
+        raise upstream.UpstreamError(
+            f"data-parallel training exited with status {failed.returncode}; log {path}:\n{tail}"
+        )
 
 
 def default_workers() -> int:
@@ -123,21 +185,40 @@ def train(
     inputs="auto",
     loader="fast",
     workers: int | None = None,
+    gpus: int = 1,
+    engine: str | None = None,
 ) -> list[package.Package]:
-    """Train every (seed, fold) with upstream's train.py; return their packages.
+    """Train every (seed, fold); return their packages.
 
     ``model`` is upstream's: "Dietnet", or "Mlp", the baseline without an
-    auxiliary network, which takes no embedding. How train.py is fed, which
-    leaves the trained model bit-identical:
+    auxiliary network, which takes no embedding.
+
+    ``engine`` "upstream" (the default on one GPU) runs upstream's train.py,
+    unmodified, fed so that the trained model is bit-identical to train.py's:
 
     - ``inputs``: the genotype store it reads (:mod:`dietnet.genotypes`): "ram"
       (upstream's copy of the whole dataset), "memmap", "packed", or "auto".
     - ``loader``: "fast" reads each batch in one call with ``workers`` loader
       processes (default :func:`default_workers`) and fills missing values in
       one operation; "upstream" leaves train.py's own loader alone.
+
+    ``engine`` "dietnet" (the default, and the only choice, for ``gpus`` > 1)
+    trains with :mod:`dietnet.parallel`: upstream's model and epoch logic in a
+    loop of its own, data-parallel over ``gpus``, packed genotypes decoded on the
+    GPU, without train.py's per-batch bookkeeping; on Mila's A100 its training
+    pass ran ~20x upstream's (docs/scaling.md). Its weights differ from train.py's.
     """
+    engine = engine or ("dietnet" if gpus > 1 else "upstream")
+    if engine not in ("upstream", "dietnet"):
+        raise ValueError(f"engine must be 'upstream' or 'dietnet', not {engine!r}")
     if loader not in ("fast", "upstream"):
         raise ValueError(f"loader must be 'fast' or 'upstream', not {loader!r}")
+    if gpus < 1:
+        raise ValueError("gpus must be at least 1")
+    if gpus > 1 and engine == "upstream":
+        raise ValueError("engine 'upstream' is train.py's own loop, on one GPU")
+    if engine == "dietnet" and loader == "upstream":
+        raise ValueError("--loader upstream applies to engine 'upstream' only")
     if model not in upstream.MODELS:
         raise ValueError(f"model must be one of {sorted(upstream.MODELS)}")
     if (embedding is None) != (model == "Mlp"):
@@ -178,12 +259,12 @@ def train(
             ]  # fmt: skip
             if normalize:
                 args.append("--normalize")
-            upstream.run(
-                "train.py",
-                args,
-                log=exp_dir / "logs" / f"train_seed{seed}_fold{fold}.log",
-                env=env,
-            )
+            log = exp_dir / "logs" / f"train_seed{seed}_fold{fold}.log"
+            if engine == "dietnet":
+                args += ["--inputs", env[_launch.INPUTS_ENV], "--workers", workers]
+                _run_parallel(args, gpus, log)
+            else:
+                upstream.run("train.py", args, log=log, env=env)
 
             results = (
                 exp_dir / "runs" / f"RESULTS_{upstream.exp_identifier(cfg, fold, task, model)}"
