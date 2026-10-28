@@ -2,6 +2,7 @@
 # Submit the UK Biobank trait runs. Run prepare.sh first.
 #
 #   source traits.env   # GENOTYPES FIELDS PAN_UK ALPHAGENOME DIETNET_VENV EXP_DIR ACCOUNT
+#                       # (and GPU_ACCOUNT, if GPU jobs go to another account)
 #   bash submit.sh prep    # datasets, partition, stats, embeddings; then the pilot
 #   TRAIN_LABELS="height bmi" TRAIN_SPECS="freq ag freq_ag freq_random freq_shuffled mlp" \
 #   TRAIN_CONFIGS=b552 SEEDS="78 79 80" FOLDS="0 1 2 3 4" bash submit.sh train
@@ -15,10 +16,11 @@ source "$HERE/common.sh"
 : "${ACCOUNT:?}"
 
 submit() {  # submit <name> [sbatch options...] <script>: prints the job id
-    local name="$1"
+    local name="$1" account="$ACCOUNT"
     shift
+    [[ "$name" == train* ]] && account="${GPU_ACCOUNT:-$ACCOUNT}"
     local id
-    id=$(sbatch --parsable --account="$ACCOUNT" --export=ALL \
+    id=$(sbatch --parsable --account="$account" --export=ALL \
         --output="$EXP_DIR/logs/%x.%A_%a.out" "$@")
     echo "$(date -Is) $name $id" >> logs/jobs.txt
     echo "$name: $id" >&2
