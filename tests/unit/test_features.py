@@ -2,6 +2,7 @@
 
 import json
 
+import h5py
 import numpy as np
 import pandas as pd
 import pytest
@@ -19,6 +20,35 @@ def prepared(tmp_path, kgp_mini):
     h5 = ds.build(kgp_mini.plink_prefix, tmp_path / "d.h5", class_labels=kgp_mini.labels)
     dietnet("partition", dataset=h5, out=tmp_path / "p.npz")
     return h5, tmp_path / "p.npz"
+
+
+def test_genotype_freq_pools_upstreams_per_class_frequencies(prepared, tmp_path):
+    """The regression baseline: count(genotype == g) / n over each fold's training
+    samples, which is upstream's per-class embedding averaged with class sizes as
+    weights."""
+    h5, partition = prepared
+    pooled, meta = features.build(
+        {"blocks": [{"provider": "genotype_freq", "block": 37}]}, h5, partition, tmp_path / "e.npz"
+    )
+    per_class, _ = features.build(
+        {"blocks": [{"provider": "class_genotype_freq"}]}, h5, partition, tmp_path / "c.npz"
+    )
+
+    x = ds.memmap_inputs(h5)
+    with h5py.File(h5, "r") as f:
+        labels = np.array(f["class_labels"])
+    folds = np.load(partition, allow_pickle=True)["folds_indexes"]
+    assert pooled.shape == (len(folds), x.shape[1], 3)
+    assert meta["column_names"] == ["all:genotype0", "all:genotype1", "all:genotype2"]
+    for f, fold in enumerate(folds):
+        train = np.asarray(fold[0])
+        g = np.asarray(x[np.sort(train)])
+        direct = np.stack([(g == value).mean(axis=0) for value in range(3)], axis=1)
+        np.testing.assert_allclose(pooled[f], direct)
+
+        sizes = np.bincount(labels[train], minlength=per_class.shape[-1] // 3)
+        weighted = per_class[f].reshape(x.shape[1], -1, 3) * (sizes / sizes.sum())[None, :, None]
+        np.testing.assert_allclose(pooled[f], weighted.sum(axis=1))
 
 
 def table_from_ids(h5):

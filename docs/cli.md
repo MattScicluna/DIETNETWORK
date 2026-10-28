@@ -94,6 +94,22 @@ and alleles to Google's API; see [SNP features](features.md#alphagenome-variant-
 | `--chunk INTEGER` | SNPs per saved part | 200 |
 | `--max-workers INTEGER` | parallel API requests | 5 |
 
+## `dietnet adjust-phenotype`
+
+A trait regressed on covariates and standardised, as regression labels for
+`create-dataset --regression-labels`: the residual of `trait ~ 1 + covariates`
+divided by its SD. Text covariates (e.g. assessment centre) become indicator
+columns. Samples missing the trait or a covariate are left out; the summary
+(samples, covariates' R², coefficients) goes to `<out>.json`. For height:
+`--trait height --covariates sex,age`, since a model of autosomes cannot see sex.
+
+| option | | default |
+|---|---|---|
+| `--phenotypes PATH` | *existing* TSV, header row, sample id first | required |
+| `--trait TEXT` | the column to predict | required |
+| `--covariates TEXT` | columns to adjust for, comma-separated | none |
+| `--out PATH` | labels TSV | required |
+
 ## `dietnet pack-genotypes`
 
 Write a 2-bit copy of the dataset's genotypes next to it

@@ -201,6 +201,44 @@ def alphagenome_scores(dataset_path, bim, out, scorers, sequence_length, chunk, 
     click.echo(f"wrote {out}")
 
 
+@main.command("adjust-phenotype")
+@click.option(
+    "--phenotypes",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="TSV with a header row: sample id first, then one column per variable.",
+)
+@click.option("--trait", required=True, help="The column to predict, e.g. height.")
+@click.option(
+    "--covariates",
+    callback=lambda ctx, param, value: [c for c in (value or "").split(",") if c],
+    help="Columns to adjust for, comma-separated, e.g. sex,age (text ones become indicators).",
+)
+@click.option("--out", required=True, type=click.Path(path_type=Path), help="Labels TSV.")
+def adjust_phenotype(phenotypes, trait, covariates, out):
+    """A trait regressed on covariates and standardised, as regression labels.
+
+    Writes `sample<TAB><trait>` for create-dataset --regression-labels: the
+    residual of trait ~ 1 + covariates divided by its SD. Samples missing the
+    trait or a covariate are left out, so pass create-dataset only those.
+    """
+    import json
+
+    from dietnet import phenotype
+
+    try:
+        adjusted, summary = phenotype.adjust(phenotype.read_table(phenotypes), trait, covariates)
+    except ValueError as error:
+        raise click.ClickException(str(error)) from None
+    out.parent.mkdir(parents=True, exist_ok=True)
+    adjusted.rename_axis("sample").to_frame().to_csv(out, sep="\t")
+    Path(f"{out}.json").write_text(json.dumps(summary, indent=2) + "\n")
+    click.echo(
+        f"{summary['samples']} samples ({summary['dropped_missing']} missing a value left out); "
+        f"covariates explain R^2 = {summary['covariate_r2']:.3f} of {trait}; wrote {out}"
+    )
+
+
 @main.command("pack-genotypes")
 @_dataset
 def pack_genotypes(dataset_path):
@@ -449,6 +487,20 @@ def predict(model_dir, plink_prefix, out, work_dir, seeds, folds, batch_size, de
     click.echo(f"wrote {out}")
 
 
+def _regression_metrics(prediction, label) -> dict:
+    """Pearson r, R^2 (1 - SSE/SST about the labels' own mean) and RMSE."""
+    import numpy as np
+
+    p, y = np.asarray(prediction, dtype=float), np.asarray(label, dtype=float)
+    sse, sst = ((y - p) ** 2).sum(), ((y - y.mean()) ** 2).sum()
+    return {
+        "n": len(y),
+        "r": float(np.corrcoef(p, y)[0, 1]),
+        "r2": float(1 - sse / sst),
+        "rmse": float(np.sqrt(sse / len(y))),
+    }
+
+
 @main.command()
 @click.option(
     "--predictions", type=click.Path(exists=True, path_type=Path), help="From dietnet predict."
@@ -464,14 +516,31 @@ def predict(model_dir, plink_prefix, out, work_dir, seeds, folds, batch_size, de
 )
 @click.option("--min-accuracy", type=float, help="Exit with status 1 below this.")
 def check(predictions, packages_dir, labels, min_accuracy):
-    """Accuracy of predictions against labels, overall and per class."""
+    """Accuracy of predictions against labels, overall and per class; for
+    regression, Pearson r, R^2 and RMSE."""
     import pandas as pd
 
     from dietnet import package
 
     if packages_dir:
+        found = package.find(packages_dir)
+        if found and all(pkg.metadata.get("task") == "regression" for pkg in found):
+            rows = []
+            for pkg in found:
+                held_out = pd.read_csv(pkg.path / "test_predictions.tsv", sep="\t")
+                rows.append({**{k: pkg.metadata[k] for k in ("seed", "fold")},
+                             **_regression_metrics(held_out["prediction"], held_out["label"])})  # fmt: skip
+            table = pd.DataFrame(rows)
+            click.echo(table.round(4).to_string(index=False))
+            click.echo(
+                f"mean held-out r: {table['r'].mean():.4f} (sd {table['r'].std():.4f}), "
+                f"R^2: {table['r2'].mean():.4f}, RMSE: {table['rmse'].mean():.4f}"
+            )
+            if min_accuracy is not None:
+                raise click.UsageError("--min-accuracy applies to classification packages")
+            return
         rows = []
-        for pkg in package.find(packages_dir):
+        for pkg in found:
             held_out = pd.read_csv(pkg.path / "test_predictions.tsv", sep="\t", dtype=str)
             rows.append({**{k: pkg.metadata[k] for k in ("seed", "fold")},
                          "n": len(held_out),
@@ -487,6 +556,14 @@ def check(predictions, packages_dir, labels, min_accuracy):
         merged = preds.merge(truth[["sample", "label"]], on="sample")
         if merged.empty:
             raise click.ClickException("no sample in common between predictions and labels")
+        numeric = merged[["prediction", "label"]].apply(pd.to_numeric, errors="coerce")
+        if numeric.notna().all().all():  # regression: a trait, not classes
+            m = _regression_metrics(numeric["prediction"], numeric["label"])
+            click.echo(f"r: {m['r']:.4f}, R^2: {m['r2']:.4f}, RMSE: {m['rmse']:.4f} "
+                       f"over {m['n']} samples")  # fmt: skip
+            if min_accuracy is not None:
+                raise click.UsageError("--min-accuracy applies to class predictions")
+            return
         merged["correct"] = merged["prediction"] == merged["label"]
         per_class = merged.groupby("label")["correct"].agg(["size", "mean"])
         click.echo(per_class.rename(columns={"size": "n", "mean": "accuracy"}).to_string())
