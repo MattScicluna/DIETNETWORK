@@ -28,13 +28,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `DataLoader` workers and pinned memory; sampler, shuffling and random-number
   use are untouched, so the model is bit-identical to train.py left alone
   (`--loader upstream`), from every genotype store and with workers.
-- `dietnet train --gpus N`: data-parallel training on one node
-  (`dietnet.parallel`, DDP). Upstream's model, task handlers, epoch logic
-  (baseline, annealing, best-model rule, patience) and result files, so packages
-  come out as from train.py; each GPU reads its share of every epoch's samples
-  a batch at a time, packed genotypes are decoded on the GPU, and the config's
-  `batch_size` is the global batch. Not bit-identical to train.py; judged on
-  held-out accuracy.
+- `dietnet train --engine dietnet` (and `--gpus N`, which implies it):
+  upstream's model, task handlers, epoch logic (baseline, annealing, best-model
+  rule, patience) and result files in a loop of dietnet's own
+  (`dietnet.parallel`), so packages come out as from train.py. It reads the
+  packed copy a batch at a time and decodes it on the GPU, skips train.py's
+  per-batch bookkeeping and its per-epoch evaluation of the training set, and
+  can run data-parallel (DDP; the config's `batch_size` is the global batch).
+  On a UK Biobank-sized matrix: 13.5 s per epoch on one A100 against 65–80 s
+  for upstream in RAM, in 8 GB instead of 82 GB. Not bit-identical to
+  train.py; judged on held-out accuracy. Benchmarks and a batch-size study on
+  the published 1KGP split are in docs/scaling.md.
 - `benchmarks/`: training time by genotype store, and training throughput by
   loader, workers, missing-value fill and batch size, on real or simulated
   genotypes at any shape.
