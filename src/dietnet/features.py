@@ -22,6 +22,12 @@ Providers:
     Genotype frequencies per class and fold: upstream's generate_embedding.py,
     run unmodified. Alone, the result is exactly what ``dietnet
     generate-embedding`` writes.
+``genotype_freq``
+    Genotype frequencies per fold over all its training samples, classes
+    pooled: the same definition without the split by class, for regression
+    tasks (which have no classes) or as a baseline. Read a block of samples at a
+    time from a genotype store (``inputs``: as for ``train``), so it scales to
+    a biobank.
 ``precomputed``
     A table with ``chrom``, ``pos``, ``ref``, ``alt`` and numeric feature
     columns (TSV, optionally gzipped, or parquet), matched to the dataset's SNPs
@@ -103,6 +109,41 @@ def _class_genotype_freq(ctx: Context, spec: dict) -> Block:
     return Block(values, columns, {"fold_dependent": True})
 
 
+def _genotype_freq(ctx: Context, spec: dict) -> Block:
+    """Genotype frequencies over each fold's training samples, classes pooled.
+
+    Upstream's definition (generate_embedding.py) without the split by class:
+    ``count(genotype == g) / n`` for g in 0, 1, 2, missing genotypes counted in
+    ``n``. For tasks without classes, such as regression. One pass over the
+    rows any fold trains on, a block at a time from a genotype store, so it
+    scales to a biobank.
+    """
+    from dietnet import genotypes
+
+    folds = np.load(ctx.partition, allow_pickle=True)["folds_indexes"]
+    store = genotypes.open_store(
+        ctx.dataset, genotypes.choose(ctx.dataset, spec.get("inputs", "auto"))
+    )
+    n_rows, n_snps = store.shape
+    member = np.zeros((len(folds), n_rows), dtype=bool)
+    for f, fold in enumerate(folds):
+        member[f, np.asarray(fold[0])] = True
+    counts = np.zeros((len(folds), n_snps, 3))
+    rows = np.flatnonzero(member.any(axis=0))
+    block = int(spec.get("block", 2048))
+    for start in range(0, len(rows), block):
+        chunk = rows[start : start + block]
+        g = np.asarray(store[chunk])
+        for f in range(len(folds)):
+            sel = g[member[f, chunk]]
+            for value in range(3):
+                counts[f, :, value] += (sel == value).sum(axis=0)
+    n = member.sum(axis=1)
+    values = counts / n[:, None, None]
+    columns = [f"all:genotype{value}" for value in range(3)]
+    return Block(values, columns, {"fold_dependent": True, "training_samples": n.tolist()})
+
+
 def _read_table(path) -> pd.DataFrame:
     path = Path(path)
     if path.suffix == ".parquet":
@@ -182,6 +223,7 @@ def _shuffled(ctx: Context, spec: dict) -> Block:
 
 PROVIDERS = {
     "class_genotype_freq": _class_genotype_freq,
+    "genotype_freq": _genotype_freq,
     "precomputed": _precomputed,
     "random": _random,
     "shuffled": _shuffled,

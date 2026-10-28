@@ -39,6 +39,15 @@ it was trained on.
     run unmodified. Alone, the result is exactly what
     `dietnet generate-embedding` writes. Takes `ncpus`.
 
+`genotype_freq`
+:   Genotype frequencies per fold over all its training samples, classes
+    pooled: upstream's definition (`count(genotype == g) / n`, missing
+    genotypes counted in `n`) without the split by class. It equals the
+    per-class frequencies averaged with class sizes as weights. A regression
+    task (height, say) has no classes, so this is its baseline. It reads the
+    genotypes a block of samples at a time from a genotype store (`inputs:`,
+    as for `train`; `block:` samples per read), so it scales to a biobank.
+
 `precomputed`
 :   A table with `chrom`, `pos`, `ref`, `alt` and numeric feature columns (TSV,
     optionally gzipped, or parquet, which needs `pyarrow` installed), matched to the dataset's SNPs by position

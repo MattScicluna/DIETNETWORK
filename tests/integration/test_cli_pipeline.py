@@ -133,6 +133,50 @@ def test_regression_end_to_end(tmp_path, synthetic):
     assert list(table.columns) == ["sample", "prediction", "sd_across_models"]
     assert np.isfinite(table["prediction"]).all()
 
+    report = dietnet("check", packages=packages)
+    assert "mean held-out r:" in report and "R^2" in report
+
+
+def test_regression_on_pooled_frequencies_with_the_dietnet_engine(tmp_path, synthetic):
+    """The height setup: a trait with no classes, the auxiliary network fed genotype
+    frequencies pooled over classes, trained by the dietnet engine."""
+    root = tmp_path / "reg"
+    train_pipeline(root, synthetic, folds="0", task="regression")  # dataset, partition, stats
+    (root / "spec.yaml").write_text(yaml.safe_dump({"blocks": [{"provider": "genotype_freq"}]}))
+    dietnet("build-embedding", dataset=root / "dataset.h5", partition=root / "partition.npz",
+            spec=root / "spec.yaml", out=root / "pooled.npz")  # fmt: skip
+    dietnet(
+        "train",
+        "--engine=dietnet",
+        dataset=root / "dataset.h5",
+        partition=root / "partition.npz",
+        embedding=root / "pooled.npz",
+        input_stats=root / "stats.npz",
+        config=root / "config.yaml",
+        exp_dir=root / "pooled",
+        seeds=SEED,
+        folds="0",
+        task="regression",
+        workers=0,
+    )
+
+    # The fold tests 40 samples, so r's standard error is ~0.15: no threshold on
+    # it would separate a working model from chance (CI's runners got 0.26, this
+    # Mac more). What must hold is the run end to end, and check's arithmetic.
+    report = dietnet("check", packages=root / "pooled" / "packages")
+    (held_out,) = (root / "pooled" / "packages").rglob("test_predictions.tsv")
+    t = pd.read_csv(held_out, sep="\t")
+    assert len(t) == 40 and np.isfinite(t["prediction"]).all()
+    r = np.corrcoef(t["prediction"], t["label"])[0, 1]
+    r2 = (
+        1
+        - ((t["label"] - t["prediction"]) ** 2).sum()
+        / ((t["label"] - t["label"].mean()) ** 2).sum()
+    )
+    rmse = np.sqrt(((t["label"] - t["prediction"]) ** 2).mean())
+    assert f"mean held-out r: {r:.4f}" in report
+    assert f"R^2: {r2:.4f}, RMSE: {rmse:.4f}" in report
+
 
 def test_info_reports_unmodified_upstream():
     out = dietnet("info")

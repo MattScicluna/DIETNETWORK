@@ -86,6 +86,11 @@ dietnet check --packages exp/packages            # each model's held-out test ac
 `--model mlp` trains upstream's MLP baseline instead: no auxiliary network, no
 `--embedding`. It's the comparison point for any change to the SNP features.
 
+For a quantitative trait such as height, `dietnet adjust-phenotype` regresses it
+on covariates (sex, age) and standardises it; train with `--task regression`,
+the auxiliary network fed `genotype_freq` (frequencies pooled over all
+samples) by `build-embedding`, and `dietnet check` reports r, R² and RMSE.
+
 For a biobank-sized dataset, `dietnet pack-genotypes --dataset dataset.h5` once,
 then `train --inputs packed` reads a 2-bit copy a batch at a time instead of
 loading every genotype into RAM (see the docs' Scaling page).

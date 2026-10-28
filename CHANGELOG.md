@@ -9,6 +9,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- Quantitative traits (height first):
+  - `dietnet adjust-phenotype`: a trait regressed on covariates (numeric, or
+    text as indicators) and standardised, as regression labels; for height,
+    sex and age, which a model of autosomes cannot see.
+  - `build-embedding` provider `genotype_freq`: genotype frequencies per fold
+    over all training samples (upstream's definition with classes pooled),
+    the auxiliary network's baseline for a task without classes; read a block
+    of samples at a time, so it scales to a biobank.
+  - `dietnet check` reports Pearson r, R² and RMSE for regression packages and
+    numeric predictions.
+
 - `dietnet train --inputs auto|ram|memmap`: where training reads genotypes.
   Upstream's train.py copies the whole matrix into RAM first (~83 GB for a
   UK Biobank-sized one); `memmap` reads each batch's rows from the dataset
