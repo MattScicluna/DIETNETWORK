@@ -175,10 +175,28 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
     # many batches upstream's eval_step does its per-batch bookkeeping for.
     eval_batch = max(batch_size, EVAL_BATCH)
 
+    def decoded(batches):
+        """Batches with packed genotypes decoded on the GPU: upstream's eval_step
+        then moves them to the device (a no-op) and carries on as with int8 rows."""
+        for x, y, rows in batches:
+            x = x.to(device, non_blocking=True)
+            yield table[x.long()].reshape(len(x), -1)[:, :n_snps], y, rows
+
+    class _Decoded:
+        def __init__(self, loader):
+            self.loader = loader
+
+        def __len__(self):  # eval_step sizes its per-batch results by it
+            return len(self.loader)
+
+        def __iter__(self):
+            return decoded(self.loader)
+
     def eval_loader(rows):
-        split = Split(store, labels, rows)
+        split = Split(store, labels, rows, packed=packed)
         sampler = BatchSampler(SequentialSampler(split), eval_batch, False)
-        return split, _loader(split, sampler, args.workers)
+        loader = _loader(split, sampler, args.workers)
+        return split, (_Decoded(loader) if packed else loader)
 
     valid_set, valid_loader = eval_loader(valid_rows)
     results = Path(args.exp_path) / args.exp_name

@@ -41,8 +41,8 @@ if [ "${STAGE:-0}" = 1 ]; then
     DATASET="$SLURM_TMPDIR/dataset.h5"
 fi
 
-cat > "$RUN/config.yaml" <<'EOF'
-batch_size: 138
+cat > "$RUN/config.yaml" <<EOF
+batch_size: ${BATCH:-138}
 epochs: 2
 input_dropout: 0.995
 dropout_main: 0.1
