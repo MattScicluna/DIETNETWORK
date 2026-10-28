@@ -29,12 +29,17 @@ submit() {  # submit <name> [sbatch options...] <script>: prints the job id
 }
 
 # Simulate, then prepare.sh, with the fileset itself as the cohort (every
-# sample is kept, so there is nothing to subset).
-sim=$(submit simulate "${CPU[@]}" --job-name=traits_simulate --cpus-per-task=32 --mem=200G \
-    --time=06:00:00 --wrap "set -e; \"$DIETNET_VENV/bin/python\" \"$HERE/dryrun/simulate.py\" \
-    \"$SIM_DIR\" --shape $SHAPE --procs 24; bash \"$HERE/prepare.sh\"; \
-    for e in bed bim fam; do ln -sfn \"$GENOTYPES.\$e\" \"$EXP_DIR/cohort.\$e\"; done")
-data=$(submit dataset "${CPU[@]}" --array=0 --dependency="afterok:$sim" "$HERE/dataset.sbatch")
+# sample is kept, so there is nothing to subset). A finished simulation is reused.
+after=()
+if [ ! -e "$EXP_DIR/cohort.bed" ]; then
+    sim=$(submit simulate "${CPU[@]}" --job-name=traits_simulate --cpus-per-task=32 \
+        --mem=200G --time=06:00:00 --wrap "set -e; \"$DIETNET_VENV/bin/python\" \
+        \"$HERE/dryrun/simulate.py\" \"$SIM_DIR\" --shape $SHAPE --procs 24; \
+        bash \"$HERE/prepare.sh\"; \
+        for e in bed bim fam; do ln -sfn \"$GENOTYPES.\$e\" \"$EXP_DIR/cohort.\$e\"; done")
+    after=(--dependency="afterok:$sim")
+fi
+data=$(submit dataset "${CPU[@]}" --array=0 "${after[@]}" "$HERE/dataset.sbatch")
 part=$(submit partition "${CPU[@]}" --dependency="afterok:${data}_0" "$HERE/partition.sbatch")
 stats=$(submit stats "${CPU[@]}" --dependency="afterok:$part" "$HERE/stats.sbatch")
 merged=$(submit merge_stats "${CPU[@]}" --dependency="afterok:$stats" "$HERE/merge_stats.sbatch")
