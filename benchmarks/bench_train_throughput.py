@@ -26,7 +26,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
-from dietnet import upstream
+from dietnet import genotypes, upstream
 from dietnet.dataset import memmap_inputs
 
 CONFIG = {
@@ -62,32 +62,45 @@ class PerSample(Dataset):
 
 
 class Batched(Dataset):
-    """One sorted read per batch: item k is batch k."""
+    """One sorted read per batch: item k is batch k.
 
-    def __init__(self, dataset, batches, labels):
-        self.dataset, self.batches, self.labels, self.x = dataset, batches, labels, None
+    ``kind``: "batched" reads the int8 rows from the dataset's memory map;
+    "packed-cpu" reads the 2-bit copy and decodes in the worker; "packed-gpu"
+    hands over the packed bytes (a quarter of the transfer) for the GPU to decode.
+    """
+
+    def __init__(self, dataset, batches, labels, kind):
+        self.dataset, self.batches, self.labels, self.kind = dataset, batches, labels, kind
+        self.x = None
 
     def __len__(self):
         return len(self.batches)
 
     def __getitem__(self, k):
         if self.x is None:
-            self.x = memmap_inputs(self.dataset)
+            if self.kind == "batched":
+                self.x = memmap_inputs(self.dataset)
+            else:
+                self.x = genotypes.PackedStore(self.dataset)
         rows = np.sort(self.batches[k])
-        return torch.from_numpy(np.array(self.x[rows])), torch.from_numpy(self.labels[rows])
+        if self.kind == "packed-gpu":
+            x = self.x.packed_rows(rows)
+        else:
+            x = np.asarray(self.x[rows])
+        return torch.from_numpy(x), torch.from_numpy(self.labels[rows])
 
 
 def loader(kind, dataset, rows, labels, batch_size, workers, rng):
     extra = {"num_workers": workers, "pin_memory": True}
     if workers:
-        extra.update(prefetch_factor=4, persistent_workers=True)
+        extra.update(prefetch_factor=2, persistent_workers=True)
     if kind == "per-sample":
         return DataLoader(
             PerSample(dataset, rows, labels), batch_size=batch_size, shuffle=True, **extra
         )
     order = rng.permutation(rows)
     batches = [order[i : i + batch_size] for i in range(0, len(order), batch_size)]
-    return DataLoader(Batched(dataset, batches, labels), batch_size=None, **extra)
+    return DataLoader(Batched(dataset, batches, labels, kind), batch_size=None, **extra)
 
 
 def _forever(data):
@@ -151,9 +164,15 @@ def main() -> None:
         if device.type == "cuda":
             torch.cuda.synchronize()
 
+    kinds = ["per-sample", "batched"]
+    if genotypes.is_packed(dataset):
+        kinds += ["packed-cpu", "packed-gpu"]
+    decode = torch.from_numpy(genotypes._DECODE).to(device)
+    n_snps = mus.numel()
+
     print("table\tbatch_size\tloader\tworkers\tmissing\tsamples_per_s")
     for b in args.batch_sizes:
-        for kind in ("per-sample", "batched"):
+        for kind in kinds:
             for w in args.workers:
                 rate = timed(loader(kind, dataset, rows, labels, b, w, rng), args.batches)
                 print(f"loader\t{b}\t{kind}\t{w}\t-\t{rate:.0f}", flush=True)
@@ -161,9 +180,12 @@ def main() -> None:
         handler = model_for(b)
         model, task = handler.model, handler.task_handler
 
-        def make_step(vectorised):
+        def make_step(vectorised, packed_on_gpu=False):
             def step(x, y):
-                x = x.to(device, non_blocking=True).float()
+                x = x.to(device, non_blocking=True)
+                if packed_on_gpu:
+                    x = decode[x.long()].reshape(len(x), -1)[:, :n_snps]
+                x = x.float()
                 y = task.format_ybatch(y.to(device, non_blocking=True))
                 if vectorised:
                     x = torch.where(x >= 0, x, mus)
@@ -180,12 +202,15 @@ def main() -> None:
             return step
 
         best = max(args.workers)
-        for kind, w in (("per-sample", 0), ("batched", best)):
-            for vectorised in (False, True):
-                data = loader(kind, dataset, rows, labels, b, w, rng)
-                rate = timed(data, args.batches, make_step(vectorised), sync)
-                missing = "vectorised" if vectorised else "upstream loop"
-                print(f"train\t{b}\t{kind}\t{w}\t{missing}\t{rate:.0f}", flush=True)
+        runs = [("per-sample", 0, False)] + [(kind, best, True) for kind in kinds[1:]]
+        if b <= 512:  # upstream's loop over samples, with the fast loader: slow at large b
+            runs.insert(1, ("batched", best, False))
+        for kind, w, vectorised in runs:
+            data = loader(kind, dataset, rows, labels, b, w, rng)
+            step = make_step(vectorised, packed_on_gpu=kind == "packed-gpu")
+            rate = timed(data, args.batches, step, sync)
+            missing = "vectorised" if vectorised else "upstream loop"
+            print(f"train\t{b}\t{kind}\t{w}\t{missing}\t{rate:.0f}", flush=True)
 
 
 if __name__ == "__main__":

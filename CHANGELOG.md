@@ -16,6 +16,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   installs in train.py's `FoldDataset`. The model is bit-identical. `auto`
   memory-maps above 2 GiB. Stage the dataset to local disk: from network
   storage an epoch took 45x longer (benchmarks in `docs/scaling.md`).
+- `dietnet pack-genotypes` and `train --inputs packed`: a 2-bit copy of the
+  genotypes (four per byte, missing as 3), sample-major and memory-mapped, so
+  training from disk reads a quarter of the bytes. Decoded exactly
+  (bit-identical model); a copy whose dataset has changed since is refused.
+  `auto` uses it when present.
+- `dietnet train --loader fast` (the default) and `--workers`: upstream's
+  train.py, unmodified, fed whole batches per read by loader workers, with
+  missing values filled in one operation instead of a Python loop over the
+  batch. The launcher gives train.py's `FoldDataset` a `__getitems__` and its
+  `DataLoader` workers and pinned memory; sampler, shuffling and random-number
+  use are untouched, so the model is bit-identical to train.py left alone
+  (`--loader upstream`), from every genotype store and with workers.
 - `benchmarks/`: training time by genotype store, and training throughput by
   loader, workers, missing-value fill and batch size, on real or simulated
   genotypes at any shape.

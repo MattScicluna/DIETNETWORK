@@ -201,6 +201,20 @@ def alphagenome_scores(dataset_path, bim, out, scorers, sequence_length, chunk, 
     click.echo(f"wrote {out}")
 
 
+@main.command("pack-genotypes")
+@_dataset
+def pack_genotypes(dataset_path):
+    """Write a 2-bit copy of the dataset's genotypes, for `train --inputs packed`.
+
+    A quarter of the bytes, so training from disk reads 4x less. Written next to
+    the dataset (<dataset>.packed.npy); rerun after the dataset changes.
+    """
+    from dietnet import genotypes
+
+    out = genotypes.pack(dataset_path)
+    click.echo(f"wrote {out}")
+
+
 @main.command("compute-input-stats")
 @_dataset
 @_partition
@@ -239,12 +253,26 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus):
 )
 @click.option(
     "--inputs",
-    type=click.Choice(["auto", "ram", "memmap"]),
+    type=click.Choice(["auto", "ram", "memmap", "packed"]),
     default="auto",
     show_default=True,
     help="Where training reads genotypes: 'ram' copies all of them into memory first "
-    "(upstream), 'memmap' reads each batch from the dataset file. Same model; 'auto' "
+    "(upstream), 'memmap' reads each batch from the dataset file, 'packed' from its 2-bit "
+    "copy (pack-genotypes). Same model; 'auto' uses the packed copy if there is one, else "
     "memory-maps above 2 GiB.",
+)
+@click.option(
+    "--loader",
+    type=click.Choice(["fast", "upstream"]),
+    default="fast",
+    show_default=True,
+    help="'fast' reads each batch in one call with loader workers and fills missing values "
+    "in one operation; 'upstream' leaves train.py's loader alone. Same model.",
+)
+@click.option(
+    "--workers",
+    type=click.IntRange(min=0),
+    help="Loader processes for --loader fast. Default: the CPUs available, less one, at most 8.",
 )
 def train(
     dataset_path,
@@ -259,6 +287,8 @@ def train(
     normalize,
     model,
     inputs,
+    loader,
+    workers,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -269,7 +299,7 @@ def train(
             input_stats=input_stats, config=config, exp_dir=exp_dir, seeds=seeds,
             folds=folds, task=task, normalize=normalize,
             model={"dietnet": "Dietnet", "mlp": "Mlp"}[model],
-            inputs=inputs,
+            inputs=inputs, loader=loader, workers=workers,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

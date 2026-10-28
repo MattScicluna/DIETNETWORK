@@ -52,6 +52,52 @@ def test_a_dataset_that_cannot_be_mapped(chunked, monkeypatch):
         genotypes.choose(chunked, "memmap")
 
 
+@pytest.mark.parametrize("n_snps", [1, 4, 7, 2001])
+def test_two_bits_hold_every_genotype_exactly(n_snps):
+    rng = np.random.default_rng(n_snps)
+    rows = rng.integers(-1, 3, size=(13, n_snps)).astype(np.int8)  # -1 is missing
+
+    packed = genotypes.encode(rows)
+
+    assert packed.dtype == np.uint8 and packed.shape == (13, -(-n_snps // 4))
+    np.testing.assert_array_equal(genotypes.decode(packed, n_snps), rows)
+
+
+def test_a_packed_store_gives_exactly_the_rows_upstream_copies(dataset):
+    genotypes.pack(dataset)
+    ram = genotypes.open_store(dataset, "ram")
+    packed = genotypes.open_store(dataset, "packed")
+
+    assert packed.shape == ram.shape and len(packed) == len(ram)
+    for rows in (np.array([5, 0, 479, 5, 200]), np.arange(len(ram)), [3]):
+        np.testing.assert_array_equal(packed[rows], ram[rows])
+    for row in (0, np.int64(17), len(ram) - 1):
+        np.testing.assert_array_equal(packed[row], ram[row])
+    assert genotypes.packed_path(dataset).stat().st_size < ram.nbytes / 3
+
+
+def test_auto_prefers_an_up_to_date_pack(dataset):
+    assert genotypes.choose(dataset, "auto") == "ram"
+    with pytest.raises(ValueError, match="pack-genotypes"):
+        genotypes.choose(dataset, "packed")
+
+    genotypes.pack(dataset)
+
+    assert genotypes.choose(dataset, "auto") == "packed"
+    assert genotypes.choose(dataset, "memmap") == "memmap"
+
+
+def test_a_pack_of_a_dataset_that_changed_since_is_refused(dataset):
+    genotypes.pack(dataset)
+    with h5py.File(dataset, "a") as f:  # e.g. rebuilt with other samples
+        f.attrs["rebuilt"] = 1
+
+    assert not genotypes.is_packed(dataset)
+    assert genotypes.choose(dataset, "auto") == "ram"
+    with pytest.raises(ValueError, match="up-to-date"):
+        genotypes.open_store(dataset, "packed")
+
+
 def test_an_explicit_mode_is_kept_and_an_unknown_one_refused(dataset):
     assert genotypes.choose(dataset, "ram") == "ram"
     assert genotypes.choose(dataset, "memmap") == "memmap"

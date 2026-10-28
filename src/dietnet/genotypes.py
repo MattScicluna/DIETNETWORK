@@ -6,21 +6,24 @@ a biobank that copy is hundreds of GB. Training only ever needs one batch of
 rows at a time, so the copy is an implementation detail, and replaceable.
 
 A *store* is anything that gives those rows by sample index -- ``store[i]`` or
-``store[indices]`` -- as int8 arrays:
+``store[indices]`` -- as int8 arrays (dosage 0, 1, 2; -1 missing):
 
 - ``ram``: upstream's copy in memory.
 - ``memmap``: a memory map of the dataset file (:func:`dietnet.dataset.memmap_inputs`).
   Rows are read when a batch asks for them; the OS keeps what it can in its
   page cache, which every process on a node shares.
+- ``packed``: a memory map of a 2-bit copy (:func:`pack`), a quarter of the
+  bytes, decoded per batch. Training from local disk is limited by how many
+  bytes it reads, so this is the fastest store when the data does not fit in
+  memory.
 
-Both give the same rows, so the model trained from either is the same. The
-store is the seam for what comes next: a packed (2-bit) backend if reading is
-the bottleneck, and a data-parallel loop in which each GPU reads its own
-batches from one shared store.
+All give the same rows, so the model trained from any of them is the same.
 """
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 import h5py
@@ -28,21 +31,186 @@ import numpy as np
 
 from dietnet.dataset import memmap_inputs
 
-MODES = ("ram", "memmap")
+MODES = ("ram", "memmap", "packed")
 
-# "auto" maps inputs larger than this (the threshold the 2022 fork used for its
-# PLINK genotype cache); below it a copy in RAM costs little and is fastest.
+# "auto" leaves inputs smaller than this in RAM (the threshold the 2022 fork used
+# for its PLINK genotype cache); a copy in RAM then costs little and is fastest.
 AUTO_MEMMAP_ABOVE_BYTES = 2 * 2**30
+
+# 2-bit codes: dosage 0, 1, 2 as themselves, missing (-1) as 3. Four genotypes per
+# byte, the first in the lowest bits; rows padded to whole bytes.
+_DECODE = np.array(
+    [[(byte >> (2 * k)) & 3 for k in range(4)] for byte in range(256)], dtype=np.int8
+)
+_DECODE[_DECODE == 3] = -1
+
+
+def packed_path(dataset) -> Path:
+    """Where :func:`pack` writes the 2-bit copy of ``dataset``."""
+    return Path(f"{dataset}.packed.npy")
+
+
+def _meta_path(dataset) -> Path:
+    return Path(f"{dataset}.packed.json")
+
+
+def _source(dataset) -> dict:
+    """What a pack was built from: if the dataset changes, the pack is stale."""
+    stat = os.stat(dataset)
+    with h5py.File(dataset, "r") as f:
+        n_samples, n_snps = f["inputs"].shape
+    return {
+        "n_samples": int(n_samples),
+        "n_snps": int(n_snps),
+        "size": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+    }
+
+
+def encode(rows: np.ndarray) -> np.ndarray:
+    """int8 genotype rows (samples x SNPs) as 2-bit packed uint8 (samples x ceil(SNPs/4))."""
+    rows = np.atleast_2d(rows)
+    n, m = rows.shape
+    codes = np.zeros((n, -(-m // 4) * 4), dtype=np.uint8)
+    codes[:, :m] = np.where(rows < 0, 3, rows)
+    codes = codes.reshape(n, -1, 4)
+    return codes[..., 0] | (codes[..., 1] << 2) | (codes[..., 2] << 4) | (codes[..., 3] << 6)
+
+
+def decode(packed: np.ndarray, n_snps: int) -> np.ndarray:
+    """Packed rows back to int8 rows (samples x n_snps)."""
+    packed = np.atleast_2d(packed)
+    rows = _DECODE[packed].reshape(len(packed), -1)
+    return rows if rows.shape[1] == n_snps else np.ascontiguousarray(rows[:, :n_snps])
+
+
+def pack(dataset, block: int = 4096) -> Path:
+    """Write the 2-bit copy of ``dataset``'s inputs next to it; return its path.
+
+    Reads the dataset ``block`` samples at a time, so memory stays small. The
+    sidecar ``.packed.json`` records the dataset it came from.
+    """
+    dataset = Path(dataset)
+    source = _source(dataset)
+    n, m = source["n_samples"], source["n_snps"]
+    out = packed_path(dataset)
+    tmp = out.with_name(out.name + ".partial")
+    packed = np.lib.format.open_memmap(tmp, mode="w+", dtype=np.uint8, shape=(n, -(-m // 4)))
+    with h5py.File(dataset, "r") as f:
+        for start in range(0, n, block):
+            packed[start : start + block] = encode(f["inputs"][start : start + block])
+    packed.flush()
+    del packed
+    os.replace(tmp, out)
+    _meta_path(dataset).write_text(json.dumps(source))
+    return out
+
+
+def is_packed(dataset) -> bool:
+    """Whether ``dataset`` has a 2-bit copy built from it as it is now."""
+    meta = _meta_path(dataset)
+    if not (packed_path(dataset).exists() and meta.exists()):
+        return False
+    return json.loads(meta.read_text()) == _source(dataset)
+
+
+class PackedStore:
+    """int8 rows decoded from the 2-bit copy, read through a memory map.
+
+    ``store[i]`` is one row, ``store[indices]`` a block of rows, as for a numpy
+    array; :meth:`packed_rows` gives the undecoded bytes, for decoding on a GPU.
+    """
+
+    def __init__(self, dataset):
+        if not is_packed(dataset):
+            raise ValueError(
+                f"{dataset} has no up-to-date packed copy; run `dietnet pack-genotypes`"
+            )
+        self.dataset = Path(dataset)
+        self.n_snps = json.loads(_meta_path(dataset).read_text())["n_snps"]
+        self._packed = None
+        self.shape = (len(self.packed), self.n_snps)
+        self.dtype = np.dtype(np.int8)
+
+    @property
+    def packed(self) -> np.ndarray:
+        if self._packed is None:  # opened where it is used: a loader worker maps its own
+            self._packed = np.load(packed_path(self.dataset), mmap_mode="r")
+        return self._packed
+
+    def __getstate__(self):
+        return {**self.__dict__, "_packed": None}
+
+    def __len__(self) -> int:
+        return self.shape[0]
+
+    def packed_rows(self, rows) -> np.ndarray:
+        return np.asarray(self.packed[rows])
+
+    def __getitem__(self, rows) -> np.ndarray:
+        if np.ndim(rows) == 0:
+            return decode(self.packed[int(rows)], self.n_snps)[0]
+        return decode(self.packed_rows(rows), self.n_snps)
+
+
+class MemmapStore:
+    """int8 rows read through a memory map of the dataset's ``inputs``.
+
+    Indexes like the array it wraps; unlike an ``np.memmap``, it pickles as its
+    path, so a loader worker maps the file itself instead of being sent a copy.
+    """
+
+    def __init__(self, dataset):
+        self.dataset = Path(dataset)
+        self._x = None
+        self.shape, self.dtype = self.x.shape, self.x.dtype
+
+    @property
+    def x(self) -> np.ndarray:
+        if self._x is None:
+            self._x = memmap_inputs(self.dataset)
+        return self._x
+
+    def __getstate__(self):
+        return {**self.__dict__, "_x": None}
+
+    def __len__(self) -> int:
+        return self.shape[0]
+
+    def __getitem__(self, rows) -> np.ndarray:
+        return self.x[rows]
+
+
+def read_rows(store, indices) -> np.ndarray:
+    """``store``'s rows ``indices``, in that order, read in one pass in file order.
+
+    Batches come from a shuffled sampler; reading them sorted turns random reads
+    into forward ones, and the rows are then put back in the sampler's order.
+    """
+    indices = np.asarray(indices)
+    order = np.argsort(indices, kind="stable")
+    rows = np.asarray(store[indices[order]])
+    out = np.empty_like(rows)
+    out[order] = rows
+    return out
 
 
 def choose(dataset, mode: str = "auto") -> str:
-    """The store for ``dataset``: ``mode`` itself, or for "auto", ``memmap`` when
-    ``inputs`` is over :data:`AUTO_MEMMAP_ABOVE_BYTES` and can be mapped
-    (contiguous and uncompressed, as ``dietnet create-dataset`` writes it)."""
+    """The store for ``dataset``: ``mode`` itself, checked, or for "auto": ``packed``
+    if an up-to-date pack exists, else ``memmap`` when ``inputs`` is over
+    :data:`AUTO_MEMMAP_ABOVE_BYTES` and can be mapped (contiguous and
+    uncompressed, as ``dietnet create-dataset`` writes it), else ``ram``."""
     if mode not in (*MODES, "auto"):
         raise ValueError(f"inputs mode must be one of {['auto', *MODES]}, not {mode!r}")
     if mode == "ram":
         return mode
+    if mode == "packed" or (mode == "auto" and is_packed(dataset)):
+        if not is_packed(dataset):
+            raise ValueError(
+                f"cannot read packed genotypes: {dataset} has no up-to-date packed copy; "
+                "run `dietnet pack-genotypes` first"
+            )
+        return "packed"
     try:
         inputs = memmap_inputs(dataset)
     except ValueError as error:
@@ -54,10 +222,12 @@ def choose(dataset, mode: str = "auto") -> str:
     return "ram"
 
 
-def open_store(dataset: str | Path, mode: str) -> np.ndarray:
+def open_store(dataset: str | Path, mode: str):
     """The genotype store for ``dataset`` in ``mode`` (one of :data:`MODES`)."""
+    if mode == "packed":
+        return PackedStore(dataset)
     if mode == "memmap":
-        return memmap_inputs(dataset)
+        return MemmapStore(dataset)
     if mode == "ram":
         with h5py.File(dataset, "r") as f:
             return np.array(f["inputs"], dtype=np.int8)
