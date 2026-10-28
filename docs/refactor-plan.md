@@ -2,7 +2,7 @@
 
 Living document: each pull request that moves the plan updates it.
 
-## Status and next steps (2026-10-27)
+## Status and next steps (2026-10-28)
 
 | Phase | State |
 |---|---|
@@ -13,14 +13,67 @@ Living document: each pull request that moves the plan updates it.
 | 4. Pluggable SNP features (`build-embedding`) | ✅ |
 | 5. AlphaGenome (`dietnet alphagenome`) | ✅ UK Biobank array scored (485,516 SNPs × 3,849 tracks), table on Narval |
 | 6. Training at biobank scale | ✅ `--inputs memmap/packed`, fast loader (bit-identical), `--engine dietnet` (13.5 s/epoch vs 65–80 s, 8 GB vs 82 GB), DDP; batch study: 552 with √-scaled LR keeps accuracy (docs/scaling.md) |
+| 7. Quantitative traits | ✅ `adjust-phenotype`, `genotype_freq` features, r/R²/RMSE in `check` (PR #17) |
 | MLP baseline (published split) | ✅ 0.9117 vs Diet Network 0.9282 retrained (−1.65 points paired, 1 of 15 higher) |
 
+### Resume here: UK Biobank height (2026-10-28)
+
+Goal: predict standing height from autosomal genotypes with the Diet Network,
+and test whether AlphaGenome features for the auxiliary network help.
+
+Decided with Matt:
+- Target: height (field 50) regressed on sex (31) and age at recruitment
+  (21022), then standardised: `dietnet adjust-phenotype --trait height
+  --covariates sex,age`. Autosomes cannot predict sex, so it is adjusted for.
+- Samples: White British, relatives removed so none span folds.
+- Train with `--task regression --engine dietnet --inputs packed`, one model
+  per GPU (docs/scaling.md); compare auxiliary features: `genotype_freq`
+  (baseline), AlphaGenome, `random`, `shuffled` AlphaGenome, and the MLP.
+
+Where the data is, on Narval, under the lab's `ctb-hussinju` project space
+(compute down until 2026-11-03 04:00, reservation POWEROUT20261027; the login
+node and storage work):
+- One file per UKBB field: `grenier2/variables/<field>.csv.gz` (columns
+  `variable_id,sample_id,instance,index,value`): 50 height, 31 sex, 21022 age.
+  No 22006/22020/22021 there.
+- Camille's tables: `cam27/UKBB/PHENOTYPES/{height,sex,bmi}.tab` (`f.eid`,
+  `f.50.0.0`; sex.tab has `f.31.0.0`, `f.22001.0.0`); White British ids:
+  `cam27/UKBB/WB/USEFUL_IDS/wb_ids.txt`.
+- Camille's earlier Diet Network height work: `cam27/DIETNET_EXP/HEIGHT/`:
+  407,686 White British x 408,940 imputed LD-pruned SNPs (`DATA/GENOTYPES/`,
+  41.7 GB .bed), raw-height labels, GIANT-GWAS SNP subsets, PRS-LASSO,
+  females-only sets. Ask her what she found.
+- The UKBB array, QC'd and REF-fixed (485,516 SNPs, GRCh38): grenier2's
+  `Matt_PHATE_project/UKB/liftover_GRCh38/GRCh38/noINDELs_fixref_vcf/`.
+- AlphaGenome scores for those array SNPs, in the user's Narval scratch:
+  `dietnet_refactor/features/alphagenome_ukbb.tsv.gz` (485,516 x 3,849
+  tracks; ids chr:pos:REF:ALT, REF = the .bim's A2).
+
+Open decisions (ask Matt):
+1. SNP set: the 485,516 array SNPs (AlphaGenome already scored) or Camille's
+   408,940 imputed SNPs (comparable to her work; would need ~1 day of
+   AlphaGenome scoring).
+2. Relatedness: the UKBB kinship / sample-QC files were not found by name in
+   the lab space (the PI's directory is not readable); ask where they are, or
+   compute with `plink2 --king-cutoff` (a CPU job) and drop one of each pair.
+
+Then: adjust-phenotype, plink --keep (unrelated White British with height),
+create-dataset --regression-labels, partition, compute-input-stats,
+pack-genotypes, build-embedding per feature set, train (pilot fold first,
+batch 138 vs 552 with learning rates x2), dietnet check (r, R^2).
+
+Lessons from the cluster work:
+- Mila: `ssh mila`, SLURM only, nothing on the login node; benchmark data and
+  checkout in the Mila scratch `dietnet_bench/`. The locked torch (CUDA 13) has
+  no V100 kernels: request A100s. Never update a checkout from inside
+  concurrent jobs that share it (they collided); update it once, then submit.
+- Stage data to `$SLURM_TMPDIR` with `cp -p` (packed copies check mtimes);
+  network storage is unusable for training.
+- Narval benchmark jobs on real UKBB genotypes are queued for after the outage
+  (`runs/bench_train` in the user's scratch).
+
 Next, in order:
-1. When Narval is back (2026-11-03): the UKBB complex-phenotype model. Needs
-   decisions: phenotype and task, the genotype set and samples, the auxiliary
-   features' baseline (AlphaGenome, random, shuffled, allele frequencies).
-   Then: create-dataset, pack-genotypes, one GPU job per (seed, fold) with
-   `--engine dietnet --inputs packed`; a pilot fold at batch 138 vs 552.
+1. The UKBB height model, above.
 2. Run the experiment grid on the published split, 15 models per
    configuration, A100s, about 6 GPU-hours each: freq · AlphaGenome · freq +
    AlphaGenome · freq + random · freq + shuffled AlphaGenome. The MLP
