@@ -62,7 +62,8 @@ Measured on Mila at full shape (424,768 x 485,516, simulated with
 | statistics, per fold | 11 min – 1 h 55 | 124 GB | 200 GB, 4 h |
 | embeddings (freq, ag, freq_ag, freq_random, freq_shuffled) | 7–45 min | 19–117 GB | 180 GB, 3 h |
 | training: staging the 2-bit copy | 1.6–1.8 min | | |
-| training: epoch, batch 138 / 552 | 26 s / 24 s | | 64 GB, 4 h |
+| training: epoch, batch 138 / 552 | 26 s / 24 s | 67 GB (the 2-bit copy is memory-mapped) | 96 GB, 4 h |
+| training: pilot, whole job (random labels: early stop at 34 / 27 epochs) | 18 / 14 min | | |
 
 Reading the genotypes sets the epoch's pace, so batch 552 saves only ~8%: the
 published 138 is the default for the grid. A model is at most ~1.5 h (200
