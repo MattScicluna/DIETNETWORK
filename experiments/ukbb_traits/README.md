@@ -40,18 +40,34 @@ repository, and cohort data and everything derived from it stay on the cluster.
   copy staged to the node's disk (~50 GB; the `.h5` stays on Lustre, linked,
   since training reads only labels from it).
 - Upstream's statistics script loads a fold's training genotypes (~125 GB) and
-  works through the SNPs serially (hours per fold). `stats.sbatch` runs the
-  five folds side by side, on one-fold partitions; `merge_stats.sbatch` joins
-  them into the file one run over all folds writes (the dry run checks they
-  are identical).
+  takes 10 min to 2 h a fold. `stats.sbatch` runs the five folds side by side,
+  on one-fold partitions; `merge_stats.sbatch` joins them into the file one
+  run over all folds writes (the dry run checks they are identical).
 - The four datasets, the five embeddings and the five statistics folds are
   array tasks; each job waits only on what it reads, so `submit.sh prep` can
   be queued while the cluster is down.
 - Epochs: the published 8,000 epochs and patience 2,000 were ~80,000 and
   ~20,000 steps on 1KGP; here an epoch is ~1,850 steps. The pilot runs at most
   200 epochs with patience 20, at batch 138 and at 552 (learning rates ×2,
-  which kept accuracy on 1KGP): its logs give the epoch time and where
-  validation loss bottoms out, which set the grid's config.
+  which kept accuracy on 1KGP): its logs show where validation loss bottoms
+  out.
+
+Measured on Mila at full shape (424,768 x 485,516, simulated with
+`dryrun/scale.sh`; one A100 40 GB, as on Narval), 2026-10-28:
+
+| step | wall time | peak memory | requested |
+|---|---|---|---|
+| create-dataset + pack-genotypes | 30 min | 53 GB | 80 GB, 3 h |
+| partition | 15 s | 0.5 GB | 16 GB, 1 h |
+| statistics, per fold | 11 min – 1 h 55 | 124 GB | 200 GB, 4 h |
+| embeddings (freq, ag, freq_ag, freq_random, freq_shuffled) | 7–45 min | 19–117 GB | 180 GB, 3 h |
+| training: staging the 2-bit copy | 1.6–1.8 min | | |
+| training: epoch, batch 138 / 552 | 26 s / 24 s | | 64 GB, 4 h |
+
+Reading the genotypes sets the epoch's pace, so batch 552 saves only ~8%: the
+published 138 is the default for the grid. A model is at most ~1.5 h (200
+epochs). The simulated AlphaGenome table is 9 GB gzipped, the real one 23 GB:
+reading it takes longer, in the same memory.
 
 ## Running it
 
@@ -73,8 +89,8 @@ bash prepare.sh            # labels; seconds, fine on a login node
 bash submit.sh prep        # subset -> datasets -> partition -> stats, embeddings -> pilot
 # after the pilot (runs/height/freq/b138 and b552):
 TRAIN_LABELS="height bmi" TRAIN_SPECS="freq ag freq_ag freq_random freq_shuffled mlp" \
-TRAIN_CONFIGS=b552 SEEDS=78 FOLDS="0 1 2 3 4" bash submit.sh train
-$DIETNET_VENV/bin/dietnet check --packages $EXP_DIR/runs/height/freq_ag/b552/packages
+TRAIN_CONFIGS=b138 SEEDS=78 FOLDS="0 1 2 3 4" bash submit.sh train
+$DIETNET_VENV/bin/dietnet check --packages $EXP_DIR/runs/height/freq_ag/b138/packages
 ```
 
 `submit.sh train` passes further arguments to `sbatch` (e.g.

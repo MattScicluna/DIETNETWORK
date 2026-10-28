@@ -5,7 +5,7 @@
 #                       # (and GPU_ACCOUNT, if GPU jobs go to another account)
 #   bash submit.sh prep    # datasets, partition, stats, embeddings; then the pilot
 #   TRAIN_LABELS="height bmi" TRAIN_SPECS="freq ag freq_ag freq_random freq_shuffled mlp" \
-#   TRAIN_CONFIGS=b552 SEEDS="78 79 80" FOLDS="0 1 2 3 4" bash submit.sh train
+#   TRAIN_CONFIGS=b138 SEEDS="78 79 80" FOLDS="0 1 2 3 4" bash submit.sh train
 #
 # Every step waits on the ones it reads (afterok), so `prep` can be submitted
 # while the cluster is down and runs end to end when it is back. Job ids go to

@@ -6,7 +6,7 @@
 #SBATCH --job-name=traits_dataset
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=80G
-#SBATCH --time=12:00:00
+#SBATCH --time=03:00:00
 source "$HERE/common.sh"
 
 name="${LABEL_SETS[$SLURM_ARRAY_TASK_ID]%%=*}"

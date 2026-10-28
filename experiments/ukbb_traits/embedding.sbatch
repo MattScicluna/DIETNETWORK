@@ -5,7 +5,7 @@
 #SBATCH --job-name=traits_embedding
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=180G
-#SBATCH --time=08:00:00
+#SBATCH --time=03:00:00
 source "$HERE/common.sh"
 
 name="${SPEC_NAMES[$SLURM_ARRAY_TASK_ID]}"

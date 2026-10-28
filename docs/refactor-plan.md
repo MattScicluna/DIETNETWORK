@@ -50,15 +50,18 @@ State on Narval (user's scratch, `dietnet_traits/`):
   552); job ids in `exp/logs/jobs.txt`.
 
 When Narval is back:
-1. Watch the chain (`squeue -u $USER`, `exp/logs/`). Unknowns: create-dataset
-   and pack time at 425k x 485k (~206 GB per dataset), the statistics folds
-   (~125 GB in memory each), AlphaGenome PCA memory.
-2. Pilot: epoch time, best epoch, held-out r at batch 138 vs 552
-   (`dietnet check --packages exp/runs/height/freq/<config>/packages`). Set
-   the grid's epochs and patience from it.
+1. Watch the chain (`squeue -u $USER`, `exp/logs/`). Every step was timed on
+   Mila at full shape with simulated data (`dryrun/scale.sh`; table in the
+   experiment's README): datasets 30 min (53 GB), statistics 11 min to 2 h a
+   fold (124 GB), embeddings up to 45 min (117 GB), an epoch 26 s, so a model
+   is at most ~1.5 h. That run caught create-dataset's memory (32G killed it;
+   now 80G, and the pending Narval jobs were updated).
+2. Pilot: best epoch and held-out r at batch 138 vs 552
+   (`dietnet check --packages exp/runs/height/freq/<config>/packages`). Batch
+   552 is only ~8% faster an epoch, so 138 (published) is the grid's default.
 3. Grid: `height bmi` x `freq ag freq_ag freq_random freq_shuffled mlp`,
-   folds 0-4, seed 78 first (60 GPU jobs); then the `_tdi` label sets and more
-   seeds.
+   folds 0-4, seed 78, b138 first (60 GPU jobs, at most ~90 GPU-hours); then
+   the `_tdi` label sets and more seeds.
 4. Later: relatedness (partition without Pan-UKB `related`), and Camille's
    results for comparison (her runs are in `cam27/DIETNET_EXP/HEIGHT/` and
    `BMI/`, on her imputed SNPs).
