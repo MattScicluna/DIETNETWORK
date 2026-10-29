@@ -59,11 +59,12 @@ When Narval is back:
 2. Pilot: best epoch and held-out r at batch 138 vs 552
    (`dietnet check --packages exp/runs/height/freq/<config>/packages`). Batch
    552 is only ~8% faster an epoch, so 138 (published) is the grid's default.
-3. Grid: `height bmi` x `freq ag freq_ag freq_random freq_shuffled mlp`,
-   folds 0-4, seed 78, b138 (60 GPU jobs, at most ~90 GPU-hours): queued
-   2026-10-29 as job array 7503767, after the height and BMI datasets, the
-   merged statistics and every embedding. Then the `_tdi` label sets and more
-   seeds.
+3. Grid, cut with Matt to what answers the question: `height bmi` x
+   `freq freq_ag`, folds 0-4, seed 78, b138 (20 GPU jobs, ~7-30 GPU-hours):
+   tasks 0-4, 10-14, 30-34, 40-44 of job array 7503767 (the other 40 tasks
+   and the pilot were cancelled). Only if `freq_ag` beats `freq`: its
+   `freq_random` control (the embedding is built anyway). Later, if wanted:
+   `ag` alone, the `_tdi` label sets, the MLP, more seeds.
 4. Later: relatedness (partition without Pan-UKB `related`), and Camille's
    results for comparison (her runs are in `cam27/DIETNET_EXP/HEIGHT/` and
    `BMI/`, on her imputed SNPs).
