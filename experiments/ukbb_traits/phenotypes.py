@@ -6,7 +6,7 @@ the first assessment visit (instance 0), and writes to ``--out-dir``:
 
 - ``phenotypes.tsv``: sample, height (50), bmi (21001), sex (31), age (21022),
   townsend (22189), and Pan-UKB's pop and related, for the kept samples;
-- ``keep.txt``: the kept sample ids, for ``plink2 --keep``: in the genotype
+- ``keep.txt``: FID and IID of the kept samples, for ``plink2 --keep``: in the genotype
   ``.fam``, Pan-UKB ``EUR``, and no field above missing, so that every trait
   and covariate set is trained on the same samples with the same folds;
 - ``classes.tsv``: one class for everyone. Partitioning needs class labels; a
@@ -50,7 +50,7 @@ def main():
     pan = bridge.merge(pan, on="s").set_index("sample")[["pop", "related"]]
     table = table.join(pan, how="inner")
 
-    fam = pd.read_csv(args.fam, sep=r"\s+", header=None, usecols=[1], names=["iid"])
+    fam = pd.read_csv(args.fam, sep=r"\s+", header=None, usecols=[0, 1], names=["fid", "iid"])
     genotyped = set(fam["iid"][fam["iid"] > 0])  # withdrawn samples are negative ids
     counts = {"with genotypes and Pan-UKB ancestry": table.index.isin(genotyped).sum()}
     table = table[table.index.isin(genotyped)]
@@ -63,7 +63,10 @@ def main():
     args.out_dir.mkdir(parents=True, exist_ok=True)
     table.index.name = "sample"
     table.sort_index().to_csv(args.out_dir / "phenotypes.tsv", sep="\t")
-    pd.Series(sorted(table.index)).to_csv(args.out_dir / "keep.txt", index=False, header=False)
+    # FID and IID as in the .fam: plink2 reads a one-column --keep file as FIDs
+    # and keeps no one.
+    keep = fam[fam["iid"].isin(table.index)].sort_values("iid")
+    keep.to_csv(args.out_dir / "keep.txt", sep="\t", index=False, header=False)
     classes = pd.DataFrame({"sample": sorted(table.index), "class": "all"})
     classes.to_csv(args.out_dir / "classes.tsv", sep="\t", index=False)
     for what, n in counts.items():

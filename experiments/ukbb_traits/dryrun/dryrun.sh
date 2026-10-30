@@ -21,7 +21,7 @@ export HERE="$WORK/scripts" GENOTYPES="$WORK/fake/geno/ukb" FIELDS="$WORK/fake/f
 DIETNET="$DIETNET_VENV/bin/dietnet"
 
 bash "$HERE/prepare.sh"
-cmp <(cut -d' ' -f2 "$GENOTYPES.fam" | sort) <(sort "$EXP_DIR/inputs/keep.txt")
+cmp <(cut -d' ' -f1,2 "$GENOTYPES.fam" | tr ' ' '\t' | sort) <(sort "$EXP_DIR/inputs/keep.txt")
 for e in bed bim fam; do cp "$GENOTYPES.$e" "$EXP_DIR/cohort.$e"; done  # subset.sbatch
 
 for i in 0 1 2 3; do SLURM_ARRAY_TASK_ID=$i bash "$HERE/dataset.sbatch"; done
