@@ -19,7 +19,7 @@ echo "node $(hostname), $(nproc) CPUs"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 start=$(date +%s)
 # -p keeps modification times: the packed copy is checked against its dataset's.
-cp -p "$BENCH_DIR"/dataset.h5* "$SLURM_TMPDIR/"
+cp --preserve=timestamps "$BENCH_DIR"/dataset.h5* "$SLURM_TMPDIR/"
 echo "staged $(ls "$SLURM_TMPDIR" | tr '\n' ' ')to local disk in $(( $(date +%s) - start )) s"
 # shellcheck disable=SC2086  # lists of numbers
 "$DIETNET_VENV/bin/python" "$REPO/benchmarks/bench_train_throughput.py" "$BENCH_DIR" \

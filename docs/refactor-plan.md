@@ -74,7 +74,7 @@ Lessons from the cluster work:
   checkout in the Mila scratch `dietnet_bench/`. The locked torch (CUDA 13) has
   no V100 kernels: request A100s. Never update a checkout from inside
   concurrent jobs that share it (they collided); update it once, then submit.
-- Stage data to `$SLURM_TMPDIR` with `cp -p` (packed copies check mtimes);
+- Stage data to `$SLURM_TMPDIR` with `cp --preserve=timestamps` (packed copies check mtimes; `cp -p` fails on Narval's node disk, which refuses Lustre's permissions);
   network storage is unusable for training.
 - Narval benchmark jobs on real UKBB genotypes are queued for after the outage
   (`runs/bench_train` in the user's scratch).
