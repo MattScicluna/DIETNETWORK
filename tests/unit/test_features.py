@@ -154,6 +154,35 @@ def test_controls_transforms_and_mixing_shared_with_per_fold_blocks(tmp_path, pr
     assert saved["shape"] == list(values.shape)
 
 
+def test_an_excluded_block_feeds_shuffled_but_not_the_matrix(tmp_path, prepared):
+    """The shuffled control on its own: the original is built, then left out."""
+    h5, partition = prepared
+    spec = {
+        "blocks": [
+            {"provider": "random", "columns": 4, "seed": 1, "include": False},
+            {"provider": "shuffled", "of": 0, "seed": 2},
+        ]
+    }
+    values, meta = features.build(spec, h5, partition, tmp_path / "e.npz")
+    original = np.random.default_rng(1).standard_normal((2000, 4))
+
+    assert values.shape == (2000, 4)
+    assert sorted(map(tuple, values)) == sorted(map(tuple, original))
+    assert not np.array_equal(values, original)
+    assert [b["columns"] for b in meta["blocks"]] == [None, [0, 4]]
+    assert meta["column_names"] == [f"shuffled2:random1:{i}" for i in range(4)]
+
+    (tmp_path / "spec.yaml").write_text(json.dumps(spec))  # JSON is YAML
+    report = dietnet("build-embedding", dataset=h5, partition=partition,
+                     spec=tmp_path / "spec.yaml", out=tmp_path / "cli.npz")  # fmt: skip
+    assert "random               built, not included" in report
+    assert np.array_equal(np.load(tmp_path / "cli.npz")["emb"], values)
+
+    spec["blocks"][1]["include"] = False
+    with pytest.raises(ValueError, match="nothing to write"):
+        features.build(spec, h5, partition, tmp_path / "e.npz")
+
+
 def test_all_zero_columns_are_refused(tmp_path, prepared):
     h5, partition = prepared
     _, table = table_from_ids(h5)

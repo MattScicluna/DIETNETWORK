@@ -75,6 +75,22 @@ it was trained on.
     the list (0 for the first), `seed:` the permutation's seed: the control for
     "this information" rather than "information of this shape".
 
+    Every block goes into the matrix unless it has `include: false`: then it
+    is built, so a later `shuffled` block can copy it, and left out. That
+    gives a shuffled control without the original beside it:
+
+    ```yaml
+    blocks:
+      - provider: genotype_freq
+      - provider: precomputed          # built, not used ...
+        path: alphagenome.tsv
+        orient: effect
+        pca: 64
+        include: false
+      - provider: shuffled             # ... except shuffled
+        of: 1
+    ```
+
 ## Transforms
 
 Applied to a block after its provider:

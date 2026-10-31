@@ -19,6 +19,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     of samples at a time, so it scales to a biobank.
   - `dietnet check` reports Pearson r, R² and RMSE for regression packages and
     numeric predictions.
+  - `experiments/ukbb_traits/`: height and BMI on the UK Biobank array, as a
+    chain of SLURM jobs (labels, datasets, partition, per-fold statistics in
+    parallel, feature specs, pilot, grid), with a dry run on fake data.
+- `build-embedding`: a block with `include: false` is built for a later
+  `shuffled` block and left out of the matrix, so a shuffled control can
+  stand without its original.
 
 - `dietnet train --inputs auto|ram|memmap`: where training reads genotypes.
   Upstream's train.py copies the whole matrix into RAM first (~83 GB for a

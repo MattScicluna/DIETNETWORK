@@ -1,0 +1,8 @@
+# The baseline plus AlphaGenome variant effects.
+blocks:
+  - provider: genotype_freq
+  - provider: precomputed
+    path: alphagenome.tsv.gz
+    name: alphagenome
+    orient: effect
+    pca: 64

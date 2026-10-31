@@ -146,6 +146,9 @@ def build_embedding(dataset_path, partition_path, spec, out):
     except (ValueError, training.InputError) as error:
         raise click.ClickException(str(error)) from None
     for block in meta["blocks"]:
+        if block["columns"] is None:
+            click.echo(f"  {block['provider']:20s} built, not included")
+            continue
         start, stop = block["columns"]
         click.echo(f"  {block['provider']:20s} columns {start}-{stop - 1}")
     click.echo(f"wrote {out} {tuple(values.shape)} and {out}.json")
