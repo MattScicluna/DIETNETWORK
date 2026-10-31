@@ -60,11 +60,22 @@ When Narval is back:
    (`dietnet check --packages exp/runs/height/freq/<config>/packages`). Batch
    552 is only ~8% faster an epoch, so 138 (published) is the grid's default.
 3. Grid, cut with Matt to what answers the question: `height bmi` x
-   `freq freq_ag`, folds 0-4, seed 78, b138 (20 GPU jobs, ~7-30 GPU-hours):
-   tasks 0-4, 10-14, 30-34, 40-44 of job array 7503767 (the other 40 tasks
-   and the pilot were cancelled). Only if `freq_ag` beats `freq`: its
-   `freq_random` control (the embedding is built anyway). Later, if wanted:
-   `ag` alone, the `_tdi` label sets, the MLP, more seeds.
+   `freq freq_ag`, folds 0-4, seed 78, b138. **Ran 2026-10-30 (job array
+   7527042, all 20 completed, 15 min-2 h each): held-out r ~ 0 everywhere**
+   (height 0.0008 / 0.0025, BMI -0.0004 / -0.0006 for freq / freq_ag);
+   training loss stays at the label variance (~0.998), so the models predict
+   the mean. Not a data problem: a marginal linear score on fold 0
+   (`linear_check.py`, training rows only) gives test r = 0.33 for height and
+   0.18 for BMI. Likely cause: the Diet Network's first-layer weights are a
+   function of each SNP's embedding, and pooled genotype frequencies (and
+   AlphaGenome effects, which carry no sign for the trait) say nothing about
+   a SNP's effect on height, so the model cannot single out causal SNPs.
+   Camille's height runs used embeddings that do: genotype frequencies per
+   trait decile (`class_genotype_freq` over decile classes, per fold, on
+   training samples) and GWAS summary statistics. Next, if Matt agrees:
+   decile classes as the baseline, then decile + AlphaGenome.
+   Run fixes along the way: `keep.txt` needs FID and IID for plink2;
+   staging uses `cp --preserve=timestamps` (cp -p fails on Narval's node disk).
 4. Later: relatedness (partition without Pan-UKB `related`), and Camille's
    results for comparison (her runs are in `cam27/DIETNET_EXP/HEIGHT/` and
    `BMI/`, on her imputed SNPs).
