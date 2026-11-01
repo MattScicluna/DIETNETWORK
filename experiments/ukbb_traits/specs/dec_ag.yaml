@@ -1,0 +1,9 @@
+# dec.yaml plus AlphaGenome variant effects (64 components). A template, as dec.yaml.
+blocks:
+  - provider: genotype_freq
+    classes: inputs/deciles/{label}.tsv
+  - provider: precomputed
+    path: alphagenome.tsv.gz
+    name: alphagenome
+    orient: effect
+    pca: 64

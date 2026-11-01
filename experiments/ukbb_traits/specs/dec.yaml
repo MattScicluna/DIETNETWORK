@@ -1,0 +1,8 @@
+# Genotype frequencies per decile of the trait, per fold over its training
+# samples: each SNP's frequencies along the trait's range, which tell the
+# auxiliary network the SNP's association with the trait (as in C. Rochefort-
+# Boulanger's height experiments). A template: embedding.sbatch fills in {label}
+# (spec name dec@<label>).
+blocks:
+  - provider: genotype_freq
+    classes: inputs/deciles/{label}.tsv

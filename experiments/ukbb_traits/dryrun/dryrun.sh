@@ -48,6 +48,20 @@ for i in 0 1; do SLURM_ARRAY_TASK_ID=$i SLURM_TMPDIR=$(mktemp -d) bash "$HERE/tr
 export TRAIN_LABELS=bmi_tdi TRAIN_SPECS="ag freq_ag freq_random freq_shuffled mlp" \
     TRAIN_CONFIGS=b552 FOLDS=1
 for i in 0 1 2 3 4; do SLURM_ARRAY_TASK_ID=$i SLURM_TMPDIR=$(mktemp -d) bash "$HERE/train.sbatch"; done
+
+# Decile features (templates filled per label set) and their training runs.
+export SPECS="dec@height dec_ag@height dec@bmi dec_ag@bmi"
+for i in 0 1 2 3; do SLURM_ARRAY_TASK_ID=$i bash "$HERE/embedding.sbatch"; done
+test "$(cut -f2 inputs/deciles/height.tsv | tail -n +2 | sort -u | wc -l)" -eq 10
+export TRAIN_LABELS="height bmi" TRAIN_SPECS="dec dec_ag" TRAIN_CONFIGS=b138 FOLDS=2
+for i in 0 1 2 3; do SLURM_ARRAY_TASK_ID=$i SLURM_TMPDIR=$(mktemp -d) bash "$HERE/train.sbatch"; done
+"$DIETNET_VENV/bin/python" -c "
+import numpy as np
+for name, width in [('dec@height', 30), ('dec_ag@bmi', 30 + 64)]:
+    shape = np.load(f'embeddings/{name}.npz')['emb'].shape
+    assert shape[-1] == width, (name, shape)
+print('decile features: 30 columns, 94 with AlphaGenome')
+"
 for d in runs/*/*/*; do
     echo "== $d"
     "$DIETNET" check --packages "$d/packages" | tail -1

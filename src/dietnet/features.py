@@ -27,7 +27,9 @@ Providers:
     pooled: the same definition without the split by class, for regression
     tasks (which have no classes) or as a baseline. Read a block of samples at a
     time from a genotype store (``inputs``: as for ``train``), so it scales to
-    a biobank.
+    a biobank. With ``classes`` (a sample id / class TSV), per class instead:
+    ``class_genotype_freq``'s values, streamed, for classes the dataset does
+    not hold (deciles of a trait, say).
 ``precomputed``
     A table with ``chrom``, ``pos``, ``ref``, ``alt`` and numeric feature
     columns (TSV, optionally gzipped, or parquet), matched to the dataset's SNPs
@@ -65,6 +67,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import h5py
 import numpy as np
 import pandas as pd
 import yaml
@@ -113,12 +116,16 @@ def _class_genotype_freq(ctx: Context, spec: dict) -> Block:
 
 
 def _genotype_freq(ctx: Context, spec: dict) -> Block:
-    """Genotype frequencies over each fold's training samples, classes pooled.
+    """Genotype frequencies over each fold's training samples, classes pooled or
+    per class.
 
-    Upstream's definition (generate_embedding.py) without the split by class:
-    ``count(genotype == g) / n`` for g in 0, 1, 2, missing genotypes counted in
-    ``n``. For tasks without classes, such as regression. One pass over the
-    rows any fold trains on, a block at a time from a genotype store, so it
+    Upstream's definition (generate_embedding.py): ``count(genotype == g) / n``
+    for g in 0, 1, 2, missing genotypes counted in ``n``. Pooled by default, for
+    tasks without classes such as regression; with ``classes:`` (a TSV of
+    sample id and class, as for ``--labels``) per class, in upstream's column
+    order, so that classes can be defined apart from the dataset (deciles of a
+    trait, say). Rows are grouped by class and by the folds they train in, and
+    each group is counted once, a block at a time from a genotype store, so it
     scales to a biobank.
     """
     from dietnet import genotypes
@@ -131,20 +138,47 @@ def _genotype_freq(ctx: Context, spec: dict) -> Block:
     member = np.zeros((len(folds), n_rows), dtype=bool)
     for f, fold in enumerate(folds):
         member[f, np.asarray(fold[0])] = True
-    counts = np.zeros((len(folds), n_snps, 3))
-    rows = np.flatnonzero(member.any(axis=0))
+    if "classes" in spec:
+        with h5py.File(ctx.dataset, "r") as h5:
+            samples = np.array(h5["samples"]).astype(str)
+        labels = ds._ordered(ds.read_labels(spec["classes"]), samples, spec["classes"])
+        names, klass = np.unique(labels, return_inverse=True)
+    else:
+        names, klass = np.array(["all"]), np.zeros(n_rows, dtype=int)
+
+    # A group per (class, training folds): every row of a group adds to the same
+    # (fold, class) counts, so each row is counted once, whatever the folds.
+    pattern = (member * (1 << np.arange(len(folds)))[:, None]).sum(axis=0)
+    rows = np.flatnonzero(pattern)
+    keys, group = np.unique(klass[rows] * (1 << len(folds)) + pattern[rows], return_inverse=True)
+    counts = np.zeros((len(keys), n_snps, 3))
     block = int(spec.get("block", 2048))
     for start in range(0, len(rows), block):
-        chunk = rows[start : start + block]
-        g = np.asarray(store[chunk])
-        for f in range(len(folds)):
-            sel = g[member[f, chunk]]
+        g = np.asarray(store[rows[start : start + block]])
+        at = group[start : start + block]
+        for k in np.unique(at):
+            sel = g[at == k]
             for value in range(3):
-                counts[f, :, value] += (sel == value).sum(axis=0)
-    n = member.sum(axis=1)
-    values = counts / n[:, None, None]
-    columns = [f"all:genotype{value}" for value in range(3)]
-    return Block(values, columns, {"fold_dependent": True, "training_samples": n.tolist()})
+                counts[k, :, value] += (sel == value).sum(axis=0)
+
+    sizes = np.bincount(group, minlength=len(keys))
+    key_class, key_pattern = keys >> len(folds), keys & ((1 << len(folds)) - 1)
+    values = np.zeros((len(folds), n_snps, 3 * len(names)))
+    n = np.zeros((len(folds), len(names)), dtype=int)
+    for f in range(len(folds)):
+        for c in range(len(names)):
+            mine = (key_class == c) & ((key_pattern >> f) & 1).astype(bool)
+            n[f, c] = sizes[mine].sum()
+            if n[f, c] == 0:
+                raise ValueError(
+                    f"genotype_freq: class {names[c]!r} has no training samples in fold {f}"
+                )
+            values[f, :, 3 * c : 3 * c + 3] = counts[mine].sum(axis=0) / n[f, c]
+    columns = [f"{c}:genotype{value}" for c in names for value in range(3)]
+    info = {"fold_dependent": True, "training_samples": n.sum(axis=1).tolist()}
+    if "classes" in spec:
+        info["classes"] = {"path": str(spec["classes"]), "names": names.tolist()}
+    return Block(values, columns, info)
 
 
 def _read_table(path) -> pd.DataFrame:

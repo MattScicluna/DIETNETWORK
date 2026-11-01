@@ -48,6 +48,13 @@ it was trained on.
     genotypes a block of samples at a time from a genotype store (`inputs:`,
     as for `train`; `block:` samples per read), so it scales to a biobank.
 
+    With `classes:` (a TSV of sample id and class, as for `--labels`), the
+    frequencies are per class instead, with the same values and columns as
+    `class_genotype_freq`, but streamed, and with classes that need not be the
+    dataset's: deciles of a quantitative trait, for example, which give each
+    SNP's frequencies along the trait's range. Each class must have training
+    samples in every fold.
+
 `precomputed`
 :   A table with `chrom`, `pos`, `ref`, `alt` and numeric feature columns (TSV,
     optionally gzipped, or parquet, which needs `pyarrow` installed), matched to the dataset's SNPs by position

@@ -51,6 +51,37 @@ def test_genotype_freq_pools_upstreams_per_class_frequencies(prepared, tmp_path)
         np.testing.assert_allclose(pooled[f], weighted.sum(axis=1))
 
 
+def test_genotype_freq_by_class_from_a_table_is_upstreams_embedding(prepared, tmp_path, kgp_mini):
+    """Classes given as a table (deciles of a trait, say) rather than stored in the
+    dataset: the same values and columns as upstream's per-class embedding."""
+    h5, partition = prepared
+    by_table, meta = features.build(
+        {"blocks": [{"provider": "genotype_freq", "classes": str(kgp_mini.labels), "block": 37}]},
+        h5, partition, tmp_path / "t.npz",
+    )  # fmt: skip
+    upstream_values, upstream_meta = features.build(
+        {"blocks": [{"provider": "class_genotype_freq"}]}, h5, partition, tmp_path / "c.npz"
+    )
+
+    np.testing.assert_allclose(by_table, upstream_values, rtol=0, atol=1e-12)
+    assert meta["column_names"] == upstream_meta["column_names"]
+    assert meta["blocks"][0]["classes"]["names"] == ds.class_label_names(h5)
+
+
+def test_genotype_freq_refuses_a_class_missing_from_a_fold(prepared, tmp_path):
+    h5, partition = prepared
+    with h5py.File(h5, "r") as f:
+        samples = np.array(f["samples"]).astype(str)
+    train0 = np.asarray(np.load(partition, allow_pickle=True)["folds_indexes"][0][0])
+    classes = np.where(np.isin(np.arange(len(samples)), train0), "a", "b")
+    pd.DataFrame({"sample": samples, "class": classes}).to_csv(
+        tmp_path / "classes.tsv", sep="\t", index=False
+    )
+    spec = {"blocks": [{"provider": "genotype_freq", "classes": str(tmp_path / "classes.tsv")}]}
+    with pytest.raises(ValueError, match="class 'b' has no training samples in fold 0"):
+        features.build(spec, h5, partition, tmp_path / "e.npz")
+
+
 def table_from_ids(h5):
     """A table keyed by the chr:pos:REF:ALT ids, one effect column of +1 (ALT raises it)."""
     snps = ds.snp_table(h5)

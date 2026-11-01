@@ -28,14 +28,16 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
 # Training reads only labels and metadata from the .h5, and genotypes from the
 # 2-bit copy: stage the copy and link the .h5, so the sidecar's check (the .h5's
-# size and mtime) sees the file the copy was made from. Not cp -p: Narval's node
-# disk refuses Lustre's permissions, and cp then fails.
+# size and mtime) sees the file the copy was made from; the copy's own mtime is
+# not checked. Not cp -p: Narval's node disk refuses Lustre's permissions, and
+# cp then fails.
 local_data="$SLURM_TMPDIR/$label.h5"
 ln -s "$EXP_DIR/data/$label.h5" "$local_data"
-time cp --preserve=timestamps "data/$label.h5.packed.npy" "data/$label.h5.packed.json" \
-    "$SLURM_TMPDIR/"
+time cp "data/$label.h5.packed.npy" "data/$label.h5.packed.json" "$SLURM_TMPDIR/"
 
-features=(--embedding "embeddings/$spec.npz")
+embedding="embeddings/$spec@$label.npz"  # label-specific (decile) features first
+[ -e "$embedding" ] || embedding="embeddings/$spec.npz"
+features=(--embedding "$embedding")
 [ "$spec" = mlp ] && features=(--model mlp)
 "$DIETNET" train --dataset "$local_data" --partition partition.npz "${features[@]}" \
     --input-stats stats.npz --config "$HERE/configs/$config.yaml" \
