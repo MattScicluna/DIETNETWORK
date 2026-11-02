@@ -55,6 +55,10 @@ for i in 0 1 2 3; do SLURM_ARRAY_TASK_ID=$i bash "$HERE/embedding.sbatch"; done
 test "$(cut -f2 inputs/deciles/height.tsv | tail -n +2 | sort -u | wc -l)" -eq 10
 export TRAIN_LABELS="height bmi" TRAIN_SPECS="dec dec_ag" TRAIN_CONFIGS=b138 FOLDS=2
 for i in 0 1 2 3; do SLURM_ARRAY_TASK_ID=$i SLURM_TMPDIR=$(mktemp -d) bash "$HERE/train.sbatch"; done
+# Extra flags and a separate run directory (batch-norm recalibration).
+TRAIN_LABELS=height TRAIN_SPECS=dec TRAIN_FLAGS="--bn-recalibrate 50" RUN_SUFFIX=_bn \
+    SLURM_ARRAY_TASK_ID=0 SLURM_TMPDIR=$(mktemp -d) bash "$HERE/train.sbatch"
+grep -q "batch-norm statistics recomputed on 50" runs/height/dec/b138_bn/logs/*.log
 "$DIETNET_VENV/bin/python" -c "
 import numpy as np
 for name, width in [('dec@height', 30), ('dec_ag@bmi', 30 + 64)]:

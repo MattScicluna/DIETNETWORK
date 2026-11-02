@@ -39,7 +39,10 @@ embedding="embeddings/$spec@$label.npz"  # label-specific (decile) features firs
 [ -e "$embedding" ] || embedding="embeddings/$spec.npz"
 features=(--embedding "$embedding")
 [ "$spec" = mlp ] && features=(--model mlp)
+# TRAIN_FLAGS: further `dietnet train` flags (e.g. --bn-recalibrate 20000);
+# RUN_SUFFIX keeps such runs apart from the plain ones (runs/<label>/<spec>/<config><suffix>).
+read -ra extra <<< "${TRAIN_FLAGS:-}"
 "$DIETNET" train --dataset "$local_data" --partition partition.npz "${features[@]}" \
     --input-stats stats.npz --config "$HERE/configs/$config.yaml" \
-    --exp-dir "runs/$label/$spec/$config" --seeds "$seed" --folds "$fold" \
-    --task regression --engine dietnet --inputs packed --workers 8
+    --exp-dir "runs/$label/$spec/$config${RUN_SUFFIX:-}" --seeds "$seed" --folds "$fold" \
+    --task regression --engine dietnet --inputs packed --workers 8 ${extra[@]+"${extra[@]}"}
