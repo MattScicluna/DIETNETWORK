@@ -1,0 +1,17 @@
+# b138.yaml without input dropout. A diagnostic: upstream's network puts batch
+# normalisation right after the input-dropout-fed fat layer, so its running
+# statistics are learned with dropout and applied without it. At input dropout
+# 0.5 the height model fitted its training set (loss 1.19 -> 0.83) while its
+# validation loss started at 126; with no input dropout there is no mismatch.
+batch_size: 138
+epochs: 200
+input_dropout: 0.0
+dropout_main: 0.1
+lr_aux: 0.0006
+lr_main: 0.0003
+learning_rate_annealing: 0.99
+nb_hidden_u_aux: [100, 100]
+nb_hidden_u_main: [100]
+patience: 20
+seed: 78  # overridden per --seeds
+uniform_init_limit: 0.02

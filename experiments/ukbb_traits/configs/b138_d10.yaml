@@ -1,0 +1,14 @@
+# b138.yaml with input dropout 0.1: a diagnostic beside b138_d0.yaml, for how
+# much input dropout the fat layer's batch normalisation tolerates.
+batch_size: 138
+epochs: 200
+input_dropout: 0.1
+dropout_main: 0.1
+lr_aux: 0.0006
+lr_main: 0.0003
+learning_rate_annealing: 0.99
+nb_hidden_u_aux: [100, 100]
+nb_hidden_u_main: [100]
+patience: 20
+seed: 78  # overridden per --seeds
+uniform_init_limit: 0.02
