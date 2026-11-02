@@ -1,0 +1,17 @@
+# b138.yaml with input dropout 0.5 instead of the published 0.995. At 0.995 each
+# sample keeps ~2,400 of 485,516 SNPs per step, scaled up 200x: fine for
+# ancestry, where a few hundred markers decide, but every height and BMI model
+# then predicted the mean (held-out r ~ 0 with freq, freq_ag, dec and dec_ag
+# features, while a marginal linear score reached r = 0.33 / 0.18).
+batch_size: 138
+epochs: 200
+input_dropout: 0.5
+dropout_main: 0.1
+lr_aux: 0.0006
+lr_main: 0.0003
+learning_rate_annealing: 0.99
+nb_hidden_u_aux: [100, 100]
+nb_hidden_u_main: [100]
+patience: 20
+seed: 78  # overridden per --seeds
+uniform_init_limit: 0.02

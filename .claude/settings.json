@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/egress_guard.py\""
+            "command": "python3 \"$(git rev-parse --show-toplevel)/.claude/hooks/egress_guard.py\""
           }
         ]
       }
