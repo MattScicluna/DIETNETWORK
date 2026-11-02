@@ -187,6 +187,7 @@ def train(
     workers: int | None = None,
     gpus: int = 1,
     engine: str | None = None,
+    bn_recalibrate: int = 0,
 ) -> list[package.Package]:
     """Train every (seed, fold); return their packages.
 
@@ -207,6 +208,10 @@ def train(
     loop of its own, data-parallel over ``gpus``, packed genotypes decoded on the
     GPU, without train.py's per-batch bookkeeping; on Mila's A100 its training
     pass ran ~20x upstream's (docs/scaling.md). Its weights differ from train.py's.
+    With ``bn_recalibrate`` > 0 it recomputes the batch-norm statistics on that
+    many training samples, without dropout, before each validation: upstream's
+    network batch-normalises the fat layer right after input dropout, so the
+    statistics learned in training do not describe evaluation's activations.
     """
     engine = engine or ("dietnet" if gpus > 1 else "upstream")
     if engine not in ("upstream", "dietnet"):
@@ -217,6 +222,8 @@ def train(
         raise ValueError("gpus must be at least 1")
     if gpus > 1 and engine == "upstream":
         raise ValueError("engine 'upstream' is train.py's own loop, on one GPU")
+    if bn_recalibrate and engine != "dietnet":
+        raise ValueError("--bn-recalibrate needs engine 'dietnet' (train.py runs unmodified)")
     if engine == "dietnet" and loader == "upstream":
         raise ValueError("--loader upstream applies to engine 'upstream' only")
     if model not in upstream.MODELS:
@@ -261,7 +268,8 @@ def train(
                 args.append("--normalize")
             log = exp_dir / "logs" / f"train_seed{seed}_fold{fold}.log"
             if engine == "dietnet":
-                args += ["--inputs", env[_launch.INPUTS_ENV], "--workers", workers]
+                args += ["--inputs", env[_launch.INPUTS_ENV], "--workers", workers,
+                         "--bn-recalibrate", bn_recalibrate]  # fmt: skip
                 _run_parallel(args, gpus, log)
             else:
                 upstream.run("train.py", args, log=log, env=env)

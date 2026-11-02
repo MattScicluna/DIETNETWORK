@@ -55,3 +55,16 @@ def test_the_dietnet_engine_trains_a_model_as_good_as_train_py(tmp_path, inputs,
     report = dietnet("check", packages=packages)
     accuracy = float(re.search(r"(\d\.\d+)", report.splitlines()[-1]).group(1))
     assert accuracy >= 0.9, report
+
+
+def test_recalibrated_batchnorm_trains_a_model_as_good(tmp_path):
+    """--bn-recalibrate: the same quality, with statistics recomputed before validation."""
+    data = DATASETS["synthetic"]
+    flags = ["--engine=dietnet", "--workers=1", "--inputs=memmap", "--bn-recalibrate=100"]
+    packages = train_pipeline(tmp_path / "bn", data, folds="0", flags=flags)
+
+    (log,) = (tmp_path / "bn" / "exp" / "logs").glob("train_*.log")
+    assert "batch-norm statistics recomputed on 100 training samples" in log.read_text()
+    report = dietnet("check", packages=packages)
+    accuracy = float(re.search(r"(\d\.\d+)", report.splitlines()[-1]).group(1))
+    assert accuracy >= 0.9, report

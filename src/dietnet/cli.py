@@ -332,6 +332,15 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus):
     "train.py's per-batch bookkeeping (~20x faster training pass; not bit-identical). Default: "
     "'upstream' on one GPU, 'dietnet' for --gpus > 1.",
 )
+@click.option(
+    "--bn-recalibrate",
+    type=click.IntRange(min=0),
+    default=0,
+    show_default=True,
+    help="Engine 'dietnet' only: before each validation, recompute the batch-norm statistics "
+    "on this many training samples without dropout (0: off). Upstream's fat layer is "
+    "batch-normalised right after input dropout, so its training statistics misfit evaluation.",
+)
 def train(
     dataset_path,
     partition_path,
@@ -349,6 +358,7 @@ def train(
     workers,
     gpus,
     engine,
+    bn_recalibrate,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -360,6 +370,7 @@ def train(
             folds=folds, task=task, normalize=normalize,
             model={"dietnet": "Dietnet", "mlp": "Mlp"}[model],
             inputs=inputs, loader=loader, workers=workers, gpus=gpus, engine=engine,
+            bn_recalibrate=bn_recalibrate,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

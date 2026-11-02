@@ -87,6 +87,31 @@ def _loader(dataset, batch_sampler, workers):
     return DataLoader(dataset, **options)
 
 
+def recalibrate_batchnorm(model, batches, forward) -> int:
+    """Recompute every batch-norm layer's running statistics as plain averages over
+    ``batches`` (each fed to ``forward``), with the rest of ``model`` in evaluation
+    mode, so without dropout: the statistics it then evaluates with describe the
+    activations it gets at evaluation, not those of training with dropout. Leaves
+    the model in evaluation mode; returns the number of samples seen.
+    """
+    norms = [mod for mod in model.modules() if isinstance(mod, nn.modules.batchnorm._BatchNorm)]
+    momenta = [bn.momentum for bn in norms]
+    model.eval()
+    for bn in norms:
+        bn.reset_running_stats()
+        bn.momentum = None  # a cumulative average over the batches
+        bn.train()
+    seen = 0
+    with torch.no_grad():
+        for x in batches:
+            forward(x)
+            seen += len(x)
+    for bn, momentum in zip(norms, momenta):
+        bn.momentum = momentum
+    model.eval()
+    return seen
+
+
 def _args(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     # train.py's names, so dietnet.training builds both command lines alike.
@@ -103,6 +128,11 @@ def _args(argv=None):
     p.add_argument("--normalize", action="store_true")
     p.add_argument("--inputs", choices=genotypes.MODES, default="memmap")
     p.add_argument("--workers", type=int, default=0)
+    p.add_argument(
+        "--bn-recalibrate", type=int, default=0,
+        help="training samples to recompute batch-norm statistics on, without dropout, "
+        "before each validation (0: off, as train.py)",
+    )  # fmt: skip
     return p.parse_args(argv)
 
 
@@ -199,6 +229,25 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
         return split, (_Decoded(loader) if packed else loader)
 
     valid_set, valid_loader = eval_loader(valid_rows)
+    recalibration = None
+    if args.bn_recalibrate:
+        # A fixed random subset of the training rows, read in file order.
+        pick = np.random.default_rng(seed).choice(
+            train_rows, min(args.bn_recalibrate, len(train_rows)), replace=False
+        )
+        _, recalibration = eval_loader(np.sort(pick))
+        say(f"dietnet: batch-norm statistics recomputed on {len(pick)} training samples, "
+            "without dropout, before each validation")  # fmt: skip
+
+    def recalibrated_inputs():
+        """The recalibration subset, preprocessed as training batches are."""
+        for x, _, _ in recalibration:
+            x = x.to(device, non_blocking=True).float()
+            _fill_missing(x, mus)
+            if args.normalize:
+                x = m.dataset_utils.normalize(x, mus, sigmas)
+            yield x
+
     results = Path(args.exp_path) / args.exp_name
     results = results / f"RESULTS_{upstream.exp_identifier(config, fold, args.task, args.model)}"
     best_path, last_path = results / "best_model.pt", results / "last_model.pt"
@@ -209,6 +258,10 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
         f"{args.workers} loader workers")  # fmt: skip
 
     def validate(epoch):
+        if recalibration is not None:
+            recalibrate_batchnorm(
+                model, recalibrated_inputs(), lambda x: model(x, str(results), epoch, 0, "valid")
+            )
         model.eval()
         with torch.no_grad():
             out = m.mainloop_utils.eval_step(
