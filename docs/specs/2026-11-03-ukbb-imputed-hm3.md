@@ -77,6 +77,20 @@ and gives the Diet Network the same inputs a strong PRS uses.
 - Expect height r ~ 0.5, BMI ~ 0.3. If height stays near 0.37, the SNP count is not
   the limit and the LD reference (10k) is the next suspect.
 
+**Done 2026-11-03.** A: `submit.sh imputed` (jobs 8424876-8424881, 8427659):
+1,440,938 of 1,443,190 HM3+ variants are in the imputed data; after MAF >= 1% and
+<= 10% missing, `exp_hm3/cohort` has 424,142 samples x 1,290,149 SNPs (137 GB).
+B: `GWAS=plink2 bench-ldpred2` (array 8427660, ~1.7 h a fold at 128G), mean test r
+over 5 folds: **height 0.396** (0.394-0.399), **BMI 0.307** (0.302-0.312), vs 0.372 /
+0.277 on the array SNPs. So more SNPs adds ~+0.025-0.03 to both; BMI is now at the top
+of the literature range, height still well short of ~0.5. The fit, not the SNP set,
+looks like height's limit: LDSC h2 0.59 (intercept 1.63) but kept chains estimate h2
+0.15-0.19, the MLE sampler still diverges, 2-23 of 30 chains pass. Over-shrinkage of
+that kind points at the 10k in-sample LD reference vs a 255k GWAS. Cheap next checks:
+a larger LD reference (30-50k training samples) for fold 0; LDpred2-grid / lassosum2
+on the same LD (h2 fixed at the LDSC value instead of estimated); individual-level
+penalised regression (bigstatsr `big_spLinReg`, no LD reference, heavier).
+
 ### C. Diet Network on HapMap3+ (GPU, after B and Matt's go)
 
 - Dataset, partition from the fold lists (same folds, by sample id), per-fold
