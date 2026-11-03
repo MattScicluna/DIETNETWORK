@@ -85,7 +85,11 @@ for (label in labels) {
   # Keep the chains that converged (the bigsnpr tutorial's rule).
   spread <- sapply(multi, function(a) diff(range(a$corr_est)))
   keep <- which(spread > 0.95 * quantile(spread, 0.95, na.rm = TRUE))
-  beta <- rowMeans(sapply(multi[keep], function(a) a$beta_est))
+  log_msg(label, ": chain spreads", paste(signif(spread, 3), collapse = " "))
+  log_msg(label, ": chain h2", paste(signif(sapply(multi, function(a) a$h2_est), 3),
+                                     collapse = " "))
+  if (length(keep) == 0) stop(label, ": no LDpred2-auto chain converged")
+  beta <- rowMeans(do.call(cbind, lapply(multi[keep], function(a) a$beta_est)))
   log_msg(label, ":", length(keep), "of", N_CHAINS, "chains kept")
 
   prefix <- file.path(fold_dir, paste0(label, ".ldpred2", tag))
