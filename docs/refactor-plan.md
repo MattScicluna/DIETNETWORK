@@ -84,8 +84,15 @@ When Narval is back:
    ~19,000 more had SD <= 0.01. With SNPs at MAF >= 1% only (`subset.sbatch`,
    416,084 kept; run directory `exp_maf01`), height / dec / fold 0 at input
    dropout 0.5 gives held-out r = 0.328, and 0.332 with `--bn-recalibrate
-   20000` (smoother validation): the linear score's 0.33. Next: the
-   height/BMI x dec/dec_ag grid on `exp_maf01` (b138_d50 + recalibration).
+   20000` (smoother validation): the linear score's 0.33.
+   **Grid, 2026-11-02 (array 7731383, all 20 completed; b138_d50 +
+   `--bn-recalibrate 20000`), mean held-out r over 5 folds:** height dec
+   0.336 (sd 0.004), dec_ag 0.334 (0.005); BMI dec 0.221 (0.006), dec_ag
+   0.219 (0.009). AlphaGenome adds nothing: per-fold differences have mixed
+   signs, mean -0.001 (height) and -0.003 (BMI). Height matches the naive
+   marginal score (0.33) and sits below good polygenic scores (~0.5-0.6);
+   BMI beats the naive score (0.18). Benchmark on the same folds: regenie +
+   clumping and thresholding (`submit.sh bench`, array 7732912).
 4. Later: relatedness (partition without Pan-UKB `related`), and Camille's
    results for comparison (her runs are in `cam27/DIETNET_EXP/HEIGHT/` and
    `BMI/`, on her imputed SNPs).
