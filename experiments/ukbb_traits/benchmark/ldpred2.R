@@ -133,4 +133,25 @@ for (label in labels) {
   )
   fwrite(data.frame(key = names(info), value = unname(info)), paste0(prefix, ".info.tsv"),
          sep = "\t")
+
+  # EXTRA=1: models that fix h2 rather than estimate it, on the same LD, each
+  # chosen on validation later (multi_eval.py): LDpred2-grid around the LDSC h2,
+  # and lassosum2. One beta column per model, diverged models zeroed.
+  if (Sys.getenv("EXTRA") == "1") {
+    params <- expand.grid(p = signif(seq_log(1e-4, 1, length.out = 11), 2),
+                          h2 = signif(ldsc[["h2"]] * c(0.7, 1, 1.4), 3), sparse = FALSE)
+    grid <- snp_ldpred2_grid(corr, df_beta, params, ncores = ncores)
+    log_msg(label, ": grid done,", sum(colSums(is.na(grid)) > 0), "of", ncol(grid), "diverged")
+    lasso <- snp_lassosum2(corr, df_beta, ncores = ncores)
+    log_msg(label, ": lassosum2 done,", ncol(lasso), "models")
+    betas <- cbind(grid, lasso)
+    betas[!is.finite(betas)] <- 0
+    names_grid <- sprintf("grid_p%g_h%g", params$p, params$h2)
+    lp <- attr(lasso, "grid_param")
+    names_lasso <- sprintf("lasso_d%g_l%.3g", lp$delta, lp$lambda)
+    out <- data.table(ID = map$rsid[ids], A1 = map$a1[ids])
+    out[, (c(names_grid, names_lasso)) := as.data.table(betas)]
+    keep_cols <- c(TRUE, TRUE, colSums(betas != 0) > 0)  # plink2 rejects all-zero columns
+    fwrite(out[, keep_cols, with = FALSE], paste0(prefix, ".multi.betas.tsv"), sep = "\t")
+  }
 }
