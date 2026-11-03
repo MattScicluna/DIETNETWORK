@@ -76,6 +76,16 @@ When Narval is back:
    decile classes as the baseline, then decile + AlphaGenome.
    Run fixes along the way: `keep.txt` needs FID and IID for plink2;
    staging uses `cp --preserve=timestamps` (cp -p fails on Narval's node disk).
+   **Resolved 2026-11-02: the cause was rare SNPs, not the features.** The
+   decile run also gave r ~ 0; lowering input dropout (0.5, 0.1, 0) let the
+   model fit its training data but validation loss swung between 2 and 330.
+   895 SNPs had no carrier among fold 0's training samples (SD at upstream's
+   1e-6 floor), so a validation carrier's standardised input was ~1e6, and
+   ~19,000 more had SD <= 0.01. With SNPs at MAF >= 1% only (`subset.sbatch`,
+   416,084 kept; run directory `exp_maf01`), height / dec / fold 0 at input
+   dropout 0.5 gives held-out r = 0.328, and 0.332 with `--bn-recalibrate
+   20000` (smoother validation): the linear score's 0.33. Next: the
+   height/BMI x dec/dec_ag grid on `exp_maf01` (b138_d50 + recalibration).
 4. Later: relatedness (partition without Pan-UKB `related`), and Camille's
    results for comparison (her runs are in `cam27/DIETNET_EXP/HEIGHT/` and
    `BMI/`, on her imputed SNPs).
