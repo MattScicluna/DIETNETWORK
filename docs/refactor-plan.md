@@ -16,12 +16,23 @@ Living document: each pull request that moves the plan updates it.
 | 7. Quantitative traits | ✅ `adjust-phenotype`, `genotype_freq` features, r/R²/RMSE in `check` (PR #17); UKB height & BMI runs set up (`experiments/ukbb_traits/`) |
 | MLP baseline (published split) | ✅ 0.9117 vs Diet Network 0.9282 retrained (−1.65 points paired, 1 of 15 higher) |
 
-### Resume here: UK Biobank height and BMI (2026-10-28)
+### Resume here (2026-11-03): toward height r ~ 0.5
+
+**Next work is specified in `docs/specs/2026-11-03-ukbb-traits-toward-0.5.md`**
+(agreed with Matt): A1 regenie -> LDpred2-auto benchmark; per-fold precomputed
+features; A2 Diet Network on regenie GWAS features (+/- AlphaGenome); B2
+LD-aware SNP features; B3 hybrid model with free per-SNP weights under a group
+lasso; A3 (optional) SBayesRC with AlphaGenome annotations. Current results
+(height / BMI, mean r over 5 folds): Diet Network dec 0.336 / 0.221, dec_ag
+0.334 / 0.219, regenie C+T 0.351 / 0.165. Run directory on Narval:
+`$SCRATCH/dietnet_traits/exp_maf01` (MAF >= 1%). The history below records how
+we got here.
+
+### UK Biobank height and BMI (2026-10-28, history)
 
 Goal: predict height and BMI from autosomal genotypes with the Diet Network,
 and test whether AlphaGenome features for the auxiliary network help.
-Everything is set up in `experiments/ukbb_traits/` (README there); Narval
-compute is down until 2026-11-03 04:00 (reservation POWEROUT20261027).
+Everything is set up in `experiments/ukbb_traits/` (README there).
 
 Decided with Matt (2026-10-28):
 - **Genotypes: the UK Biobank array** (485,516 SNPs, GRCh38, AlphaGenome
