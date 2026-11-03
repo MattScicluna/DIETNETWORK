@@ -1,10 +1,11 @@
 # LDpred2-auto on one fold's regenie GWAS, with LD from the fold's LD reference.
 #
-#   Rscript ldpred2.R <ld.bed> <fold dir> <labels, comma-separated> <tag> <ncores> <tmp dir>
+#   Rscript ldpred2.R <ld.bed> <fold dir> <labels, comma-separated> <tag> <ncores> <tmp dir> \
+#       [<GWAS prefix, default gwas>]
 #
 # <ld.bed>: the fold's 10,000 LD-reference samples (training samples only), all
-# SNPs of the GWAS. <fold dir> holds gwas_<label>.regenie (BETA per ALLELE1, which
-# is the bim's first allele, bigsnpr's allele1). LD is computed once, on the SNPs
+# SNPs of the GWAS. <fold dir> holds <prefix>_<label>.regenie (regenie's columns;
+# BETA per ALLELE1). LD is computed once, on the SNPs
 # with a finite BETA and SE in every label's GWAS, so all labels share it.
 # Writes, per label, <fold dir>/<label>.ldpred2<tag>.betas.tsv (ID, A1, BETA:
 # input to plink2 --score) and <label>.ldpred2<tag>.info.tsv (key, value).
@@ -13,7 +14,8 @@ suppressPackageStartupMessages({
   library(data.table)
 })
 args <- commandArgs(trailingOnly = TRUE)
-stopifnot(length(args) == 6)
+stopifnot(length(args) %in% 6:7)
+gwas_prefix <- if (length(args) == 7) args[7] else "gwas"
 ld_bed <- args[1]
 fold_dir <- args[2]
 labels <- strsplit(args[3], ",")[[1]]
@@ -37,7 +39,7 @@ map <- data.frame(chr = as.integer(map$chromosome), rsid = map$marker.ID,
 log_msg("LD reference:", nrow(G), "samples,", ncol(G), "SNPs")
 
 read_gwas <- function(label) {
-  g <- fread(file.path(fold_dir, paste0("gwas_", label, ".regenie")))
+  g <- fread(file.path(fold_dir, paste0(gwas_prefix, "_", label, ".regenie")))
   g <- g[TEST == "ADD" & is.finite(BETA) & is.finite(SE) & SE > 0]
   data.frame(chr = as.integer(g$CHROM), pos = g$GENPOS, rsid = g$ID,
              a0 = g$ALLELE0, a1 = g$ALLELE1, beta = g$BETA, beta_se = g$SE, n_eff = g$N)

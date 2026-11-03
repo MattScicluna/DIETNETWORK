@@ -97,6 +97,23 @@ $DIETNET_VENV/bin/dietnet check --packages $EXP_DIR/runs/height/freq_ag/b138/pac
 `submit.sh train` passes further arguments to `sbatch` (e.g.
 `--dependency=afterok:<id>`). Job ids are appended to `$EXP_DIR/logs/jobs.txt`.
 
+Linear benchmarks on the same folds and test samples (CPU only):
+
+```bash
+bash submit.sh bench           # regenie GWAS per fold (training samples), clumping/thresholding
+bash submit.sh bench-ldpred2   # LDpred2-auto on those GWAS; CHR=22 for a one-chromosome test
+```
+
+`bench-ldpred2` (`benchmark/ldpred2.sbatch`, `ldpred2.R`) needs bigsnpr in
+`$R_LIBS_USER` (default `~/R/x86_64-pc-linux-gnu-library/4.4`, for `module load
+StdEnv/2023 gcc r/4.4.0`). Per fold: LD from the fold's 10,000-sample LD
+reference (mean-imputed, 1 Mb physical window), the tutorial's QC, an LDSC h2 to
+start 30 chains, the converged chains averaged; if no chain converges with the
+MLE update of p and h2 (bigsnpr's default), once more without it. Results in
+`bench/fold<k>/<label>.ldpred2.json` (test r, R^2, RMSE, and the chains' h2 and p).
+`GWAS=plink2` feeds it a plain marginal GWAS (plink2 `--glm`, training samples)
+instead of regenie's LOCO-adjusted one; outputs `<label>.ldpred2.plink.*`.
+
 ## Dry run
 
 ```bash
