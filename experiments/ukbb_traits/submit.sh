@@ -8,6 +8,8 @@
 #   TRAIN_CONFIGS=b138 SEEDS="78 79 80" FOLDS="0 1 2 3 4" bash submit.sh train
 #   bash submit.sh bench   # linear benchmark (regenie, clumping/thresholding), same folds
 #   bash submit.sh bench-ldpred2   # LDpred2-auto on bench's GWAS (CHR=22: one chromosome)
+#   EXP_DIR=<new dir> SRC_EXP=<array run dir> IMPUTED=<prefix with {chr}> HM3_MAP=<rds> \
+#   bash submit.sh imputed          # the cohort on imputed HapMap3+ variants
 #
 # Every step waits on the ones it reads (afterok), so `prep` can be submitted
 # while the cluster is down and runs end to end when it is back. Job ids go to
@@ -69,13 +71,25 @@ bench)
     submit regenie_ct --dependency="afterok:$folds" "${@:2}" \
         "$HERE/benchmark/regenie_ct.sbatch" > /dev/null
     ;;
+imputed)
+    # The cohort on HapMap3+ variants from the imputed data, in EXP_DIR (a new run
+    # directory), with SRC_EXP's benchmark folds: ids -> 22 extracts -> merge.
+    : "${IMPUTED:?}" "${HM3_MAP:?map_hm3_plus.rds}" "${SRC_EXP:?the array run directory}"
+    export IMPUTED SRC_EXP
+    ids=$(submit imputed_ids --job-name=traits_imputed_ids --cpus-per-task=2 --mem=24G \
+        --time=01:00:00 --wrap "module load StdEnv/2023 gcc r/4.4.0 && \
+        Rscript \"$HERE/imputed/hm3_ids.R\" \"$HM3_MAP\" \"$IMPUTED\" imputed/ids")
+    extract=$(submit imputed_extract --dependency="afterok:$ids" "$HERE/imputed/extract.sbatch")
+    submit imputed_merge --dependency="afterok:$extract" "${@:2}" \
+        "$HERE/imputed/merge.sbatch" > /dev/null
+    ;;
 bench-ldpred2)
     # LDpred2-auto on the GWAS that `bench` wrote (further arguments go to the array).
     export BENCH_LABELS="${BENCH_LABELS:-height,bmi}" ${CHR:+CHR}
     submit ldpred2 "${@:2}" "$HERE/benchmark/ldpred2.sbatch" > /dev/null
     ;;
 *)
-    echo "usage: submit.sh prep|train|bench|bench-ldpred2 [sbatch options]" >&2
+    echo "usage: submit.sh prep|train|bench|bench-ldpred2|imputed [sbatch options]" >&2
     exit 1
     ;;
 esac
