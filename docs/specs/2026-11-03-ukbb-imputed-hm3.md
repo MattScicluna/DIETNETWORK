@@ -1,0 +1,95 @@
+# UK Biobank traits: more SNPs from the imputed data (HapMap3+)
+
+Draft for Matt, 2026-11-03. Follows `2026-11-03-ukbb-traits-toward-0.5.md` (A1 done:
+LDpred2-auto on the 416k array SNPs gives height r 0.372, BMI 0.277).
+
+## Why
+
+Every model so far sees only the array's 416,084 SNPs (MAF >= 1%). Published UK
+Biobank height scores near r ~ 0.5-0.6 (LDpred2, SBayesR, lasso) use ~1.1-1.4M
+imputed HapMap3(+) variants, which tag far more of the common causal variation. Our
+joint linear model already beats clumping/thresholding (+0.02 height, +0.11 BMI), so
+the ceiling is now the SNP set more than the method. More SNPs raises the baseline
+and gives the Diet Network the same inputs a strong PRS uses.
+
+## What exists on Narval (surveyed 2026-11-03, read-only)
+
+- **No UK Biobank WGS or exome genotypes** anywhere the lab can read (all four
+  `*-hussinju` projects, `shared/UKBiobank_data` in full). Dube's project
+  (group `ctb-dubemar1`, holds the raw 20168 bgen) is not readable by us.
+- **UKB v3 imputed (HRC + UK10K), application 20168 (ours: same IDs as the array),
+  already hard-called and lifted to GRCh38** by grenier2:
+  `ctb-hussinju/shared/UKBiobank_data/20168_project_Dube/genotypes_imputation/
+  plink_format_INFO0.8_GP0.9/liftover_GRCh38/per_chr_clean_version/
+  ukb_v3.woWithrawalSamples.liftOverCommon.GRCh38.chr{1..22}.{bed,bim,fam}`
+  (811 GB; 41.3M variants incl. rare; 486,748 samples; calls at GP >= 0.9, MaCH
+  R^2 >= 0.8; ids `chr:pos38:ref:alt`). **424,142 of our 424,768 cohort samples are
+  in it** (626 are not, presumably later withdrawals).
+- UKB `mfi` INFO files (`shared/UKBiobank_data/Imputation_INFO_scores/`).
+- GATK bundle HapMap 3.3 sites, GRCh38
+  (`def-hussinju/shared/References/GRCh38/Resource-bundle_GATK/hapmap_3.3.hg38.vcf.gz`):
+  3.6M polymorphic SNPs over all HapMap populations, with rsids. Not the curated EUR
+  HapMap3 set; useful to map rsids to GRCh38.
+- **GIANT 2014 height GWAS (Wood et al., 253k Europeans, no UK Biobank)**:
+  `ctb-hussinju/cam27/DIETNET_EXP/HEIGHT/DATA/GENOTYPES_2014GIANTGWAS_SNPS/`
+  (2.55M HapMap2 SNPs by rsid; 2.54M of them map through the HapMap VCF).
+- Application 49731 data (Camille's) and a TOPMed-imputed 19,552-sample DietNet
+  subset: wrong application / too few samples for us.
+
+## Decisions for Matt
+
+1. **SNP set: HapMap3+ (recommended).** bigsnpr's `map_hm3_plus.rds` (Privé et al.
+   2022, 1,444,196 variants chosen to tag common variation in UKB Europeans, with
+   GRCh38 positions; the standard LDpred2 set). Figshare refuses non-browser
+   downloads from the cluster, so it needs downloading by hand
+   (https://figshare.com/ndownloader/files/37802721) and copying to
+   `$SCRATCH/dietnet_traits/resources/map_hm3_plus.rds` on Narval. Alternatives:
+   plain HapMap3 (`map.rds`, 1,054,330; same issue), or the GATK HapMap sites after
+   filters (~2M, non-standard, heavier).
+2. **"SNPs known to be associated with height": only from GWAS without UK
+   Biobank.** GIANT 2018 and 2022 include UK Biobank, so our test samples helped find
+   their hits: using them to pick SNPs or as features leaks. GIANT 2014 (above) has
+   no UKB samples and is safe, as features (C below) or as a prior.
+3. GPU time for the Diet Network on the new SNPs (step C): ~20 A100 jobs, each
+   ~3-4x the array's (~1.5 h -> ~5 h): ask before submitting.
+
+## Work
+
+### A. Cohort on HapMap3+ (CPU)
+
+- `imputed/variants.R`: HM3+ map -> `chr pos_hg38 a0 a1` -> matched to the imputed
+  bims by position and alleles (either orientation, no strand flips needed: same
+  reference) -> per-chromosome id lists.
+- `imputed/extract.sbatch` (array over chromosomes): plink2 `--bfile <imputed chr>
+  --keep inputs/keep.txt --extract <ids> --maf 0.01 --geno 0.1` (hard calls at GP 0.9
+  leave missing genotypes) `--make-bed`; then one merge to `exp_hm3/cohort.{bed,bim,fam}`
+  with samples in `exp_maf01/cohort.fam` order (`--indiv-sort f`). Expect ~1.2-1.4M
+  SNPs, ~150 GB packed.
+- Report: SNPs kept per chromosome, missingness, overlap with the array SNPs.
+
+### B. Linear benchmarks on HapMap3+ (CPU)
+
+- `exp_hm3/bench/`: the same fold lists as `exp_maf01/bench/` (train/valid/test/ld,
+  `pheno.tsv`), minus the 626 absent samples (scores merge on IID, so the array
+  results can be re-scored on exactly the same 424,142 for a paired comparison).
+- `GWAS=plink2 submit.sh bench-ldpred2` with `EXP_DIR=exp_hm3`, 5 folds (~2-3 h a
+  fold, more memory: 128G). C+T too if cheap.
+- Expect height r ~ 0.5, BMI ~ 0.3. If height stays near 0.37, the SNP count is not
+  the limit and the LD reference (10k) is the next suspect.
+
+### C. Diet Network on HapMap3+ (GPU, after B and Matt's go)
+
+- Dataset, partition from the fold lists (same folds, by sample id), per-fold
+  stats (~3.4x memory: large-memory nodes), `dec` and `dec_ag` embeddings
+  (AlphaGenome scores exist only for array SNPs: score the new SNPs first, ~2 days of
+  API, or restrict `dec_ag` to the overlap), then `dec`, plus `gwas` / `gwasld` /
+  hybrid variants from the first spec as they land.
+- New, leakage-free external prior: a `giant2014` feature block (GIANT 2014 z, BETA,
+  -log10 P per SNP, mapped rsid -> GRCh38 via the HapMap VCF; fold-independent
+  `precomputed`), variants `dec_giant` and `dec_giant_ag`.
+
+## Not doing
+
+- WGS: not available to us. If Dube's project holds the 500k WGS, that is a data
+  request to make outside this work.
+- Rare variants (MAF < 1%): they broke the Diet Network's standardisation before.
