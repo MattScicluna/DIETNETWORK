@@ -222,3 +222,86 @@ def test_all_zero_columns_are_refused(tmp_path, prepared):
 
     with pytest.raises(ValueError, match="all-zero"):
         features.build(spec, h5, partition, tmp_path / "e.npz")
+
+
+def per_fold_tables(tmp_path, h5, n_folds, dropped=()):
+    """One table per fold, gwas_fold<k>.tsv, with fold-specific values."""
+    _, table = table_from_ids(h5)
+    rng = np.random.default_rng(0)
+    for f in range(n_folds):
+        t = table.assign(z=rng.standard_normal(len(table)), beta=rng.standard_normal(len(table)))
+        t.drop(columns="effect").drop(index=list(dropped)).to_csv(
+            tmp_path / f"gwas_fold{f}.tsv", sep="\t", index=False
+        )
+    return str(tmp_path / "gwas_fold{fold}.tsv")
+
+
+def test_a_per_fold_table_stacks_the_per_fold_builds(tmp_path, prepared):
+    """`{fold}` in the path: fold k's matrix is exactly what fold k's table gives alone,
+    matched and oriented as a fold-independent table is."""
+    h5, partition = prepared
+    n_folds = len(np.load(partition, allow_pickle=True)["folds_indexes"])
+    template = per_fold_tables(tmp_path, h5, n_folds, dropped=range(0, 400, 7))
+
+    block = {"provider": "precomputed", "orient": "effect", "name": "gwas"}
+    values, meta = features.build(
+        {"blocks": [{**block, "path": template}]}, h5, partition, tmp_path / "e.npz"
+    )
+
+    assert meta["fold_dependent"] and values.shape[0] == n_folds
+    assert meta["column_names"] == ["gwas:z", "gwas:beta", "gwas:missing"]
+    for f in range(n_folds):
+        path = template.replace("{fold}", str(f))
+        alone, alone_meta = features.build(
+            {"blocks": [{**block, "path": path}]}, h5, partition, tmp_path / "one.npz"
+        )
+        np.testing.assert_array_equal(values[f], alone)
+        assert meta["column_names"] == alone_meta["column_names"]
+        assert meta["blocks"][0]["folds"][f]["sha256"] == alone_meta["blocks"][0]["sha256"]
+    assert not np.array_equal(values[0], values[1])
+
+
+def test_a_missing_fold_table_is_an_error_naming_it(tmp_path, prepared):
+    h5, partition = prepared
+    n_folds = len(np.load(partition, allow_pickle=True)["folds_indexes"])
+    template = per_fold_tables(tmp_path, h5, n_folds)
+    (tmp_path / f"gwas_fold{n_folds - 1}.tsv").unlink()
+
+    spec = {"blocks": [{"provider": "precomputed", "path": template}]}
+    with pytest.raises(FileNotFoundError, match=f"gwas_fold{n_folds - 1}.tsv"):
+        features.build(spec, h5, partition, tmp_path / "e.npz")
+
+
+def test_per_fold_tables_mix_with_per_fold_and_shared_blocks(tmp_path, prepared):
+    h5, partition = prepared
+    n_folds = len(np.load(partition, allow_pickle=True)["folds_indexes"])
+    template = per_fold_tables(tmp_path, h5, n_folds)
+    blocks = [
+        {"provider": "genotype_freq"},
+        {"provider": "precomputed", "path": template, "orient": "effect", "pca": 1},
+        {"provider": "random", "columns": 2, "seed": 4},
+    ]
+
+    values, meta = features.build({"blocks": blocks}, h5, partition, tmp_path / "e.npz")
+
+    alone = [
+        features.build({"blocks": [b]}, h5, partition, tmp_path / f"{i}.npz")[0]
+        for i, b in enumerate(blocks)
+    ]
+    np.testing.assert_array_equal(values[..., :3], alone[0])
+    np.testing.assert_array_equal(values[..., 3:4], alone[1])
+    np.testing.assert_array_equal(values[..., 4:], np.broadcast_to(alone[2], values[..., 4:].shape))
+    assert [b["columns"] for b in meta["blocks"]] == [[0, 3], [3, 4], [4, 6]]
+
+
+def test_per_fold_tables_must_cover_the_same_snps(tmp_path, prepared):
+    """A fold whose table covers every SNP would get an all-zero missing column."""
+    h5, partition = prepared
+    n_folds = len(np.load(partition, allow_pickle=True)["folds_indexes"])
+    template = per_fold_tables(tmp_path, h5, n_folds)
+    t = pd.read_csv(tmp_path / "gwas_fold1.tsv", sep="\t")
+    t.iloc[10:].to_csv(tmp_path / "gwas_fold1.tsv", sep="\t", index=False)
+
+    spec = {"blocks": [{"provider": "precomputed", "path": template}]}
+    with pytest.raises(ValueError, match="same SNPs"):
+        features.build(spec, h5, partition, tmp_path / "e.npz")

@@ -33,7 +33,10 @@ Providers:
 ``precomputed``
     A table with ``chrom``, ``pos``, ``ref``, ``alt`` and numeric feature
     columns (TSV, optionally gzipped, or parquet), matched to the dataset's SNPs
-    by position and alleles, on either strand. With ``orient: effect`` a value
+    by position and alleles, on either strand. A ``path`` containing ``{fold}``
+    names one table per fold (``gwas_fold{fold}.tsv``: statistics from each
+    fold's training samples), read and matched fold by fold into a per-fold
+    block. With ``orient: effect`` a value
     describes ALT relative to REF, so it is negated where the dataset counts
     REF (plink 1.9 makes the minor allele A1, which is REF for a quarter of the
     1KGP SNPs). SNPs the table lacks get zeros and are marked in an added
@@ -188,12 +191,14 @@ def _read_table(path) -> pd.DataFrame:
     return pd.read_csv(path, sep="\t")
 
 
-def _precomputed(ctx: Context, spec: dict) -> Block:
-    table = _read_table(spec["path"])
+def _match_table(ctx: Context, spec: dict, path: Path):
+    """One table matched to the dataset's SNPs: values (SNPs x features, signed as
+    ``orient`` says), which SNPs it covers, the feature names and a description."""
+    table = _read_table(path)
     keys = ["chrom", "pos", "ref", "alt"]
     missing = [k for k in keys if k not in table.columns]
     if missing:
-        raise ValueError(f"{spec['path']}: missing columns {missing}")
+        raise ValueError(f"{path}: missing columns {missing}")
     features = spec.get("columns") or [c for c in table.columns if c not in keys]
     orient = spec.get("orient", "none")
     if orient not in ("effect", "none"):
@@ -220,26 +225,59 @@ def _precomputed(ctx: Context, spec: dict) -> Block:
     pairs = pairs[usable].drop_duplicates("row")
     sign = np.where(counts_ref[pairs.index] & (orient == "effect"), -1.0, 1.0)
 
-    name = spec.get("name", Path(spec["path"]).stem)
     values = np.zeros((len(snps), len(features)))
     values[pairs["row"].to_numpy()] = pairs[features].to_numpy(dtype=float) * sign[:, None]
     covered = np.zeros(len(snps), dtype=bool)
     covered[pairs["row"].to_numpy()] = True
     if np.isnan(values).any():
-        raise ValueError(f"{spec['path']}: NaN feature values; fill or drop them first")
-
-    columns = [f"{name}:{c}" for c in features]
-    if not covered.all():
-        values = np.column_stack([values, (~covered).astype(float)])
-        columns.append(f"{name}:missing")
+        raise ValueError(f"{path}: NaN feature values; fill or drop them first")
     info = {
-        "path": str(spec["path"]),
-        "orient": orient,
+        "path": str(path),
         "coverage": float(covered.mean()),
         "negated": int((sign < 0).sum()),
-        "sha256": hashlib.sha256(Path(spec["path"]).read_bytes()).hexdigest(),
+        "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(),
     }
-    return Block(values, columns, info)
+    return values, covered, list(features), info
+
+
+def _precomputed(ctx: Context, spec: dict) -> Block:
+    """A fold-independent table or, with ``{fold}`` in ``path``, one table per fold
+    (statistics from each fold's training samples, say) stacked into a
+    folds x SNPs x features block."""
+    template = str(spec["path"])
+    per_fold = "{fold}" in template
+    if per_fold:
+        paths = [Path(template.replace("{fold}", str(f))) for f in range(ctx.n_folds)]
+    else:
+        paths = [Path(template)]
+    absent = [str(p) for p in paths if not p.exists()]
+    if absent:
+        raise FileNotFoundError(f"precomputed: no table at {', '.join(absent)}")
+    matched = [_match_table(ctx, spec, p) for p in paths]
+    features = matched[0][2]
+    for p, (_, _, names, _) in zip(paths, matched):
+        if names != features:
+            raise ValueError(f"{p}: feature columns {names} differ from {paths[0]}'s {features}")
+
+    name = spec.get("name", Path(template.replace("{fold}", "")).stem)
+    values = np.stack([m[0] for m in matched])
+    covered = np.stack([m[1] for m in matched])
+    columns = [f"{name}:{c}" for c in features]
+    if not covered.all():
+        complete = [str(p) for p, c in zip(paths, covered) if c.all()]
+        if complete:
+            # The missing column would be all zeros there: NaN in the model.
+            raise ValueError(
+                f"precomputed: {', '.join(complete)} cover every SNP but other folds' "
+                "tables do not; give every fold's table the same SNPs"
+            )
+        values = np.concatenate([values, (~covered).astype(float)[..., None]], axis=-1)
+        columns.append(f"{name}:missing")
+    orient = {"orient": spec.get("orient", "none")}
+    if per_fold:
+        info = {**orient, "fold_dependent": True, "folds": [m[3] for m in matched]}
+        return Block(values, columns, info)
+    return Block(values[0], columns, {**matched[0][3], **orient})
 
 
 def _random(ctx: Context, spec: dict) -> Block:

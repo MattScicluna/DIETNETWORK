@@ -73,6 +73,23 @@ it was trained on.
     SNPs the table lacks get zeros and are flagged in an added
     `<name>:missing` column.
 
+    **One table per fold.** A `path` containing `{fold}` names one table per
+    fold of the partition, `{fold}` replaced by 0, 1, ...: statistics that must
+    come from each fold's training samples only, such as a GWAS. Each table is
+    read, matched and oriented as above, and the block becomes per fold
+    (folds x SNPs x features), so it mixes with `genotype_freq` blocks and
+    fold-independent ones. The tables must have the same feature columns and
+    cover the same SNPs (otherwise the `missing` column would be all zeros in
+    some fold); a missing fold's table is an error that names it. `name:`
+    defaults to the stem with `{fold}` removed.
+
+    ```yaml
+    - provider: precomputed
+      path: features/gwas_height_fold{fold}.tsv   # gwas_height_fold0.tsv, ...
+      name: gwas
+      orient: effect
+    ```
+
 `random`
 :   `columns:` standard-normal columns (`seed:`, default 0): the control for
     "more columns" rather than "more information".
