@@ -6,6 +6,7 @@
 #   bash submit.sh prep    # datasets, partition, stats, embeddings; then the pilot
 #   TRAIN_LABELS="height bmi" TRAIN_SPECS="freq ag freq_ag freq_random freq_shuffled mlp" \
 #   TRAIN_CONFIGS=b138 SEEDS="78 79 80" FOLDS="0 1 2 3 4" bash submit.sh train
+#   bash submit.sh bench   # linear benchmark (regenie, clumping/thresholding), same folds
 #
 # Every step waits on the ones it reads (afterok), so `prep` can be submitted
 # while the cluster is down and runs end to end when it is back. Job ids go to
@@ -57,8 +58,18 @@ train)
     : "${TRAIN_LABELS:?}" "${TRAIN_SPECS:?}" "${TRAIN_CONFIGS:?}" "${SEEDS:?}" "${FOLDS:?}"
     train "${@:2}" > /dev/null
     ;;
+bench)
+    # The linear benchmark on the same folds: sample lists, then regenie and
+    # clumping/thresholding per fold (further arguments go to that array).
+    export BENCH_LABELS="${BENCH_LABELS:-height,bmi}"
+    folds=$(submit bench_folds --job-name=traits_bench_folds --cpus-per-task=1 --mem=8G \
+        --time=00:30:00 --wrap "\"$PYTHON\" \"$HERE/benchmark/folds.py\" --exp-dir \"$EXP_DIR\" \
+        --labels \"$BENCH_LABELS\" --out-dir \"$EXP_DIR/bench\"")
+    submit regenie_ct --dependency="afterok:$folds" "${@:2}" \
+        "$HERE/benchmark/regenie_ct.sbatch" > /dev/null
+    ;;
 *)
-    echo "usage: submit.sh prep|train [sbatch options for train]" >&2
+    echo "usage: submit.sh prep|train|bench [sbatch options for train or bench]" >&2
     exit 1
     ;;
 esac
