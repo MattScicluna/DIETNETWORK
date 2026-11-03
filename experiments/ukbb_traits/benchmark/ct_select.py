@@ -20,9 +20,9 @@ import pandas as pd
 def scores(prefix, split, threshold, label, pheno):
     s = pd.read_csv(f"{prefix}.{split}.{threshold}.sscore", sep="\t")
     s = s.rename(columns={"#FID": "FID", "#IID": "IID"}).astype({"IID": str})
-    score = [c for c in s.columns if c.endswith("_SUM")][0]
-    merged = s[["IID", score]].merge(pheno[["IID", label]], on="IID")
-    return merged[score].to_numpy(float), merged[label].to_numpy(float)
+    # The score itself; plink2 also writes NAMED_ALLELE_DOSAGE_SUM, an allele count.
+    merged = s[["IID", "SCORE1_SUM"]].merge(pheno[["IID", label]], on="IID")
+    return merged["SCORE1_SUM"].to_numpy(float), merged[label].to_numpy(float)
 
 
 def main():
