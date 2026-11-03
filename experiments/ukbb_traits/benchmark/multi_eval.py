@@ -1,7 +1,8 @@
 """Many polygenic scores at once: per model family, the model chosen on validation.
 
-Reads plink2's ``<prefix>.valid.sscore`` and ``<prefix>.test.sscore`` scored with
-one column per model (``<name>_SUM``, names like ``grid_...`` and ``lasso_...``),
+Reads plink2's ``<prefix>.valid.sscore`` and ``<prefix>.test.sscore``, scored from
+``<prefix>.betas.tsv`` with one column per model (names like ``grid_...`` and
+``lasso_...``; plink2 calls them SCORE1_SUM, ... in that order),
 picks per family (the name's first ``_`` part) the model whose score correlates
 best with the label on validation, and evaluates it on test as score_eval.py does.
 
@@ -17,11 +18,12 @@ import pandas as pd
 from score_eval import evaluate
 
 
-def read(path, label, pheno):
+def read(path, label, pheno, names):
+    """plink2 names the scores SCORE1_SUM, SCORE2_SUM, ... in the betas file's order."""
     s = pd.read_csv(path, sep="\t").rename(columns={"#FID": "FID", "#IID": "IID"})
+    s = s.rename(columns={f"SCORE{i + 1}_SUM": f"{n}_SUM" for i, n in enumerate(names)})
     s = s.astype({"IID": str}).merge(pheno[["IID", label]], on="IID")
-    cols = [c for c in s.columns if c.endswith("_SUM") and c != "NAMED_ALLELE_DOSAGE_SUM"]
-    return s, cols
+    return s, [f"{n}_SUM" for n in names]
 
 
 def main():
@@ -32,8 +34,9 @@ def main():
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
     pheno = pd.read_csv(args.pheno, sep="\t", dtype={"IID": str})
-    valid, cols = read(f"{args.prefix}.valid.sscore", args.label, pheno)
-    test, _ = read(f"{args.prefix}.test.sscore", args.label, pheno)
+    names = pd.read_csv(f"{args.prefix}.betas.tsv", sep="\t", nrows=0).columns[2:].tolist()
+    valid, cols = read(f"{args.prefix}.valid.sscore", args.label, pheno, names)
+    test, _ = read(f"{args.prefix}.test.sscore", args.label, pheno, names)
 
     yv, yt = valid[args.label].to_numpy(float), test[args.label].to_numpy(float)
     valid_r = {
