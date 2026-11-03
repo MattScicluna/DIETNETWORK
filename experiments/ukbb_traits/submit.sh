@@ -7,6 +7,7 @@
 #   TRAIN_LABELS="height bmi" TRAIN_SPECS="freq ag freq_ag freq_random freq_shuffled mlp" \
 #   TRAIN_CONFIGS=b138 SEEDS="78 79 80" FOLDS="0 1 2 3 4" bash submit.sh train
 #   bash submit.sh bench   # linear benchmark (regenie, clumping/thresholding), same folds
+#   bash submit.sh bench-ldpred2   # LDpred2-auto on bench's GWAS (CHR=22: one chromosome)
 #
 # Every step waits on the ones it reads (afterok), so `prep` can be submitted
 # while the cluster is down and runs end to end when it is back. Job ids go to
@@ -68,8 +69,13 @@ bench)
     submit regenie_ct --dependency="afterok:$folds" "${@:2}" \
         "$HERE/benchmark/regenie_ct.sbatch" > /dev/null
     ;;
+bench-ldpred2)
+    # LDpred2-auto on the GWAS that `bench` wrote (further arguments go to the array).
+    export BENCH_LABELS="${BENCH_LABELS:-height,bmi}" ${CHR:+CHR}
+    submit ldpred2 "${@:2}" "$HERE/benchmark/ldpred2.sbatch" > /dev/null
+    ;;
 *)
-    echo "usage: submit.sh prep|train|bench [sbatch options for train or bench]" >&2
+    echo "usage: submit.sh prep|train|bench|bench-ldpred2 [sbatch options]" >&2
     exit 1
     ;;
 esac
