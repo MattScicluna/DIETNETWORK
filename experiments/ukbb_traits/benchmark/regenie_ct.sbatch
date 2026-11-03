@@ -13,7 +13,6 @@
 #SBATCH --mem=64G
 #SBATCH --time=12:00:00
 source "$HERE/common.sh"
-module load regenie/3.2.1 plink/2.0.0-a.6.32
 : "${BENCH_LABELS:=height,bmi}"
 
 k="$SLURM_ARRAY_TASK_ID"
@@ -21,12 +20,15 @@ B="bench/fold$k"
 threads="$SLURM_CPUS_PER_TASK"
 read -ra chr <<< "${CHR:+--chr $CHR}"
 
+# Narval's regenie needs the 2020 environment, its plink2 the 2023 one.
+module load StdEnv/2020 gcc/9.3.0 regenie/3.2.1
 regenie --step 1 --bed cohort ${chr[@]+"${chr[@]}"} --keep "$B/train.txt" --phenoFile bench/pheno.tsv \
     --phenoColList "$BENCH_LABELS" --qt --bsize 1000 --lowmem --lowmem-prefix "$B/tmp" \
     --threads "$threads" --out "$B/step1"
 regenie --step 2 --bed cohort ${chr[@]+"${chr[@]}"} --keep "$B/train.txt" --phenoFile bench/pheno.tsv \
     --phenoColList "$BENCH_LABELS" --qt --pred "$B/step1_pred.list" --bsize 400 \
     --threads "$threads" --out "$B/gwas"
+module load StdEnv/2023 plink/2.0.0-a.6.32
 
 THRESHOLDS="5e-8 1e-6 1e-4 1e-3 0.01 0.05 0.1 0.2 0.5 1"
 for label in ${BENCH_LABELS//,/ }; do
