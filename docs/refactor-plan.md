@@ -91,8 +91,13 @@ When Narval is back:
    0.219 (0.009). AlphaGenome adds nothing: per-fold differences have mixed
    signs, mean -0.001 (height) and -0.003 (BMI). Height matches the naive
    marginal score (0.33) and sits below good polygenic scores (~0.5-0.6);
-   BMI beats the naive score (0.18). Benchmark on the same folds: regenie +
-   clumping and thresholding (`submit.sh bench`, array 7732912).
+   BMI beats the naive score (0.18). **Benchmark on the same test folds**
+   (`submit.sh bench`, array 7732912; regenie GWAS on the training samples,
+   clumping, threshold chosen on validation): height r = 0.351 (sd 0.006,
+   p < 1e-6 in every fold), BMI r = 0.165 (sd 0.003, p < 1e-4). So the Diet
+   Network is slightly behind clumping/thresholding for height (-0.015) and
+   clearly ahead for BMI (+0.056). Next, if wanted: a joint linear model
+   (bigsnpr lasso, installed on Narval) toward height r ~ 0.5.
 4. Later: relatedness (partition without Pan-UKB `related`), and Camille's
    results for comparison (her runs are in `cam27/DIETNET_EXP/HEIGHT/` and
    `BMI/`, on her imputed SNPs).
