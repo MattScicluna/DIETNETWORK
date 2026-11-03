@@ -13,7 +13,7 @@ map <- as.data.table(readRDS(args[1]))[!is.na(pos_hg38)]
 dir.create(args[3], showWarnings = FALSE, recursive = TRUE)
 
 summary <- rbindlist(lapply(1:22, function(chr) {
-  bim <- fread(sub("{chr}", chr, args[2], fixed = TRUE), header = FALSE,
+  bim <- fread(paste0(sub("{chr}", chr, args[2], fixed = TRUE), ".bim"), header = FALSE,
                select = c(2, 4, 5, 6), col.names = c("id", "pos", "b1", "b2"),
                colClasses = list(character = c(2, 5, 6), integer = 4))
   hm3 <- map[map$chr == chr, .(pos = pos_hg38, a0, a1)]
