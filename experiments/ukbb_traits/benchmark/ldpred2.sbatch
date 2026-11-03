@@ -28,6 +28,8 @@ regenie) gwas_prefix=gwas tag="${CHR:+.chr$CHR}" ;;
 plink2) gwas_prefix=gwas_marginal tag=".plink${CHR:+.chr$CHR}" ;;
 *) echo "GWAS must be regenie or plink2, not $GWAS" >&2; exit 1 ;;
 esac
+# LD_WINDOW_KB (default 1000) widens or narrows the LD window; tagged .w<kb>.
+tag="$tag${LD_WINDOW_KB:+.w$LD_WINDOW_KB}"
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1  # bigsnpr parallelises itself
 
 module load StdEnv/2023 plink/2.0.0-a.6.32

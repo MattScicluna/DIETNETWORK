@@ -22,7 +22,8 @@ labels <- strsplit(args[3], ",")[[1]]
 tag <- args[4]
 ncores <- as.integer(args[5])
 tmp <- args[6]
-WINDOW_KB <- 1000  # physical window: no GRCh38 genetic map offline on the nodes
+# Physical window (no GRCh38 genetic map offline on the nodes); LD_WINDOW_KB overrides.
+WINDOW_KB <- as.numeric(Sys.getenv("LD_WINDOW_KB", "1000"))
 N_CHAINS <- 30
 bigparallelr::set_blas_ncores(1)
 set.seed(1)
