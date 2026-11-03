@@ -12,17 +12,18 @@ stopifnot(length(args) == 3)
 map <- as.data.table(readRDS(args[1]))[!is.na(pos_hg38)]
 dir.create(args[3], showWarnings = FALSE, recursive = TRUE)
 
-summary <- rbindlist(lapply(1:22, function(chr) {
-  bim <- fread(paste0(sub("{chr}", chr, args[2], fixed = TRUE), ".bim"), header = FALSE,
+summary <- rbindlist(lapply(1:22, function(k) {
+  # (k, not chr: inside a data.table's [ ], chr would be the column.)
+  bim <- fread(paste0(sub("{chr}", k, args[2], fixed = TRUE), ".bim"), header = FALSE,
                select = c(2, 4, 5, 6), col.names = c("id", "pos", "b1", "b2"),
                colClasses = list(character = c(2, 5, 6), integer = 4))
-  hm3 <- map[map$chr == chr, .(pos = pos_hg38, a0, a1)]
+  hm3 <- map[as.integer(chr) == k, .(pos = pos_hg38, a0, a1)]
   m <- merge(bim, hm3, by = "pos")
   m <- m[(b1 == a1 & b2 == a0) | (b1 == a0 & b2 == a1)]
   ids <- unique(m$id)
-  fwrite(list(ids), file.path(args[3], paste0("chr", chr, ".ids")), col.names = FALSE)
-  cat("chromosome", chr, ":", nrow(hm3), "HM3+ variants,", length(ids), "matched\n")
-  data.table(chr = chr, hm3 = nrow(hm3), matched = length(ids))
+  fwrite(list(ids), file.path(args[3], paste0("chr", k, ".ids")), col.names = FALSE)
+  cat("chromosome", k, ":", nrow(hm3), "HM3+ variants,", length(ids), "matched\n")
+  data.table(chr = k, hm3 = nrow(hm3), matched = length(ids))
 }))
 fwrite(summary, file.path(args[3], "summary.tsv"), sep = "\t")
 cat("total:", sum(summary$hm3), "HM3+ variants,", sum(summary$matched), "matched\n")
