@@ -54,7 +54,39 @@ installed for `module load StdEnv/2023 gcc r/4.4.0`, library
   a `submit.sh bench-ldpred2` phase. Test first on one chromosome (`CHR=22`).
 - Expect height r ~ 0.45-0.55. If far below, check allele alignment first.
 
+**Result (2026-11-03, arrays 8282169 + 8299197, `GWAS=plink2`): height r = 0.372
+(sd 0.003), BMI r = 0.277 (sd 0.005), mean test r over 5 folds** (per fold:
+height 0.369 0.375 0.375 0.374 0.368; BMI 0.274 0.283 0.280 0.273 0.274), ~47 min
+a fold on 32 CPUs, 55 GB.
+
+- **regenie's GWAS does not suit LDpred2.** Step 2 associates y minus the LOCO
+  polygenic prediction, not y, so chi^2 is inflated (fold 0 LDSC h2 0.92,
+  intercept 1.27) and LDpred2-auto on it gave height 0.179, BMI 0.130 (fold 0).
+  `GWAS=plink2` runs a plain marginal GWAS (plink2 `--glm`, training samples only,
+  `bench/fold<k>/gwas_marginal_<label>.regenie`, regenie's columns), which gives
+  the results above. A2/B2 should take their GWAS features from these files too.
+- Allele alignment checked: bigsnpr's `allele1` is the bim's first allele, matched
+  by ID with no flips; scores use the bim's A1; LD itself does not depend on the
+  counted allele.
+- The MLE update of p and h2 (bigsnpr's default) diverges in every chain, every
+  fold, both traits; the script falls back to `use_MLE = FALSE`, where 3-11 of 30
+  chains pass the tutorial's convergence filter. Kept chains estimate h2 ~0.14
+  (height) and ~0.05 (BMI): too low, a sign of LD-reference mismatch at N ~250k.
+- A 3 Mb window (fold 0, `LD_WINDOW_KB=3000`) changes r by < 0.003 (height 0.370,
+  BMI 0.276), though chain h2 rises to 0.36 / 0.10: the window is not the limit.
+- So the joint model gains +0.02 over C+T for height, +0.11 for BMI; BMI is in the
+  literature's range, height short of 0.45-0.55. Likely reasons, untested: 416k
+  array SNPs vs ~1.1M imputed HapMap3 SNPs in the literature (less tagging of
+  causal variants), and a 10k LD reference for a 255k GWAS. Possible next checks:
+  a larger LD reference (e.g. 30-50k training samples), or individual-level
+  penalised regression (bigstatsr `big_spLinReg`), which needs no LD reference.
+
 ### Shared code: per-fold precomputed features
+
+**Done 2026-11-03** (`src/dietnet/features.py`, tests in `tests/unit/test_features.py`,
+`docs/features.md`). Per-fold tables must also share feature columns and cover the
+same SNPs (otherwise the `missing` column would be all zeros in some fold).
+
 
 Needed by A2 and B2. `build-embedding`'s `precomputed` provider is fold-independent
 (SNPs x features). Add a per-fold form: `path:` containing `{fold}` (e.g.

@@ -28,6 +28,12 @@ lasso; A3 (optional) SBayesRC with AlphaGenome annotations. Current results
 `$SCRATCH/dietnet_traits/exp_maf01` (MAF >= 1%). The history below records how
 we got here.
 
+**Done 2026-11-03:** A1 (LDpred2-auto: height 0.372, BMI 0.277 over 5 folds;
+details in the spec's A1 section) and the per-fold precomputed features
+(`{fold}` in a `precomputed` path; `docs/features.md`). **Next: A2**, whose
+GWAS tables should come from the plain marginal GWAS
+(`bench/fold<k>/gwas_marginal_<label>.regenie`), not regenie's LOCO one (see A1).
+
 ### UK Biobank height and BMI (2026-10-28, history)
 
 Goal: predict height and BMI from autosomal genotypes with the Diet Network,
