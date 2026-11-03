@@ -15,13 +15,17 @@ for c in $(seq 2 22); do
 done
 cp imputed/chr1.fam cohort.fam
 for c in $(seq 1 22); do cat "imputed/chr$c.bim"; done > cohort.bim
-{
-    head -c 3 imputed/chr1.bed
-    for c in $(seq 1 22); do tail -c +4 "imputed/chr$c.bed"; done
-} > cohort.bed
-# Size check: header + variants x ceil(samples / 4) bytes.
+# Expected size: header + variants x ceil(samples / 4) bytes. A complete earlier
+# merge is kept (rerunning only the lists).
 n=$(wc -l < cohort.fam) m=$(wc -l < cohort.bim)
-[ "$(stat -c %s cohort.bed)" -eq $((3 + m * ((n + 3) / 4))) ] || { echo "bad bed size" >&2; exit 1; }
+size=$((3 + m * ((n + 3) / 4)))
+if [ "$(stat -c %s cohort.bed 2>/dev/null || echo 0)" -ne "$size" ]; then
+    {
+        head -c 3 imputed/chr1.bed
+        for c in $(seq 1 22); do tail -c +4 "imputed/chr$c.bed"; done
+    } > cohort.bed
+fi
+[ "$(stat -c %s cohort.bed)" -eq "$size" ] || { echo "bad bed size" >&2; exit 1; }
 echo "cohort: $n samples, $m variants"
 
 # Benchmark lists: the source's folds, samples absent here dropped.
@@ -34,5 +38,6 @@ for d in "$SRC_EXP"/bench/fold*; do
     for s in train valid test ld; do
         awk 'NR == FNR { keep[$2]; next } $2 in keep' cohort.fam "$d/$s.txt" > "bench/$k/$s.txt"
     done
-    wc -l "bench/$k"/{train,valid,test,ld}.txt | head -4 | tr '\n' ' '; echo
+    echo "$k: $(cat "bench/$k"/train.txt | wc -l) train, $(wc -l < "bench/$k/valid.txt") valid," \
+        "$(wc -l < "bench/$k/test.txt") test, $(wc -l < "bench/$k/ld.txt") LD reference"
 done
