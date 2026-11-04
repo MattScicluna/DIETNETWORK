@@ -110,6 +110,11 @@ not the LD reference or the SNPs. Folds 1-4: array 8467266.
   q = 1 - input_dropout keeps the rate. Check before using it at 1.29M: the array
   grid (`exp_maf01`, `dec`, b138_d50, `--bn-recalibrate 20000`, folds 0-4) with
   `--snp-sample 0.5`, paired per fold against height 0.336 / BMI 0.221.
+  **Result (array 8470059):** height 0.3359 (sd 0.005) vs 0.3356; per fold -0.001
+  +0.003 +0.001 +0.002 -0.003. BMI 0.2221 (sd 0.012) vs 0.2211; per fold +0.009
+  +0.001 +0.010 -0.013 -0.001. No change in accuracy. Training pass 19.8 -> 13.6 s an
+  epoch (genotype reading and decoding are not reduced), ~10% more epochs to the
+  best model, so ~25% less GPU time a model. Used for the HM3+ grid.
 - **AlphaGenome for the new SNPs** (for `dec_ag` on HM3+): 1,155,048 HM3+ SNPs not
   already scored, on the Mac (`~/dietnet_alphagenome/ukbb_hm3/run_scoring.sh`,
   resumable, ~2.5 days at the API's rate); then merged with the array table.
