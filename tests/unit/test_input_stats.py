@@ -41,6 +41,16 @@ def test_streamed_statistics_are_upstreams(prepared, tmp_path, inputs):
     np.testing.assert_allclose(ours["sd_by_fold"], upstream["sd_by_fold"], rtol=1e-12, atol=0)
 
 
+def test_a_fold_without_training_samples_is_refused(prepared, tmp_path):
+    h5, partition = prepared
+    p = np.load(partition, allow_pickle=True)
+    folds = p["folds_indexes"].copy()
+    folds[1, 0] = np.array([], dtype=np.int64)
+    np.savez(tmp_path / "empty.npz", folds_indexes=folds, folds_samples=p["folds_samples"])
+    with pytest.raises(ValueError, match=r"no training samples in fold\(s\) \[1\]"):
+        input_stats.compute(h5, tmp_path / "empty.npz")
+
+
 def test_the_cli_writes_what_train_reads(prepared, tmp_path):
     h5, partition = prepared
     dietnet("compute-input-stats", dataset=h5, partition=partition, out=tmp_path / "up.npz")

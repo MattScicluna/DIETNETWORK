@@ -26,6 +26,9 @@ from dietnet import genotypes
 def compute(dataset, partition, inputs: str = "auto", block: int = 2048) -> dict:
     """``means_by_fold`` and ``sd_by_fold`` (folds x SNPs, float64), as upstream writes."""
     folds = np.load(partition, allow_pickle=True)["folds_indexes"]
+    empty = [k for k, fold in enumerate(folds) if len(fold[0]) == 0]
+    if empty:
+        raise ValueError(f"{partition}: no training samples in fold(s) {empty}")
     store = genotypes.open_store(dataset, genotypes.choose(dataset, inputs))
     counts, _ = genotypes.count_by_fold(store, [fold[0] for fold in folds], block=block)
     c = counts[:, 0].astype(np.float64)  # folds x SNPs x (n0, n1, n2)

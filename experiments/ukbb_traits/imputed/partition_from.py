@@ -34,7 +34,15 @@ def main():
     kept = np.empty(folds.shape, dtype=object)
     for k in range(folds.shape[0]):
         for s in range(folds.shape[1]):
-            ids = [str(x) for x in folds[k, s] if str(x) in row]
+            # Stored as bytes (the datasets' |S ids): decode, as the dataset's are.
+            source = np.asarray(folds[k, s]).astype(str)
+            ids = [x for x in source if x in row]
+            if len(source) - len(ids) > 0.01 * len(source):
+                raise SystemExit(
+                    f"fold {k} split {s}: {len(source) - len(ids)} of {len(source)} samples "
+                    f"are not in {args.dataset} (e.g. {source[:3].tolist()} vs "
+                    f"{samples[:3].tolist()}): not the same cohort?"
+                )
             kept[k, s] = np.array(ids)
             indexes[k, s] = np.array([row[x] for x in ids], dtype=np.int64)
         sizes = [len(x) for x in indexes[k]]
