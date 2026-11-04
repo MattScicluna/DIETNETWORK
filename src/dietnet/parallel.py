@@ -45,6 +45,15 @@ from dietnet import genotypes, upstream
 from dietnet._launch import _fill_missing
 
 EVAL_BATCH = 2048
+EVAL_INPUT_BYTES = 4 * 2**30  # float32 inputs of one evaluation batch; preprocessing copies them
+
+
+def eval_batch_size(batch_size: int, n_snps: int) -> int:
+    """Samples per evaluation batch: :data:`EVAL_BATCH`, fewer where a batch's inputs would
+    exceed :data:`EVAL_INPUT_BYTES` (2048 x 1.29M SNPs is 9.84 GiB, copied several times
+    over by preprocessing: more than an A100 holds), never fewer than a training batch.
+    """
+    return max(batch_size, min(EVAL_BATCH, EVAL_INPUT_BYTES // (4 * n_snps)))
 
 
 class Split(torch.utils.data.Dataset):
@@ -243,7 +252,7 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
 
     # Evaluation has no dropout, so its batch size changes no prediction, only how
     # many batches upstream's eval_step does its per-batch bookkeeping for.
-    eval_batch = max(batch_size, EVAL_BATCH)
+    eval_batch = eval_batch_size(batch_size, n_snps)
 
     def decoded(batches):
         """Batches with packed genotypes decoded on the GPU: upstream's eval_step

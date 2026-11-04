@@ -4,7 +4,14 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from dietnet.parallel import SnpSampled
+from dietnet.parallel import SnpSampled, eval_batch_size
+
+
+def test_evaluation_batches_fit_a_gpu_at_any_number_of_snps():
+    assert eval_batch_size(138, 416_084) == 2048  # the array: as before
+    assert eval_batch_size(138, 1_290_149) == 832
+    assert eval_batch_size(4096, 416_084) == 4096  # never below a training batch
+    assert eval_batch_size(138, 40_000_000) == 138
 
 
 class Aux(nn.Module):
