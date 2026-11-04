@@ -363,6 +363,16 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus, engine, inputs
     "on this many training samples without dropout (0: off). Upstream's fat layer is "
     "batch-normalised right after input dropout, so its training statistics misfit evaluation.",
 )
+@click.option(
+    "--snp-sample",
+    type=click.FloatRange(0, 1, min_open=True),
+    default=1.0,
+    show_default=True,
+    help="Engine 'dietnet', Diet Network only: train each batch on this share of the SNPs, "
+    "the same for the whole batch, in place of per-sample input dropout (1: off). The "
+    "auxiliary network and the fat layer then do that share of the work; evaluation uses "
+    "every SNP. 1 - input_dropout keeps the dropout rate.",
+)
 def train(
     dataset_path,
     partition_path,
@@ -381,6 +391,7 @@ def train(
     gpus,
     engine,
     bn_recalibrate,
+    snp_sample,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -392,7 +403,7 @@ def train(
             folds=folds, task=task, normalize=normalize,
             model={"dietnet": "Dietnet", "mlp": "Mlp"}[model],
             inputs=inputs, loader=loader, workers=workers, gpus=gpus, engine=engine,
-            bn_recalibrate=bn_recalibrate,
+            bn_recalibrate=bn_recalibrate, snp_sample=snp_sample,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

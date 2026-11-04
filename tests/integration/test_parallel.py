@@ -57,6 +57,22 @@ def test_the_dietnet_engine_trains_a_model_as_good_as_train_py(tmp_path, inputs,
     assert accuracy >= 0.9, report
 
 
+def test_snp_sampling_trains_a_model_as_good(tmp_path):
+    """--snp-sample 0.5 in place of per-sample input dropout: the same quality, and the
+    package records how it was trained."""
+    import json
+
+    data = DATASETS["synthetic"]
+    flags = ["--engine=dietnet", "--workers=1", "--inputs=memmap", "--snp-sample=0.5"]
+    packages = train_pipeline(tmp_path / "ss", data, folds="0", flags=flags)
+
+    report = dietnet("check", packages=packages)
+    accuracy = float(re.search(r"(\d\.\d+)", report.splitlines()[-1]).group(1))
+    assert accuracy >= 0.9, report
+    (meta,) = packages.glob("seed_*/fold_*/metadata.json")
+    assert json.loads(meta.read_text())["snp_sample"] == 0.5
+
+
 def test_recalibrated_batchnorm_trains_a_model_as_good(tmp_path):
     """--bn-recalibrate: the same quality, with statistics recomputed before validation."""
     data = DATASETS["synthetic"]

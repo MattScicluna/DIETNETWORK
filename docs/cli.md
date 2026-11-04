@@ -158,6 +158,7 @@ Train each (seed, fold) with upstream `train.py`; package the results under
 | `--gpus INTEGER` | above 1, train each model data-parallel over this many GPUs on one node (CPU processes where there are none): upstream's model and epoch logic, the config's `batch_size` split across them; not bit-identical to train.py, see Scaling | 1 |
 | `--engine` | `upstream`: train.py itself, unmodified (bit-identical model); `dietnet`: upstream's model and epoch logic in dietnet's own loop, packed genotypes decoded on the GPU, without train.py's per-batch bookkeeping (much faster; not bit-identical) | `upstream` on one GPU, `dietnet` for `--gpus` > 1 |
 | `--bn-recalibrate` | engine `dietnet` only: before each validation, recompute the batch-norm statistics on this many training samples without dropout. Upstream batch-normalises the fat layer right after input dropout, so the statistics learned in training misfit evaluation | 0 (off) |
+| `--snp-sample` | engine `dietnet`, Diet Network only: each training batch uses this share of the SNPs, the same for the whole batch, scaled up to keep the fat layer's expected input, in place of per-sample input dropout. The dropped SNPs are skipped, so the auxiliary network and the fat layer do that share of the work; evaluation uses every SNP. `1 - input_dropout` keeps the dropout rate | 1 (off) |
 
 ## `dietnet match`
 

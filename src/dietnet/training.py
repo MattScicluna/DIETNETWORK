@@ -188,6 +188,7 @@ def train(
     gpus: int = 1,
     engine: str | None = None,
     bn_recalibrate: int = 0,
+    snp_sample: float = 1.0,
 ) -> list[package.Package]:
     """Train every (seed, fold); return their packages.
 
@@ -212,6 +213,10 @@ def train(
     many training samples, without dropout, before each validation: upstream's
     network batch-normalises the fat layer right after input dropout, so the
     statistics learned in training do not describe evaluation's activations.
+    With ``snp_sample`` < 1 (Diet Network only) each training batch uses that share
+    of the SNPs, the same for the whole batch, in place of per-sample input dropout
+    (:class:`dietnet.parallel.SnpSampled`): the auxiliary network and the fat layer
+    then do that share of the work.
     """
     engine = engine or ("dietnet" if gpus > 1 else "upstream")
     if engine not in ("upstream", "dietnet"):
@@ -224,6 +229,10 @@ def train(
         raise ValueError("engine 'upstream' is train.py's own loop, on one GPU")
     if bn_recalibrate and engine != "dietnet":
         raise ValueError("--bn-recalibrate needs engine 'dietnet' (train.py runs unmodified)")
+    if not 0 < snp_sample <= 1:
+        raise ValueError(f"snp_sample must be in (0, 1], not {snp_sample}")
+    if snp_sample < 1 and (engine != "dietnet" or model != "Dietnet"):
+        raise ValueError("--snp-sample needs engine 'dietnet' and the Diet Network")
     if engine == "dietnet" and loader == "upstream":
         raise ValueError("--loader upstream applies to engine 'upstream' only")
     if model not in upstream.MODELS:
@@ -269,7 +278,7 @@ def train(
             log = exp_dir / "logs" / f"train_seed{seed}_fold{fold}.log"
             if engine == "dietnet":
                 args += ["--inputs", env[_launch.INPUTS_ENV], "--workers", workers,
-                         "--bn-recalibrate", bn_recalibrate]  # fmt: skip
+                         "--bn-recalibrate", bn_recalibrate, "--snp-sample", snp_sample]  # fmt: skip
                 _run_parallel(args, gpus, log)
             else:
                 upstream.run("train.py", args, log=log, env=env)
@@ -290,7 +299,11 @@ def train(
                 seed=seed,
                 fold=fold,
                 model=model,
-                extra={"results_dir": str(results), "embedding": feature_meta},
+                extra={
+                    "results_dir": str(results),
+                    "embedding": feature_meta,
+                    **({"snp_sample": snp_sample} if snp_sample < 1 else {}),
+                },
             )
             _held_out_predictions(results, dataset, task).to_csv(
                 pkg.path / "test_predictions.tsv", sep="\t", index=False

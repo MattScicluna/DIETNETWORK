@@ -112,6 +112,35 @@ def recalibrate_batchnorm(model, batches, forward) -> int:
     return seen
 
 
+class SnpSampled(nn.Module):
+    """Upstream's Diet Network, trained on a random share of the SNPs per batch.
+
+    In training, each batch draws ``keep`` x n SNPs (the same for every sample of
+    the batch): the auxiliary network computes fat-layer weights for those SNPs
+    only, and the main network sees only their columns, scaled by n / k so the fat
+    layer's expected input is unchanged, as dropout's 1 / (1 - p) scaling keeps it.
+    This is input dropout with one mask per batch instead of one per sample, which
+    is what lets the dropped SNPs be skipped: the auxiliary network and the fat
+    layer do ~``keep`` of the work. It replaces the main network's per-sample input
+    dropout (set to the identity by the caller); keep = 1 - input_dropout keeps the
+    rate. In evaluation every SNP is used, as upstream's model does.
+    """
+
+    def __init__(self, net, keep: float):
+        super().__init__()
+        self.net, self.keep = net, keep
+
+    def forward(self, x, results, epoch, batch, step):
+        net = self.net
+        if not net.training or self.keep >= 1:
+            return net(x, results, epoch, batch, step)
+        n = x.shape[1]
+        k = max(1, round(self.keep * n))
+        cols = torch.randperm(n, device=x.device)[:k].sort().values
+        aux = net.aux_net(net.embedding[cols], results, epoch, batch, step, save_weights=False)
+        return net.main_net(x[:, cols] * (n / k), aux.T, results, epoch, batch, step)
+
+
 def _args(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     # train.py's names, so dietnet.training builds both command lines alike.
@@ -132,6 +161,11 @@ def _args(argv=None):
         "--bn-recalibrate", type=int, default=0,
         help="training samples to recompute batch-norm statistics on, without dropout, "
         "before each validation (0: off, as train.py)",
+    )  # fmt: skip
+    p.add_argument(
+        "--snp-sample", type=float, default=1.0,
+        help="Diet Network: train each batch on this share of the SNPs, shared by the batch, "
+        "in place of per-sample input dropout (1: off, as train.py)",
     )  # fmt: skip
     return p.parse_args(argv)
 
@@ -175,7 +209,13 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
     else:
         handler = m.model_handlers.MlpHandler(task, args.dataset, config)
     model = handler.model.to(device)
-    ddp = DistributedDataParallel(model, device_ids=[local_rank] if cuda else None)
+    trained = model
+    if args.snp_sample < 1:
+        if args.model != "Dietnet":
+            raise SystemExit("--snp-sample applies to the Diet Network only")
+        model.main_net.input_dropout = nn.Identity()  # replaced by the shared SNP sample
+        trained = SnpSampled(model, args.snp_sample)
+    ddp = DistributedDataParallel(trained, device_ids=[local_rank] if cuda else None)
     optimizers = model.get_optimizers()
     torch.manual_seed(seed + 1000 * rank)  # each rank its own dropout masks
 

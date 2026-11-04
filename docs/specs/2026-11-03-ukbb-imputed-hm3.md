@@ -91,6 +91,29 @@ a larger LD reference (30-50k training samples) for fold 0; LDpred2-grid / lasso
 on the same LD (h2 fixed at the LDSC value instead of estimated); individual-level
 penalised regression (bigstatsr `big_spLinReg`, no LD reference, heavier).
 
+**lassosum2 (fold 0, 2026-11-03):** height test r **0.518** (LDpred2-auto 0.394; every
+LDpred2-grid model diverged), BMI 0.289 (auto 0.302). A 40k LD reference changes
+nothing (auto 0.394, lassosum2 0.518), so the limit was LDpred2's sampler on height,
+not the LD reference or the SNPs. Folds 1-4: array 8467266.
+
+### Efficiency for 1.29M SNPs (agreed with Matt, 2026-11-03)
+
+- **Streamed input statistics.** Upstream's compute_input_features_statistics.py
+  holds a fold's training genotypes in memory (~330 GB at 254k x 1.29M). The same
+  means and SDs follow from per-SNP genotype counts, gathered a block of rows at a
+  time: `compute-input-stats --engine dietnet` (means equal to upstream's, SDs to
+  1e-12; `tests/unit/test_input_stats.py`), one 48G job for all folds.
+- **SNP sampling (`train --snp-sample q`, engine `dietnet`).** Each training batch
+  uses a random share q of the SNPs, the same for the whole batch, scaled by n/k,
+  in place of per-sample input dropout: input dropout with one mask per batch, so
+  the auxiliary network and the fat layer skip the dropped SNPs (~q of the work).
+  q = 1 - input_dropout keeps the rate. Check before using it at 1.29M: the array
+  grid (`exp_maf01`, `dec`, b138_d50, `--bn-recalibrate 20000`, folds 0-4) with
+  `--snp-sample 0.5`, paired per fold against height 0.336 / BMI 0.221.
+- **AlphaGenome for the new SNPs** (for `dec_ag` on HM3+): 1,155,048 HM3+ SNPs not
+  already scored, on the Mac (`~/dietnet_alphagenome/ukbb_hm3/run_scoring.sh`,
+  resumable, ~2.5 days at the API's rate); then merged with the array table.
+
 ### C. Diet Network on HapMap3+ (GPU, after B and Matt's go)
 
 - Dataset, partition from the fold lists (same folds, by sample id), per-fold
