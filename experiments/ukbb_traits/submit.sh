@@ -10,6 +10,7 @@
 #   bash submit.sh bench-ldpred2   # LDpred2-auto on bench's GWAS (CHR=22: one chromosome)
 #   EXP_DIR=<new dir> SRC_EXP=<array run dir> IMPUTED=<prefix with {chr}> HM3_MAP=<rds> \
 #   bash submit.sh imputed          # the cohort on imputed HapMap3+ variants
+#   SPECS="dec@height dec@bmi" TRAIN_FLAGS=... bash submit.sh prep-imputed   # its datasets...pilot
 #
 # Every step waits on the ones it reads (afterok), so `prep` can be submitted
 # while the cluster is down and runs end to end when it is back. Job ids go to
@@ -83,13 +84,36 @@ imputed)
     submit imputed_merge --dependency="afterok:$extract" "${@:2}" \
         "$HERE/imputed/merge.sbatch" > /dev/null
     ;;
+prep-imputed)
+    # The Diet Network's inputs for a cohort built by `imputed` (EXP_DIR), with
+    # SRC_EXP's labels and folds (by sample id), then the pilot. Resources scaled
+    # for ~1.3M SNPs (2.7x the array): create-dataset holds the .bed in memory,
+    # the statistics a fold's training genotypes.
+    : "${SRC_EXP:?the array run directory}"
+    [ -s cohort.bed ] || { echo "run submit.sh imputed first" >&2; exit 1; }
+    [ -e inputs ] || ln -s "$SRC_EXP/inputs" inputs
+    datasets=$(submit datasets --array="0-$((${#LABEL_SETS[@]} - 1))" --mem=220G \
+        --time=12:00:00 "$HERE/dataset.sbatch")
+    partition=$(submit partition --job-name=traits_partition --dependency="afterok:${datasets}_0" \
+        --cpus-per-task=1 --mem=32G --time=01:00:00 --wrap "\"$PYTHON\" \
+        \"$HERE/imputed/partition_from.py\" --src \"$SRC_EXP/partition.npz\" \
+        --dataset \"data/$FIRST.h5\" --out partition.npz")
+    stats=$(submit stats --dependency="afterok:$partition" --mem=450G --time=10:00:00 \
+        "$HERE/stats.sbatch")
+    merged=$(submit merge_stats --dependency="afterok:$stats" "$HERE/merge_stats.sbatch")
+    embeddings=$(submit embeddings --array="0-$((${#SPEC_NAMES[@]} - 1))" --mem=64G \
+        --time=12:00:00 --dependency="afterok:$partition" "$HERE/embedding.sbatch")
+    TRAIN_LABELS="$FIRST" TRAIN_SPECS="${SPEC_NAMES[0]%@*}" TRAIN_CONFIGS="${PILOT_CONFIG:-b138_d50}" \
+        SEEDS=78 FOLDS=0 train --dependency="afterok:$merged:${embeddings}_0:${datasets}" \
+        --mem=160G --time=12:00:00 > /dev/null
+    ;;
 bench-ldpred2)
     # LDpred2-auto on the GWAS that `bench` wrote (further arguments go to the array).
     export BENCH_LABELS="${BENCH_LABELS:-height,bmi}" ${CHR:+CHR}
     submit ldpred2 "${@:2}" "$HERE/benchmark/ldpred2.sbatch" > /dev/null
     ;;
 *)
-    echo "usage: submit.sh prep|train|bench|bench-ldpred2|imputed [sbatch options]" >&2
+    echo "usage: submit.sh prep|train|bench|bench-ldpred2|imputed|prep-imputed [sbatch options]" >&2
     exit 1
     ;;
 esac
