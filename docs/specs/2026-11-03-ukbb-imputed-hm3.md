@@ -96,6 +96,16 @@ LDpred2-grid model diverged), BMI 0.289 (auto 0.302). A 40k LD reference changes
 nothing (auto 0.394, lassosum2 0.518), so the limit was LDpred2's sampler on height,
 not the LD reference or the SNPs. Folds 1-4: array 8467266.
 
+**Linear baseline on HM3+, 5 folds (mean test r; model chosen on validation):**
+
+| | height | BMI |
+|---|---|---|
+| lassosum2 | **0.517** (0.518 0.520 0.518 0.511 0.516) | 0.296 (0.289 0.302 0.299 0.294 0.295) |
+| LDpred2-auto | 0.396 | **0.308** (0.302 0.312 0.312 0.303 0.308) |
+
+The Diet Network on HM3+ is judged against the better of the two per trait: height
+0.517 (lassosum2), BMI 0.308 (LDpred2-auto).
+
 ### Efficiency for 1.29M SNPs (agreed with Matt, 2026-11-03)
 
 - **Streamed input statistics.** Upstream's compute_input_features_statistics.py
