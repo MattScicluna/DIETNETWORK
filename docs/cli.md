@@ -130,7 +130,9 @@ Per-fold SNP means and SDs (upstream `compute_input_features_statistics.py`).
 | `--dataset PATH` | *existing* dataset | required |
 | `--partition PATH` | *existing* partition | required |
 | `--out PATH` | output `.npz` | required |
-| `--ncpus INTEGER` | processes | 1 |
+| `--ncpus INTEGER` | processes (engine `upstream`) | 1 |
+| `--engine` | `upstream`: its script, which holds a fold's training genotypes in memory (int8, samples x SNPs: ~330 GB at 254k x 1.29M); `dietnet`: the same statistics from genotype counts, a block of samples at a time, in a few GB (means identical, SDs to floating-point rounding) | `upstream` |
+| `--inputs` | engine `dietnet`: where genotypes are read from, as for `train` | auto |
 
 ## `dietnet train`
 

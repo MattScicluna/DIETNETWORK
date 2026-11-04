@@ -232,3 +232,46 @@ def open_store(dataset: str | Path, mode: str):
         with h5py.File(dataset, "r") as f:
             return np.array(f["inputs"], dtype=np.int8)
     raise ValueError(f"inputs mode must be one of {MODES}, not {mode!r}")
+
+
+def count_by_fold(store, train_rows, klass=None, n_classes=1, block=2048):
+    """Genotype counts over each fold's training rows, per class, a block of rows at
+    a time: memory is a block plus the counts, whatever the number of samples.
+
+    ``train_rows``: one array of row indices per fold. ``klass``: each row's class
+    (0..n_classes-1), or None for one class. Returns ``counts`` (folds x classes x
+    SNPs x 3, int64: how many rows have genotype 0, 1, 2; missing, -1, counts for
+    none) and ``rows`` (folds x classes: training rows, missing genotypes or not).
+    Rows are grouped by class and by the folds they train in, and each group is
+    read once, so a row shared by four folds' training sets is read once, not four
+    times.
+    """
+    n_rows, n_snps = store.shape
+    n_folds = len(train_rows)
+    member = np.zeros((n_folds, n_rows), dtype=bool)
+    for f, rows in enumerate(train_rows):
+        member[f, np.asarray(rows)] = True
+    klass = np.zeros(n_rows, dtype=np.int64) if klass is None else np.asarray(klass)
+
+    pattern = (member * (1 << np.arange(n_folds))[:, None]).sum(axis=0)
+    rows = np.flatnonzero(pattern)
+    keys, group = np.unique(klass[rows] * (1 << n_folds) + pattern[rows], return_inverse=True)
+    group_counts = np.zeros((len(keys), n_snps, 3), dtype=np.int64)
+    for start in range(0, len(rows), block):
+        g = np.asarray(store[rows[start : start + block]])
+        at = group[start : start + block]
+        for k in np.unique(at):
+            sel = g[at == k]
+            for value in range(3):
+                group_counts[k, :, value] += (sel == value).sum(axis=0)
+
+    sizes = np.bincount(group, minlength=len(keys))
+    key_class, key_pattern = keys >> n_folds, keys & ((1 << n_folds) - 1)
+    counts = np.zeros((n_folds, n_classes, n_snps, 3), dtype=np.int64)
+    n = np.zeros((n_folds, n_classes), dtype=np.int64)
+    for f in range(n_folds):
+        for c in range(n_classes):
+            mine = (key_class == c) & ((key_pattern >> f) & 1).astype(bool)
+            n[f, c] = sizes[mine].sum()
+            counts[f, c] = group_counts[mine].sum(axis=0)
+    return counts, n

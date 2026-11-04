@@ -261,9 +261,31 @@ def pack_genotypes(dataset_path):
 @_partition
 @_out
 @_ncpus
-def compute_input_stats(dataset_path, partition_path, out, ncpus):
+@click.option(
+    "--engine",
+    type=click.Choice(["upstream", "dietnet"]),
+    default="upstream",
+    show_default=True,
+    help="upstream: its script, which holds a fold's training genotypes in memory; "
+    "dietnet: the same statistics from genotype counts, a block of samples at a time.",
+)
+@click.option(
+    "--inputs",
+    type=click.Choice(["auto", "ram", "memmap", "packed"]),
+    default="auto",
+    show_default=True,
+    help="engine dietnet: where genotypes are read from (as for train).",
+)
+def compute_input_stats(dataset_path, partition_path, out, ncpus, engine, inputs):
     """Per-fold SNP means and SDs (upstream compute_input_features_statistics.py)."""
-    _per_fold_step("compute_input_features_statistics.py", dataset_path, partition_path, out, ncpus)
+    if engine == "upstream":
+        _per_fold_step(
+            "compute_input_features_statistics.py", dataset_path, partition_path, out, ncpus
+        )
+        return
+    from dietnet import input_stats
+
+    click.echo(f"wrote {input_stats.write(dataset_path, partition_path, _npz(out), inputs)}")
 
 
 @main.command()

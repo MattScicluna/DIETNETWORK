@@ -138,45 +138,25 @@ def _genotype_freq(ctx: Context, spec: dict) -> Block:
         ctx.dataset, genotypes.choose(ctx.dataset, spec.get("inputs", "auto"))
     )
     n_rows, n_snps = store.shape
-    member = np.zeros((len(folds), n_rows), dtype=bool)
-    for f, fold in enumerate(folds):
-        member[f, np.asarray(fold[0])] = True
     if "classes" in spec:
         with h5py.File(ctx.dataset, "r") as h5:
             samples = np.array(h5["samples"]).astype(str)
         labels = ds._ordered(ds.read_labels(spec["classes"]), samples, spec["classes"])
         names, klass = np.unique(labels, return_inverse=True)
     else:
-        names, klass = np.array(["all"]), np.zeros(n_rows, dtype=int)
+        names, klass = np.array(["all"]), None
 
-    # A group per (class, training folds): every row of a group adds to the same
-    # (fold, class) counts, so each row is counted once, whatever the folds.
-    pattern = (member * (1 << np.arange(len(folds)))[:, None]).sum(axis=0)
-    rows = np.flatnonzero(pattern)
-    keys, group = np.unique(klass[rows] * (1 << len(folds)) + pattern[rows], return_inverse=True)
-    counts = np.zeros((len(keys), n_snps, 3))
-    block = int(spec.get("block", 2048))
-    for start in range(0, len(rows), block):
-        g = np.asarray(store[rows[start : start + block]])
-        at = group[start : start + block]
-        for k in np.unique(at):
-            sel = g[at == k]
-            for value in range(3):
-                counts[k, :, value] += (sel == value).sum(axis=0)
-
-    sizes = np.bincount(group, minlength=len(keys))
-    key_class, key_pattern = keys >> len(folds), keys & ((1 << len(folds)) - 1)
+    counts, n = genotypes.count_by_fold(
+        store, [fold[0] for fold in folds], klass, len(names), int(spec.get("block", 2048))
+    )
     values = np.zeros((len(folds), n_snps, 3 * len(names)))
-    n = np.zeros((len(folds), len(names)), dtype=int)
     for f in range(len(folds)):
         for c in range(len(names)):
-            mine = (key_class == c) & ((key_pattern >> f) & 1).astype(bool)
-            n[f, c] = sizes[mine].sum()
             if n[f, c] == 0:
                 raise ValueError(
                     f"genotype_freq: class {names[c]!r} has no training samples in fold {f}"
                 )
-            values[f, :, 3 * c : 3 * c + 3] = counts[mine].sum(axis=0) / n[f, c]
+            values[f, :, 3 * c : 3 * c + 3] = counts[f, c] / n[f, c]
     columns = [f"{c}:genotype{value}" for c in names for value in range(3)]
     info = {"fold_dependent": True, "training_samples": n.sum(axis=1).tolist()}
     if "classes" in spec:
