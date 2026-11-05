@@ -145,6 +145,14 @@ Implementation (never edit `Dietnet_train_and_evaluate/`):
   synthetic fixture; the proximal step matches its closed form; a package round
   trip predicts what training reported for its test fold; integration run on
   synthetic data reaches the plain model's quality.
+- **Implemented 2026-11-05** (`src/dietnet/hybrid.py`, `train --free-snp-weights`,
+  `--free-snp-lr`; tests `tests/unit/test_hybrid.py` and the hybrid tests in
+  `tests/integration/test_parallel.py`: a penalty keeping delta at 0 trains the plain
+  model bit for bit; a format-3 package predicts what training reported). **Lambda's
+  scale:** delta is stepped by Adam, which moves each entry by ~lr whatever the
+  gradient, so a SNP's column moves ~lr * sqrt(hidden) = 10 lr a step against a
+  proximal shrinkage of lr * lambda: lambda ~ 10 zeroes everything and the values
+  below (1e-6 ... 1e-4) are no penalty at all. Grid instead: 0.3, 1, 3, 6.
 - Runs: lambda grid on fold 0 (e.g. 1e-6, 1e-5, 1e-4, chosen on validation), then
   `hybrid_dec`, `hybrid_dec_ag` (and `hybrid_gwas_ag` if A2 helps) on 5 folds.
 - Success: height r >= ~0.5 over 5 folds; AlphaGenome judged by paired per-fold
