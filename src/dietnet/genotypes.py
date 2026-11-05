@@ -130,8 +130,14 @@ class PackedReader:
     @classmethod
     def of(cls, path) -> PackedReader:
         with open(path, "rb") as f:
-            version = np.lib.format.read_magic(f)
-            shape, _, _ = np.lib.format._read_array_header(f, version)
+            version = np.lib.format.read_magic(f)  # public readers: numpy versions differ
+            read = {
+                (1, 0): np.lib.format.read_array_header_1_0,
+                (2, 0): np.lib.format.read_array_header_2_0,
+            }.get(version)
+            if read is None:
+                raise ValueError(f"{path}: unsupported .npy format version {version}")
+            shape, _, _ = read(f)
             return cls(path, shape[0], shape[1], f.tell())
 
     def __getstate__(self):
