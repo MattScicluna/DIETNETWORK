@@ -41,7 +41,7 @@ from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import BatchSampler, DataLoader, DistributedSampler, SequentialSampler
 
-from dietnet import genotypes, upstream
+from dietnet import genotypes, hybrid, upstream
 from dietnet._launch import _fill_missing
 
 EVAL_BATCH = 2048
@@ -150,8 +150,8 @@ class SnpSampled(nn.Module):
             k = max(1, round(self.keep * n))
             cols = torch.randperm(n, device=x.device)[:k].sort().values
             x = x[:, cols]
-        aux = net.aux_net(net.embedding[cols], results, epoch, batch, step, save_weights=False)
-        return net.main_net(x * (n / len(cols)), aux.T, results, epoch, batch, step)
+        weights = hybrid.fat_weights(net, cols)  # with free per-SNP weights, if any
+        return net.main_net(x * (n / len(cols)), weights, results, epoch, batch, step)
 
 
 class ChunkPlan:
@@ -270,6 +270,12 @@ def _args(argv=None):
         help="with --chunk-rows and --snp-sample: cut the SNPs into this many contiguous "
         "blocks, and hold only a --snp-sample share of the blocks per buffer (0: off)",
     )  # fmt: skip
+    p.add_argument(
+        "--free-snp-weights", type=float, default=0.0,
+        help="Diet Network: add free per-SNP fat-layer weights under a group-lasso penalty "
+        "of this strength (dietnet.hybrid; 0: off)",
+    )  # fmt: skip
+    p.add_argument("--free-snp-lr", type=float, help="their Adam learning rate (default lr_main)")
     return p.parse_args(argv)
 
 
@@ -312,6 +318,11 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
     else:
         handler = m.model_handlers.MlpHandler(task, args.dataset, config)
     model = handler.model.to(device)
+    delta = None
+    if args.free_snp_weights > 0:
+        if args.model != "Dietnet":
+            raise SystemExit("--free-snp-weights applies to the Diet Network only")
+        delta = hybrid.attach(model)  # all 0: the model computes what it did
     trained = model
     if args.snp_sample < 1:
         if args.model != "Dietnet":
@@ -320,6 +331,10 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
         trained = SnpSampled(model, args.snp_sample)
     ddp = DistributedDataParallel(trained, device_ids=[local_rank] if cuda else None)
     optimizers = model.get_optimizers()
+    delta_optimizer = None
+    if delta is not None:
+        delta_optimizer = torch.optim.Adam([delta], lr=args.free_snp_lr or config["lr_main"])
+        optimizers = (*optimizers, delta_optimizer)  # stepped and annealed with the others
     torch.manual_seed(seed + 1000 * rank)  # each rank its own dropout masks
 
     # Data.
@@ -485,6 +500,9 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
             loss.backward()
             for optimizer in optimizers:
                 optimizer.step()
+            if delta_optimizer is not None:  # the group-lasso proximal step
+                step_size = delta_optimizer.param_groups[0]["lr"]
+                hybrid.prox(delta, step_size * args.free_snp_weights)
             totals[0] += loss.detach() * len(y)
             totals[1] += len(y)
             if args.task == "classification":
@@ -502,7 +520,8 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
                 + f" | valid loss {valid['losses_wo_reduction'].sum() / n:.6f}"
                 + (f" acc {valid['n_right'].sum() / n * 100:.3f}%"
                    if args.task == "classification" else "")
-                + f" | train pass {train_time:.1f} s")  # fmt: skip
+                + f" | train pass {train_time:.1f} s"
+                + (f" | free weights on {hybrid.nonzero(delta)} SNPs" if delta is not None else ""))  # fmt: skip
         for optimizer in optimizers:  # annealed on every rank alike
             for group in optimizer.param_groups:
                 group["lr"] *= config["learning_rate_annealing"]

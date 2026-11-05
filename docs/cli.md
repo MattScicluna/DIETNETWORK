@@ -161,6 +161,8 @@ Train each (seed, fold) with upstream `train.py`; package the results under
 | `--snp-sample` | engine `dietnet`, Diet Network only: each training batch uses this share of the SNPs, the same for the whole batch, scaled up to keep the fat layer's expected input, in place of per-sample input dropout. The dropped SNPs are skipped, so the auxiliary network and the fat layer do that share of the work; evaluation uses every SNP. `1 - input_dropout` keeps the dropout rate | 1 (off) |
 | `--chunk-rows` | engine `dietnet` only: read training rows in contiguous chunks of this size into shuffled in-memory buffers, not batches of random rows, so the genotype file need not fit in the page cache | 0 (off) |
 | `--chunks-per-buffer` | with `--chunk-rows`: random chunks read into each buffer | 4 |
+| `--free-snp-weights` | engine `dietnet`, Diet Network only: each SNP's fat-layer weights become the auxiliary network's plus a free term, trained under a group-lasso penalty of this strength (one group per SNP, a proximal step after each update), so the model can weigh SNPs jointly, as a penalised regression does. Packages carry the free weights and `predict` applies them | 0 (off) |
+| `--free-snp-lr` | with `--free-snp-weights`: their Adam learning rate | the config's `lr_main` |
 | `--snp-blocks` | with `--chunk-rows` and `--snp-sample`: cut the SNPs into this many contiguous blocks and keep a `--snp-sample` share of the blocks per buffer, not random SNPs per batch | 0 (off) |
 
 ## `dietnet match`

@@ -397,6 +397,20 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus, engine, inputs
     help="With --chunk-rows and --snp-sample: cut the SNPs into this many contiguous blocks "
     "and keep a --snp-sample share of the blocks per buffer, not random SNPs per batch (0: off).",
 )
+@click.option(
+    "--free-snp-weights",
+    type=click.FloatRange(min=0),
+    default=0.0,
+    show_default=True,
+    help="Engine 'dietnet', Diet Network only: add free per-SNP fat-layer weights to the "
+    "auxiliary network's, under a group-lasso penalty of this strength (one group per SNP), "
+    "so the model can weigh SNPs jointly, as a penalised regression does (0: off).",
+)
+@click.option(
+    "--free-snp-lr",
+    type=click.FloatRange(min=0, min_open=True),
+    help="With --free-snp-weights: their Adam learning rate. Default: the config's lr_main.",
+)
 def train(
     dataset_path,
     partition_path,
@@ -419,6 +433,8 @@ def train(
     chunk_rows,
     chunks_per_buffer,
     snp_blocks,
+    free_snp_weights,
+    free_snp_lr,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -432,6 +448,7 @@ def train(
             inputs=inputs, loader=loader, workers=workers, gpus=gpus, engine=engine,
             bn_recalibrate=bn_recalibrate, snp_sample=snp_sample, chunk_rows=chunk_rows,
             chunks_per_buffer=chunks_per_buffer, snp_blocks=snp_blocks,
+            free_snp_weights=free_snp_weights, free_snp_lr=free_snp_lr,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

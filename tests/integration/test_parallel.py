@@ -89,6 +89,67 @@ def test_chunked_reads_train_a_model_as_good(tmp_path, processes):
     assert accuracy >= 0.9, report
 
 
+def test_free_snp_weights_kept_at_zero_train_the_plain_model(tmp_path):
+    """--free-snp-weights with a penalty so strong that every free weight stays 0:
+    bit for bit the model trained without them."""
+    import torch
+
+    data = DATASETS["synthetic"]
+    flags = ["--engine=dietnet", "--workers=0", "--inputs=memmap"]
+    plain = train_pipeline(tmp_path / "plain", data, folds="0", flags=flags)
+    held = train_pipeline(
+        tmp_path / "held", data, folds="0", flags=[*flags, "--free-snp-weights=1e12"]
+    )
+
+    def weights(packages):
+        (model,) = packages.glob("seed_*/fold_*/model.pt")
+        return torch.load(model, weights_only=False)["model_state_dict"]
+
+    a, b = weights(plain), weights(held)
+    assert not b.pop("free_snp_weights").any()
+    assert a.keys() == b.keys()
+    for key in a:
+        assert torch.equal(a[key], b[key]), key
+
+
+def test_a_hybrid_package_predicts_what_training_reported(tmp_path):
+    """Free weights that do change the model: the package carries them, loads them
+    strictly, and predict gives the held-out predictions training wrote."""
+    import json
+
+    import pandas as pd
+
+    from dietnet import package
+
+    data = DATASETS["synthetic"]
+    root = tmp_path / "hy"
+    flags = ["--engine=dietnet", "--workers=0", "--inputs=memmap", "--free-snp-weights=1e-4"]
+    packages = train_pipeline(root, data, folds="0", flags=flags)
+    (pkg,) = package.find(packages)
+    meta = json.loads((pkg.path / "metadata.json").read_text())
+    assert meta["format_version"] == 3 and meta["free_snp_weights"]["lambda"] == 1e-4
+    import torch
+
+    state = torch.load(pkg.path / "model.pt", weights_only=False)["model_state_dict"]
+    assert state["free_snp_weights"].abs().sum() > 0  # the free weights do change the model
+
+    (log,) = (root / "exp" / "logs").glob("train_*.log")
+    assert "free weights on" in log.read_text()
+    report = dietnet("check", packages=packages)
+    accuracy = float(re.search(r"(\d\.\d+)", report.splitlines()[-1]).group(1))
+    assert accuracy >= 0.9, report
+
+    out = tmp_path / "predictions.tsv"
+    dietnet("predict", model=packages, plink=data.plink_prefix, out=out)
+    predicted = pd.read_csv(out, sep="\t", dtype={"sample": str})
+    held = pd.read_csv(pkg.path / "test_predictions.tsv", sep="\t", dtype={"sample": str})
+    merged = held.merge(predicted, on="sample", suffixes=("_train", "_predict"))
+    assert len(merged) == len(held) > 0
+    assert (
+        merged["prediction_train"].astype(str) == merged["prediction_predict"].astype(str)
+    ).all()
+
+
 def test_recalibrated_batchnorm_trains_a_model_as_good(tmp_path):
     """--bn-recalibrate: the same quality, with statistics recomputed before validation."""
     data = DATASETS["synthetic"]

@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from dietnet import _launch, genotypes, package, upstream
+from dietnet import _launch, genotypes, hybrid, package, upstream
 
 
 def _free_port() -> int:
@@ -192,6 +192,8 @@ def train(
     chunk_rows: int = 0,
     chunks_per_buffer: int = 4,
     snp_blocks: int = 0,
+    free_snp_weights: float = 0.0,
+    free_snp_lr: float | None = None,
 ) -> list[package.Package]:
     """Train every (seed, fold); return their packages.
 
@@ -225,6 +227,10 @@ def train(
     the genotype file need not fit in the page cache; with ``snp_blocks`` > 0 as well,
     ``snp_sample`` of that many contiguous SNP blocks is kept per buffer, not random
     SNPs per batch.
+    With ``free_snp_weights`` > 0 (engine "dietnet", Diet Network) each SNP's
+    fat-layer weights get a free term under a group-lasso penalty of that strength
+    (:mod:`dietnet.hybrid`), learnt by its own Adam at ``free_snp_lr`` (default the
+    config's ``lr_main``); packages carry it and ``predict`` applies it.
     """
     engine = engine or ("dietnet" if gpus > 1 else "upstream")
     if engine not in ("upstream", "dietnet"):
@@ -243,6 +249,10 @@ def train(
         raise ValueError("--snp-sample needs engine 'dietnet' and the Diet Network")
     if chunk_rows and engine != "dietnet":
         raise ValueError("--chunk-rows needs engine 'dietnet' (train.py runs unmodified)")
+    if free_snp_weights < 0:
+        raise ValueError(f"free_snp_weights must be >= 0, not {free_snp_weights}")
+    if free_snp_weights and (engine != "dietnet" or model != "Dietnet"):
+        raise ValueError("--free-snp-weights needs engine 'dietnet' and the Diet Network")
     if snp_blocks and (not chunk_rows or snp_sample >= 1):
         raise ValueError("--snp-blocks needs --chunk-rows and a --snp-sample below 1")
     if engine == "dietnet" and loader == "upstream":
@@ -289,10 +299,26 @@ def train(
                 args.append("--normalize")
             log = exp_dir / "logs" / f"train_seed{seed}_fold{fold}.log"
             if engine == "dietnet":
-                args += ["--inputs", env[_launch.INPUTS_ENV], "--workers", workers,
-                         "--bn-recalibrate", bn_recalibrate, "--snp-sample", snp_sample,
-                         "--chunk-rows", chunk_rows, "--chunks-per-buffer", chunks_per_buffer,
-                         "--snp-blocks", snp_blocks]  # fmt: skip
+                args += [
+                    "--inputs",
+                    env[_launch.INPUTS_ENV],
+                    "--workers",
+                    workers,
+                    "--bn-recalibrate",
+                    bn_recalibrate,
+                    "--snp-sample",
+                    snp_sample,
+                    "--chunk-rows",
+                    chunk_rows,
+                    "--chunks-per-buffer",
+                    chunks_per_buffer,
+                    "--snp-blocks",
+                    snp_blocks,
+                    "--free-snp-weights",
+                    free_snp_weights,
+                ]
+                if free_snp_lr:
+                    args += ["--free-snp-lr", free_snp_lr]  # fmt: skip
                 _run_parallel(args, gpus, log)
             else:
                 upstream.run("train.py", args, log=log, env=env)
@@ -321,6 +347,11 @@ def train(
                         {"chunk_rows": chunk_rows, "chunks_per_buffer": chunks_per_buffer,
                          "snp_blocks": snp_blocks}
                         if chunk_rows else {}
+                    ),  # fmt: skip
+                    **(
+                        {hybrid.PARAMETER: {"lambda": free_snp_weights,
+                                            "lr": free_snp_lr or cfg["lr_main"]}}
+                        if free_snp_weights else {}
                     ),  # fmt: skip
                 },
             )
