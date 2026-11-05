@@ -31,15 +31,24 @@ nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 # size and mtime) sees the file the copy was made from; the copy's own mtime is
 # not checked. Not cp -p: Narval's node disk refuses Lustre's permissions, and
 # cp then fails.
-local_data="$SLURM_TMPDIR/$label.h5"
-ln -s "$EXP_DIR/data/$label.h5" "$local_data"
-time cp "data/$label.h5.packed.npy" "data/$label.h5.packed.json" "$SLURM_TMPDIR/"
-# Read the copy once, in order, so it is in the page cache before training: batches
-# read random rows, and from a cold node disk the first epoch on 1.29M SNPs (137 GB)
-# took 96 min, the third 39 s. Needs --mem above the copy's size. Not for --chunk-rows,
-# which reads in file order and does not rely on the cache.
-if [[ "${TRAIN_FLAGS:-}" != *--chunk-rows* ]]; then
-    time cat "$SLURM_TMPDIR/$label.h5.packed.npy" > /dev/null
+#
+# STAGE=0 skips the copy and trains on the dataset where it is (Lustre). For
+# --chunk-rows, whose reads are large and sequential: on 1.29M SNPs (137 GB), two or
+# three jobs sharing a node's disk read ~110 MB/s each (an epoch 15-23 min instead of
+# ~70 s), while Lustre serves many nodes at once.
+if [ "${STAGE:-1}" = 0 ]; then
+    local_data="$EXP_DIR/data/$label.h5"
+else
+    local_data="$SLURM_TMPDIR/$label.h5"
+    ln -s "$EXP_DIR/data/$label.h5" "$local_data"
+    time cp "data/$label.h5.packed.npy" "data/$label.h5.packed.json" "$SLURM_TMPDIR/"
+    # Read the copy once, in order, so it is in the page cache before training: batches
+    # read random rows, and from a cold node disk the first epoch on 1.29M SNPs (137 GB)
+    # took 96 min, the third 39 s. Needs --mem above the copy's size. Not for
+    # --chunk-rows, which reads in file order and does not rely on the cache.
+    if [[ "${TRAIN_FLAGS:-}" != *--chunk-rows* ]]; then
+        time cat "$SLURM_TMPDIR/$label.h5.packed.npy" > /dev/null
+    fi
 fi
 
 embedding="embeddings/$spec@$label.npz"  # label-specific (decile) features first
