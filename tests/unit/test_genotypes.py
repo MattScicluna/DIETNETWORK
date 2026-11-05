@@ -97,6 +97,27 @@ def test_file_reads_give_the_memory_maps_bytes(dataset):
         reader[[n]]
 
 
+def test_reads_through_gaps_and_cached_rows_give_the_same_bytes(dataset):
+    genotypes.pack(dataset)
+    mapped = np.load(genotypes.packed_path(dataset), mmap_mode="r")
+    reader = genotypes.PackedReader.of(genotypes.packed_path(dataset))
+    n = len(mapped)
+    rng = np.random.default_rng(1)
+    for density in (0.2, 0.6, 1.0):
+        rows = np.flatnonzero(rng.random(n) < density)
+        for gap in (0, 1, 8, 1000):
+            np.testing.assert_array_equal(reader.read(rows, max_gap=gap), mapped[rows])
+    np.testing.assert_array_equal(reader.read([5, 3, 3, 9], max_gap=8), mapped[[5, 3, 3, 9]])
+
+    rows = np.flatnonzero(rng.random(n) < 0.3)
+    cache = genotypes.CachedRows(lambda r: reader.read(r, max_gap=4), rows[::-1])
+    some = rng.permutation(rows)[:20]
+    np.testing.assert_array_equal(cache[some], mapped[some])
+    absent = np.setdiff1d(np.arange(n), rows)[:1]
+    with pytest.raises(KeyError):
+        cache[absent]
+
+
 def test_auto_prefers_an_up_to_date_pack(dataset):
     assert genotypes.choose(dataset, "auto") == "ram"
     with pytest.raises(ValueError, match="pack-genotypes"):

@@ -149,6 +149,22 @@ class PackedReader:
         return self._file
 
     def __getitem__(self, rows) -> np.ndarray:
+        return self.read(rows)
+
+    def _read_into(self, f, view, first_row):
+        f.seek(self.offset + int(first_row) * self.row_bytes)
+        done = 0
+        while done < len(view):
+            n = f.readinto(view[done:])
+            if not n:
+                raise EOFError(f"{self.path}: short read at row {first_row}")
+            done += n
+
+    def read(self, rows, max_gap: int = 0) -> np.ndarray:
+        """``packed[rows]``. Rows within ``max_gap`` of each other (in the given order,
+        ascending) are read as one span and the rows between discarded: a few large
+        reads instead of many small ones, which is what a parallel file system serves
+        fast, for at most ``max_gap`` rows of extra bytes per gap."""
         scalar = np.ndim(rows) == 0
         rows = np.atleast_1d(np.asarray(rows, dtype=np.int64))
         if len(rows) and (rows.min() < 0 or rows.max() >= self.n_rows):
@@ -157,17 +173,40 @@ class PackedReader:
         if not len(rows):
             return out
         f = self._handle()
-        breaks = np.flatnonzero(np.diff(rows) != 1) + 1
+        step = np.diff(rows)
+        breaks = np.flatnonzero((step < 1) | (step > max_gap + 1)) + 1
         for start, stop in zip(np.r_[0, breaks], np.r_[breaks, len(rows)]):
-            view = memoryview(out[start:stop]).cast("B")
-            f.seek(self.offset + int(rows[start]) * self.row_bytes)
-            done = 0
-            while done < len(view):
-                n = f.readinto(view[done:])
-                if not n:
-                    raise EOFError(f"{self.path}: short read at row {rows[start]}")
-                done += n
+            first, last = int(rows[start]), int(rows[stop - 1])
+            if last - first + 1 == stop - start:  # consecutive: straight into out
+                self._read_into(f, memoryview(out[start:stop]).cast("B"), first)
+                continue
+            span = np.empty((last - first + 1, self.row_bytes), dtype=np.uint8)
+            self._read_into(f, memoryview(span).cast("B"), first)
+            out[start:stop] = span[rows[start:stop] - first]
         return out[0] if scalar else out
+
+
+class CachedRows:
+    """Some rows of a genotype source held in memory: ``cache[rows]`` for any of them.
+
+    For the rows every epoch reads again (validation, the BN recalibration subset,
+    the test set): one pass over the file, then no disk at all. ``read`` is the
+    source's reader, called once with the sorted rows (e.g. ``PackedReader.read``
+    with a ``max_gap``, so the pass is a few large reads).
+    """
+
+    def __init__(self, read, rows):
+        self.rows = np.unique(np.asarray(rows, dtype=np.int64))
+        self.data = np.asarray(read(self.rows))
+
+    def __getitem__(self, rows) -> np.ndarray:
+        rows = np.asarray(rows, dtype=np.int64)
+        at = np.searchsorted(self.rows, rows)
+        if np.any(at >= len(self.rows)) or np.any(
+            self.rows[np.minimum(at, len(self.rows) - 1)] != rows
+        ):
+            raise KeyError("rows not in the cache")
+        return self.data[at]
 
 
 class PackedStore:

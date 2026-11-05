@@ -46,9 +46,13 @@ def test_a_buffer_decodes_to_the_kept_columns_of_the_store():
     x = rng.integers(-1, 3, size=(50, n_snps)).astype(np.int8)
     packed = genotypes.encode(x)
 
+    class Reader:
+        def read(self, rows, max_gap=0):
+            return packed[rows]
+
     class Store:
         def __init__(self):
-            self.reader = packed
+            self.reader = Reader()
 
     labels = np.arange(50.0)
     plan = ChunkPlan(np.arange(50), n_snps, 10, 2, 8, 0.5, seed=3)

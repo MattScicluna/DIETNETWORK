@@ -89,6 +89,27 @@ def test_chunked_reads_train_a_model_as_good(tmp_path, processes):
     assert accuracy >= 0.9, report
 
 
+def test_chunked_reads_from_a_packed_copy_cache_the_evaluation_rows(tmp_path):
+    """The packed store with --chunk-rows: training buffers read through gaps, and the
+    validation, recalibration and test rows are read once into memory."""
+    data = DATASETS["synthetic"]
+    root = tmp_path / "pk"
+    train_pipeline(root, data, folds="0", flags=["--inputs=memmap", "--loader=upstream"])
+    dietnet("pack-genotypes", dataset=root / "dataset.h5")
+    dietnet(
+        "train", "--engine=dietnet", "--workers=1", "--inputs=packed", "--snp-sample=0.5",
+        "--chunk-rows=64", "--chunks-per-buffer=2", "--snp-blocks=8", "--bn-recalibrate=50",
+        dataset=root / "dataset.h5", partition=root / "partition.npz",
+        embedding=root / "embedding.npz", input_stats=root / "stats.npz",
+        config=root / "config.yaml", exp_dir=root / "exp_packed", seeds=3, folds="0",
+    )  # fmt: skip
+    (log,) = (root / "exp_packed" / "logs").glob("train_*.log")
+    assert log.read_text().count("evaluation rows cached in memory") == 2  # valid + test
+    report = dietnet("check", packages=root / "exp_packed" / "packages")
+    accuracy = float(re.search(r"(\d\.\d+)", report.splitlines()[-1]).group(1))
+    assert accuracy >= 0.9, report
+
+
 def test_free_snp_weights_kept_at_zero_train_the_plain_model(tmp_path):
     """--free-snp-weights with a penalty so strong that every free weight stays 0:
     bit for bit the model trained without them."""

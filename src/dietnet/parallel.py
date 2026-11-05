@@ -45,6 +45,8 @@ from dietnet import genotypes, hybrid, upstream
 from dietnet._launch import _fill_missing
 
 EVAL_BATCH = 2048
+TRAIN_GAP = 8  # chunked training reads span gaps of up to this many rows (~1.7x the bytes)
+EVAL_GAP = 16  # the one pass that caches the evaluation rows
 EVAL_INPUT_BYTES = 4 * 2**30  # float32 inputs of one evaluation batch; preprocessing copies them
 
 
@@ -61,16 +63,21 @@ class Split(torch.utils.data.Dataset):
     time: (genotypes, labels, rows). With ``packed``, the genotypes are the 2-bit
     bytes, for the GPU to decode."""
 
-    def __init__(self, store, labels, rows, packed=False):
+    def __init__(self, store, labels, rows, packed=False, source=None):
         self.store, self.labels, self.packed = store, labels, packed
         self.rows = np.asarray(rows)
+        self.source = source  # rows from here (e.g. a CachedRows) rather than the store
 
     def __len__(self):
         return len(self.rows)
 
     def __getitems__(self, positions):
         rows = self.rows[np.asarray(positions)]
-        source = self.store.reader if self.packed else self.store
+        source = (
+            self.source
+            if self.source is not None
+            else (self.store.reader if self.packed else self.store)
+        )
         x = genotypes.read_rows(source, rows)
         return (
             torch.from_numpy(np.ascontiguousarray(x)),
@@ -223,7 +230,10 @@ class ChunkBuffers(torch.utils.data.Dataset):
 
     def __getitem__(self, item):
         rows, ranges = item
-        x = np.asarray(genotypes.read_rows(self.store.reader if self.packed else self.store, rows))
+        if self.packed:  # sorted rows: a few large reads, through gaps of up to TRAIN_GAP rows
+            x = self.store.reader.read(rows, max_gap=TRAIN_GAP)
+        else:
+            x = np.asarray(genotypes.read_rows(self.store, rows))
         unit = 4 if self.packed else 1
         kept = [x[:, a // unit : -(-b // unit)] for a, b in ranges]
         return (
@@ -412,20 +422,35 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
         def __iter__(self):
             return decoded(self.loader)
 
-    def eval_loader(rows):
-        split = Split(store, labels, rows, packed=packed)
+    def cached(rows):
+        """With chunked reads, rows that every epoch reads again are read once, in a few
+        large reads, and kept in memory (packed: ~34 GB for validation and the BN
+        recalibration subset at 1.29M SNPs)."""
+        if not (args.chunk_rows and packed):
+            return None
+        started = time.time()
+        cache = genotypes.CachedRows(lambda r: store.reader.read(r, max_gap=EVAL_GAP), rows)
+        say(f"dietnet: {len(cache.rows)} evaluation rows cached in memory "
+            f"({cache.data.nbytes / 2**30:.1f} GiB, {time.time() - started:.0f} s)")  # fmt: skip
+        return cache
+
+    def eval_loader(rows, source=None):
+        split = Split(store, labels, rows, packed=packed, source=source)
         sampler = BatchSampler(SequentialSampler(split), eval_batch, False)
         loader = _loader(split, sampler, args.workers)
         return split, (_Decoded(loader) if packed else loader)
 
-    valid_set, valid_loader = eval_loader(valid_rows)
-    recalibration = None
+    pick = None
     if args.bn_recalibrate:
         # A fixed random subset of the training rows, read in file order.
         pick = np.random.default_rng(seed).choice(
             train_rows, min(args.bn_recalibrate, len(train_rows)), replace=False
         )
-        _, recalibration = eval_loader(np.sort(pick))
+    evaluated = cached(valid_rows if pick is None else np.concatenate([valid_rows, pick]))
+    valid_set, valid_loader = eval_loader(valid_rows, evaluated)
+    recalibration = None
+    if args.bn_recalibrate:
+        _, recalibration = eval_loader(np.sort(pick), evaluated)
         say(f"dietnet: batch-norm statistics recomputed on {len(pick)} training samples, "
             "without dropout, before each validation")  # fmt: skip
 
@@ -555,7 +580,7 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
         say(f"Loading best model from epoch {checkpoint['epoch']}")
         model.load_state_dict(checkpoint["model_state_dict"])
         model.eval()
-        test_set, test_loader = eval_loader(test_rows)
+        test_set, test_loader = eval_loader(test_rows, cached(test_rows))
         with torch.no_grad():
             test = m.mainloop_utils.eval_step(
                 handler, device, test_set, test_loader, mus, sigmas, args.normalize,
