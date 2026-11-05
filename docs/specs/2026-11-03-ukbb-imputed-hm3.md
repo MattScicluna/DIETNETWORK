@@ -137,6 +137,14 @@ The Diet Network on HM3+ is judged against the better of the two per trait: heig
   `--snp-sample`: array grid (`exp_maf01`, `dec`, b138_d50, `--bn-recalibrate 20000`,
   folds 0-4), paired against height 0.336 / BMI 0.221, plus r(row, label) to confirm
   the file's order says nothing about the traits.
+  **Result (array 8543719, 2026-11-05):** the file's order is unrelated to the traits
+  (r(row, label) -0.0007 height, -0.0013 BMI; chunk-mean variance 0.98 / 0.93 of
+  chance). Height 0.3333 (sd 0.005) vs 0.3356 plain: per fold -0.003 +0.002 -0.002
+  -0.005 -0.003. BMI 0.2210 (sd 0.009) vs 0.2211: per fold +0.004 -0.002 +0.008 -0.010
+  -0.001. At most ~0.002 lower; peak memory 19-23 GB a job on 416k SNPs (~60-70 GB
+  expected at 1.29M), no page cache needed; ~30-40 min a model. Used for the HM3+
+  grid (array 8553904, 128G); the unchunked 220G pilot was cancelled (validation and
+  BN recalibration read ~105k scattered rows an epoch, ~12 min an epoch).
 - **AlphaGenome for the new SNPs** (for `dec_ag` on HM3+): 1,155,048 HM3+ SNPs not
   already scored, on the Mac (`~/dietnet_alphagenome/ukbb_hm3/run_scoring.sh`,
   resumable, ~2.5 days at the API's rate); then merged with the array table.
