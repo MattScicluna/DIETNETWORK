@@ -189,6 +189,9 @@ def train(
     engine: str | None = None,
     bn_recalibrate: int = 0,
     snp_sample: float = 1.0,
+    chunk_rows: int = 0,
+    chunks_per_buffer: int = 4,
+    snp_blocks: int = 0,
 ) -> list[package.Package]:
     """Train every (seed, fold); return their packages.
 
@@ -217,6 +220,11 @@ def train(
     of the SNPs, the same for the whole batch, in place of per-sample input dropout
     (:class:`dietnet.parallel.SnpSampled`): the auxiliary network and the fat layer
     then do that share of the work.
+    With ``chunk_rows`` > 0 (engine "dietnet") training rows are read in contiguous
+    chunks into shuffled in-memory buffers (:class:`dietnet.parallel.ChunkPlan`), so
+    the genotype file need not fit in the page cache; with ``snp_blocks`` > 0 as well,
+    ``snp_sample`` of that many contiguous SNP blocks is kept per buffer, not random
+    SNPs per batch.
     """
     engine = engine or ("dietnet" if gpus > 1 else "upstream")
     if engine not in ("upstream", "dietnet"):
@@ -233,6 +241,10 @@ def train(
         raise ValueError(f"snp_sample must be in (0, 1], not {snp_sample}")
     if snp_sample < 1 and (engine != "dietnet" or model != "Dietnet"):
         raise ValueError("--snp-sample needs engine 'dietnet' and the Diet Network")
+    if chunk_rows and engine != "dietnet":
+        raise ValueError("--chunk-rows needs engine 'dietnet' (train.py runs unmodified)")
+    if snp_blocks and (not chunk_rows or snp_sample >= 1):
+        raise ValueError("--snp-blocks needs --chunk-rows and a --snp-sample below 1")
     if engine == "dietnet" and loader == "upstream":
         raise ValueError("--loader upstream applies to engine 'upstream' only")
     if model not in upstream.MODELS:
@@ -278,7 +290,9 @@ def train(
             log = exp_dir / "logs" / f"train_seed{seed}_fold{fold}.log"
             if engine == "dietnet":
                 args += ["--inputs", env[_launch.INPUTS_ENV], "--workers", workers,
-                         "--bn-recalibrate", bn_recalibrate, "--snp-sample", snp_sample]  # fmt: skip
+                         "--bn-recalibrate", bn_recalibrate, "--snp-sample", snp_sample,
+                         "--chunk-rows", chunk_rows, "--chunks-per-buffer", chunks_per_buffer,
+                         "--snp-blocks", snp_blocks]  # fmt: skip
                 _run_parallel(args, gpus, log)
             else:
                 upstream.run("train.py", args, log=log, env=env)
@@ -303,6 +317,11 @@ def train(
                     "results_dir": str(results),
                     "embedding": feature_meta,
                     **({"snp_sample": snp_sample} if snp_sample < 1 else {}),
+                    **(
+                        {"chunk_rows": chunk_rows, "chunks_per_buffer": chunks_per_buffer,
+                         "snp_blocks": snp_blocks}
+                        if chunk_rows else {}
+                    ),  # fmt: skip
                 },
             )
             _held_out_predictions(results, dataset, task).to_csv(

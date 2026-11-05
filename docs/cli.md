@@ -159,6 +159,9 @@ Train each (seed, fold) with upstream `train.py`; package the results under
 | `--engine` | `upstream`: train.py itself, unmodified (bit-identical model); `dietnet`: upstream's model and epoch logic in dietnet's own loop, packed genotypes decoded on the GPU, without train.py's per-batch bookkeeping (much faster; not bit-identical) | `upstream` on one GPU, `dietnet` for `--gpus` > 1 |
 | `--bn-recalibrate` | engine `dietnet` only: before each validation, recompute the batch-norm statistics on this many training samples without dropout. Upstream batch-normalises the fat layer right after input dropout, so the statistics learned in training misfit evaluation | 0 (off) |
 | `--snp-sample` | engine `dietnet`, Diet Network only: each training batch uses this share of the SNPs, the same for the whole batch, scaled up to keep the fat layer's expected input, in place of per-sample input dropout. The dropped SNPs are skipped, so the auxiliary network and the fat layer do that share of the work; evaluation uses every SNP. `1 - input_dropout` keeps the dropout rate | 1 (off) |
+| `--chunk-rows` | engine `dietnet` only: read training rows in contiguous chunks of this size into shuffled in-memory buffers, not batches of random rows, so the genotype file need not fit in the page cache | 0 (off) |
+| `--chunks-per-buffer` | with `--chunk-rows`: random chunks read into each buffer | 4 |
+| `--snp-blocks` | with `--chunk-rows` and `--snp-sample`: cut the SNPs into this many contiguous blocks and keep a `--snp-sample` share of the blocks per buffer, not random SNPs per batch | 0 (off) |
 
 ## `dietnet match`
 

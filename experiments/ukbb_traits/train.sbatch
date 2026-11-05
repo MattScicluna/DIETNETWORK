@@ -36,8 +36,11 @@ ln -s "$EXP_DIR/data/$label.h5" "$local_data"
 time cp "data/$label.h5.packed.npy" "data/$label.h5.packed.json" "$SLURM_TMPDIR/"
 # Read the copy once, in order, so it is in the page cache before training: batches
 # read random rows, and from a cold node disk the first epoch on 1.29M SNPs (137 GB)
-# took 96 min, the third 39 s. Needs --mem above the copy's size.
-time cat "$SLURM_TMPDIR/$label.h5.packed.npy" > /dev/null
+# took 96 min, the third 39 s. Needs --mem above the copy's size. Not for --chunk-rows,
+# which reads in file order and does not rely on the cache.
+if [[ "${TRAIN_FLAGS:-}" != *--chunk-rows* ]]; then
+    time cat "$SLURM_TMPDIR/$label.h5.packed.npy" > /dev/null
+fi
 
 embedding="embeddings/$spec@$label.npz"  # label-specific (decile) features first
 [ -e "$embedding" ] || embedding="embeddings/$spec.npz"

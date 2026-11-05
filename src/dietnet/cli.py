@@ -373,6 +373,30 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus, engine, inputs
     "auxiliary network and the fat layer then do that share of the work; evaluation uses "
     "every SNP. 1 - input_dropout keeps the dropout rate.",
 )
+@click.option(
+    "--chunk-rows",
+    type=click.IntRange(min=0),
+    default=0,
+    show_default=True,
+    help="Engine 'dietnet' only: read training rows in contiguous chunks of this size into "
+    "shuffled in-memory buffers, not batches of random rows, so the genotype file need not "
+    "fit in the page cache (0: off).",
+)
+@click.option(
+    "--chunks-per-buffer",
+    type=click.IntRange(min=1),
+    default=4,
+    show_default=True,
+    help="With --chunk-rows: random chunks read into each buffer.",
+)
+@click.option(
+    "--snp-blocks",
+    type=click.IntRange(min=0),
+    default=0,
+    show_default=True,
+    help="With --chunk-rows and --snp-sample: cut the SNPs into this many contiguous blocks "
+    "and keep a --snp-sample share of the blocks per buffer, not random SNPs per batch (0: off).",
+)
 def train(
     dataset_path,
     partition_path,
@@ -392,6 +416,9 @@ def train(
     engine,
     bn_recalibrate,
     snp_sample,
+    chunk_rows,
+    chunks_per_buffer,
+    snp_blocks,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -403,7 +430,8 @@ def train(
             folds=folds, task=task, normalize=normalize,
             model={"dietnet": "Dietnet", "mlp": "Mlp"}[model],
             inputs=inputs, loader=loader, workers=workers, gpus=gpus, engine=engine,
-            bn_recalibrate=bn_recalibrate, snp_sample=snp_sample,
+            bn_recalibrate=bn_recalibrate, snp_sample=snp_sample, chunk_rows=chunk_rows,
+            chunks_per_buffer=chunks_per_buffer, snp_blocks=snp_blocks,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

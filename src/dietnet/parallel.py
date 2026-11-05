@@ -139,15 +139,98 @@ class SnpSampled(nn.Module):
         super().__init__()
         self.net, self.keep = net, keep
 
-    def forward(self, x, results, epoch, batch, step):
+    def forward(self, x, results, epoch, batch, step, cols=None):
+        """With ``cols`` (sorted SNP indices), ``x`` already holds only those columns,
+        chosen by the data loader (:class:`ChunkPlan`); otherwise SNPs are drawn here."""
         net = self.net
-        if not net.training or self.keep >= 1:
+        if cols is None and (not net.training or self.keep >= 1):
             return net(x, results, epoch, batch, step)
-        n = x.shape[1]
-        k = max(1, round(self.keep * n))
-        cols = torch.randperm(n, device=x.device)[:k].sort().values
+        n = net.embedding.shape[0]
+        if cols is None:
+            k = max(1, round(self.keep * n))
+            cols = torch.randperm(n, device=x.device)[:k].sort().values
+            x = x[:, cols]
         aux = net.aux_net(net.embedding[cols], results, epoch, batch, step, save_weights=False)
-        return net.main_net(x[:, cols] * (n / k), aux.T, results, epoch, batch, step)
+        return net.main_net(x * (n / len(cols)), aux.T, results, epoch, batch, step)
+
+
+class ChunkPlan:
+    """Which rows and SNPs each in-memory buffer of an epoch holds.
+
+    A training pass reading random rows needs the whole genotype file in the page
+    cache (137 GB at 1.29M SNPs; from a cold disk an epoch took 96 min instead of
+    39 s). Here the sorted training rows are cut into contiguous chunks of
+    ``chunk_rows``; every epoch the chunks are shuffled, and each buffer is read from
+    ``chunks_per_buffer`` of them, in file order, then shuffled in memory into batches.
+    With ``snp_blocks``, the SNPs are cut into that many contiguous blocks and each
+    buffer keeps ``keep`` of them: only those columns are held and decoded. Block edges
+    are multiples of 4 SNPs, so that a block is whole bytes of the 2-bit copy.
+
+    Iterating gives ``(rows, ranges)``, the sorted rows and the kept SNP ranges of each
+    buffer of this rank. Every rank has the same number of buffers of the same size
+    (DDP needs equal batch counts), so up to a batch per buffer is left out, at random.
+    """
+
+    def __init__(self, train_rows, n_snps, chunk_rows, chunks_per_buffer, snp_blocks, keep,
+                 seed, rank=0, world=1):  # fmt: skip
+        self.rows = np.sort(np.asarray(train_rows))
+        self.n_snps, self.chunks_per_buffer = n_snps, chunks_per_buffer
+        self.keep, self.seed, self.rank, self.world = keep, seed, rank, world
+        # At least one buffer per rank: smaller chunks, where there are few rows.
+        self.n_chunks = max(chunks_per_buffer * world, len(self.rows) // chunk_rows)
+        self.buffer_rows = chunks_per_buffer * (len(self.rows) // self.n_chunks)
+        self.epoch = 0
+        edges = np.linspace(0, n_snps, snp_blocks + 1).astype(np.int64) // 4 * 4
+        edges[-1] = n_snps
+        self.blocks = np.stack([edges[:-1], edges[1:]], axis=1) if snp_blocks else None
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
+
+    def __len__(self):
+        return (self.n_chunks // self.world) // self.chunks_per_buffer
+
+    def __iter__(self):
+        rng = np.random.default_rng([self.seed, self.epoch, self.rank])
+        shared = np.random.default_rng([self.seed, self.epoch])
+        chunks = np.array_split(self.rows, self.n_chunks)
+        order = shared.permutation(self.n_chunks)[self.rank :: self.world]
+        for b in range(len(self)):
+            picked = order[b * self.chunks_per_buffer : (b + 1) * self.chunks_per_buffer]
+            rows = np.concatenate([chunks[c] for c in picked])
+            rows = np.sort(rng.permutation(rows)[: self.buffer_rows])
+            if self.blocks is None:
+                ranges = np.array([[0, self.n_snps]])
+            else:
+                k = max(1, round(self.keep * len(self.blocks)))
+                ranges = self.blocks[np.sort(rng.permutation(len(self.blocks))[:k])]
+            yield rows, ranges
+
+
+def plan_columns(ranges: np.ndarray) -> np.ndarray:
+    """The SNP indices of the kept ranges, in order."""
+    return np.concatenate([np.arange(a, b) for a, b in ranges])
+
+
+class ChunkBuffers(torch.utils.data.Dataset):
+    """One item is one buffer of a :class:`ChunkPlan`: (genotypes of the kept columns,
+    labels, SNP indices). Whole rows are read in file order and the columns cut in
+    memory, so disk access stays sequential; packed genotypes stay packed, for the GPU
+    to decode, as whole bytes of each kept block."""
+
+    def __init__(self, store, labels, packed):
+        self.store, self.labels, self.packed = store, labels, packed
+
+    def __getitem__(self, item):
+        rows, ranges = item
+        x = np.asarray(genotypes.read_rows(self.store.packed if self.packed else self.store, rows))
+        unit = 4 if self.packed else 1
+        kept = [x[:, a // unit : -(-b // unit)] for a, b in ranges]
+        return (
+            torch.from_numpy(np.concatenate(kept, axis=1)),
+            torch.from_numpy(np.asarray(self.labels[rows])),
+            torch.from_numpy(plan_columns(ranges)),
+        )
 
 
 def _args(argv=None):
@@ -175,6 +258,17 @@ def _args(argv=None):
         "--snp-sample", type=float, default=1.0,
         help="Diet Network: train each batch on this share of the SNPs, shared by the batch, "
         "in place of per-sample input dropout (1: off, as train.py)",
+    )  # fmt: skip
+    p.add_argument(
+        "--chunk-rows", type=int, default=0,
+        help="read training rows in contiguous chunks of this size into shuffled in-memory "
+        "buffers (ChunkPlan), rather than batches of random rows (0: off)",
+    )  # fmt: skip
+    p.add_argument("--chunks-per-buffer", type=int, default=4)
+    p.add_argument(
+        "--snp-blocks", type=int, default=0,
+        help="with --chunk-rows and --snp-sample: cut the SNPs into this many contiguous "
+        "blocks, and hold only a --snp-sample share of the blocks per buffer (0: off)",
     )  # fmt: skip
     return p.parse_args(argv)
 
@@ -249,6 +343,38 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
     train = Split(store, labels, train_rows, packed=packed)
     sampler = DistributedSampler(train, num_replicas=world, rank=rank, shuffle=True, seed=seed)
     train_loader = _loader(train, BatchSampler(sampler, per_rank, drop_last=False), args.workers)
+    if args.chunk_rows:
+        sampler = ChunkPlan(
+            train_rows, n_snps, args.chunk_rows, args.chunks_per_buffer, args.snp_blocks,
+            args.snp_sample, seed, rank, world,
+        )  # fmt: skip
+        if sampler.buffer_rows < per_rank:
+            raise SystemExit(
+                f"a buffer of {sampler.buffer_rows} rows holds no batch of {per_rank}: "
+                "raise --chunk-rows or --chunks-per-buffer"
+            )
+        buffers = ChunkBuffers(store, labels, packed)
+        options = dict(
+            batch_size=None, sampler=sampler, collate_fn=_as_is, num_workers=args.workers
+        )
+        if args.workers:  # one buffer ahead per worker: buffers are large
+            options.update(
+                multiprocessing_context="fork", persistent_workers=True, prefetch_factor=1
+            )
+        train_loader = DataLoader(buffers, **options)
+
+    def training_batches():
+        """(genotypes, labels, SNP indices or None) per training batch."""
+        if not args.chunk_rows:
+            for x, y, _ in train_loader:
+                yield x, y, None
+            return
+        for x, y, cols in train_loader:
+            cols = cols.to(device) if args.snp_blocks else None
+            shuffled = torch.randperm(len(x))
+            for b in range(len(x) // per_rank):
+                picked = shuffled[b * per_rank : (b + 1) * per_rank]
+                yield x[picked], y[picked], cols
 
     # Evaluation has no dropout, so its batch size changes no prediction, only how
     # many batches upstream's eval_step does its per-batch bookkeeping for.
@@ -336,18 +462,25 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
         sampler.set_epoch(epoch)
         model.train()
         totals = torch.zeros(3, device=device)  # loss x n, n, correct
-        for batch, (x, y, _) in enumerate(train_loader):
+        for batch, (x, y, cols) in enumerate(training_batches()):
             x = x.to(device, non_blocking=True)
             y = task.format_ybatch(y.to(device, non_blocking=True))
             if packed:
-                x = table[x.long()].reshape(len(x), -1)[:, :n_snps]
+                width = n_snps if cols is None else len(cols)
+                x = table[x.long()].reshape(len(x), -1)[:, :width]
             x = x.float()
-            _fill_missing(x, mus)
+            batch_mus = mus if cols is None else mus[cols]
+            _fill_missing(x, batch_mus)
             if args.normalize:
-                x = m.dataset_utils.normalize(x, mus, sigmas)
+                x = m.dataset_utils.normalize(
+                    x, batch_mus, sigmas if cols is None else sigmas[cols]
+                )
             for optimizer in optimizers:
                 optimizer.zero_grad()
-            out = ddp(x, str(results), epoch, batch, "train")
+            if cols is None:
+                out = ddp(x, str(results), epoch, batch, "train")
+            else:
+                out = ddp(x, str(results), epoch, batch, "train", cols=cols)
             loss = task.compute_loss(out, y)
             loss.backward()
             for optimizer in optimizers:

@@ -125,6 +125,18 @@ The Diet Network on HM3+ is judged against the better of the two per trait: heig
   +0.001 +0.010 -0.013 -0.001. No change in accuracy. Training pass 19.8 -> 13.6 s an
   epoch (genotype reading and decoding are not reduced), ~10% more epochs to the
   best model, so ~25% less GPU time a model. Used for the HM3+ grid.
+- **Chunked reads of samples and SNPs (`train --chunk-rows 2048 --chunks-per-buffer 4
+  --snp-blocks 64 --snp-sample 0.5`; Matt's choice over 220 GB jobs, 2026-11-04).**
+  Random-row batches need the whole 137 GB packed copy in the page cache: at 160G the
+  pilot ran at 54 s an epoch until the cache was evicted, then over an hour; 220G
+  bills ~1.7 GPUs. Instead the sorted training rows are cut into contiguous chunks,
+  shuffled per epoch; each buffer reads 4 chunks in file order and shuffles them in
+  memory (~59 batches), and keeps half of 64 contiguous SNP blocks (`ChunkPlan`). Not
+  yet checked for accuracy: whole genome regions are dropped together, and a batch
+  comes from 4 stretches of the file. Before using it at 1.29M, the same check as
+  `--snp-sample`: array grid (`exp_maf01`, `dec`, b138_d50, `--bn-recalibrate 20000`,
+  folds 0-4), paired against height 0.336 / BMI 0.221, plus r(row, label) to confirm
+  the file's order says nothing about the traits.
 - **AlphaGenome for the new SNPs** (for `dec_ag` on HM3+): 1,155,048 HM3+ SNPs not
   already scored, on the Mac (`~/dietnet_alphagenome/ukbb_hm3/run_scoring.sh`,
   resumable, ~2.5 days at the API's rate); then merged with the array table.

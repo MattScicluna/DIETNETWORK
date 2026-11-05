@@ -1,10 +1,75 @@
 """--snp-sample: a Diet Network trained on a shared random share of the SNPs per batch."""
 
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
 
-from dietnet.parallel import SnpSampled, eval_batch_size
+from dietnet import genotypes
+from dietnet.parallel import ChunkBuffers, ChunkPlan, SnpSampled, eval_batch_size, plan_columns
+
+
+def test_a_chunk_plan_covers_the_rows_and_shares_a_block_choice_per_buffer():
+    train = np.random.default_rng(0).permutation(10_000)[:6_000]
+    plan = ChunkPlan(train, 1_003, 100, 4, 16, 0.5, seed=1)
+    buffers = list(plan)
+    assert len(buffers) == len(plan) == 15
+    seen = np.concatenate([rows for rows, _ in buffers])
+    assert len(set(seen)) == len(seen) and set(seen) <= set(train)
+    assert len(seen) == 15 * 400  # equal buffers, every row of these chunks
+    for rows, ranges in buffers:
+        assert (np.diff(rows) > 0).all()  # read in file order
+        assert len(ranges) == 8
+        assert (ranges[:-1, 1] <= ranges[1:, 0]).all()
+    # whole bytes of the 2-bit copy, except the file's last SNP
+    assert all(a % 4 == 0 for a, _ in plan.blocks) and plan.blocks[-1, 1] == 1_003
+    plan.set_epoch(1)
+    again = list(plan)
+    assert not all(np.array_equal(a[0], b[0]) for a, b in zip(buffers, again))
+
+
+def test_ranks_get_as_many_buffers_of_the_same_size():
+    train = np.arange(10_007)
+    plans = [ChunkPlan(train, 400, 64, 4, 8, 0.5, seed=1, rank=r, world=3) for r in range(3)]
+    assert len({len(p) for p in plans}) == 1
+    sizes = {len(rows) for p in plans for rows, _ in p}
+    assert len(sizes) == 1
+    rank0, rank1 = [np.concatenate([r for r, _ in p]) for p in plans[:2]]
+    assert not set(rank0) & set(rank1)
+
+
+def test_a_buffer_decodes_to_the_kept_columns_of_the_store():
+    """Packed bytes of the kept blocks decode to exactly those SNPs, whichever blocks,
+    including the last one, whose final byte is part padding."""
+    rng = np.random.default_rng(2)
+    n_snps = 1_003
+    x = rng.integers(-1, 3, size=(50, n_snps)).astype(np.int8)
+    packed = genotypes.encode(x)
+
+    class Store:
+        def __init__(self):
+            self.packed = packed
+
+    labels = np.arange(50.0)
+    plan = ChunkPlan(np.arange(50), n_snps, 10, 2, 8, 0.5, seed=3)
+    table = torch.from_numpy(genotypes.DECODE_TABLE)
+    for rows, ranges in plan:
+        got, y, cols = ChunkBuffers(Store(), labels, packed=True)[(rows, ranges)]
+        decoded = table[got.long()].reshape(len(got), -1)[:, : len(cols)]
+        assert np.array_equal(cols.numpy(), plan_columns(ranges))
+        assert np.array_equal(decoded.numpy(), x[rows][:, cols.numpy()])
+        assert np.array_equal(y.numpy(), labels[rows])
+
+
+def test_given_columns_use_those_snps_scaled():
+    torch.manual_seed(5)
+    net, x = Net(), torch.randn(8, 50)
+    net.train()
+    cols = torch.tensor([0, 1, 2, 3, 20, 21, 22, 23, 40, 41])
+    out = SnpSampled(net, 0.2)(x[:, cols], "", 0, 0, "train", cols=cols)
+    mask = torch.zeros(50)
+    mask[cols] = 5.0
+    assert torch.allclose(out, net(x * mask, "", 0, 0, "train"), atol=1e-6)
 
 
 def test_evaluation_batches_fit_a_gpu_at_any_number_of_snps():

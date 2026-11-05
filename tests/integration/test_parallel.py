@@ -73,6 +73,22 @@ def test_snp_sampling_trains_a_model_as_good(tmp_path):
     assert json.loads(meta.read_text())["snp_sample"] == 0.5
 
 
+@pytest.mark.parametrize("processes", [1, 2])
+def test_chunked_reads_train_a_model_as_good(tmp_path, processes):
+    """--chunk-rows and --snp-blocks: the same quality, on one and on several processes
+    (which must see equal batch counts, or DDP hangs)."""
+    data = DATASETS["synthetic"]
+    flags = [
+        f"--gpus={processes}", "--engine=dietnet", "--workers=1", "--inputs=memmap",
+        "--snp-sample=0.5", "--chunk-rows=64", "--chunks-per-buffer=2", "--snp-blocks=8",
+    ]  # fmt: skip
+    packages = train_pipeline(tmp_path / "ch", data, folds="0", flags=flags)
+
+    report = dietnet("check", packages=packages)
+    accuracy = float(re.search(r"(\d\.\d+)", report.splitlines()[-1]).group(1))
+    assert accuracy >= 0.9, report
+
+
 def test_recalibrated_batchnorm_trains_a_model_as_good(tmp_path):
     """--bn-recalibrate: the same quality, with statistics recomputed before validation."""
     data = DATASETS["synthetic"]
