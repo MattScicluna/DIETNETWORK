@@ -70,7 +70,7 @@ class Split(torch.utils.data.Dataset):
 
     def __getitems__(self, positions):
         rows = self.rows[np.asarray(positions)]
-        source = self.store.packed if self.packed else self.store
+        source = self.store.reader if self.packed else self.store
         x = genotypes.read_rows(source, rows)
         return (
             torch.from_numpy(np.ascontiguousarray(x)),
@@ -223,7 +223,7 @@ class ChunkBuffers(torch.utils.data.Dataset):
 
     def __getitem__(self, item):
         rows, ranges = item
-        x = np.asarray(genotypes.read_rows(self.store.packed if self.packed else self.store, rows))
+        x = np.asarray(genotypes.read_rows(self.store.reader if self.packed else self.store, rows))
         unit = 4 if self.packed else 1
         kept = [x[:, a // unit : -(-b // unit)] for a, b in ranges]
         return (

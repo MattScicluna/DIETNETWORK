@@ -76,6 +76,27 @@ def test_a_packed_store_gives_exactly_the_rows_upstream_copies(dataset):
     assert genotypes.packed_path(dataset).stat().st_size < ram.nbytes / 3
 
 
+def test_file_reads_give_the_memory_maps_bytes(dataset):
+    """PackedReader (one read per run of consecutive rows) == indexing the memory map,
+    for runs, gaps, repeats, any order, single rows and the last row; and it pickles
+    without its open file, for loader workers."""
+    import pickle
+
+    genotypes.pack(dataset)
+    mapped = np.load(genotypes.packed_path(dataset), mmap_mode="r")
+    reader = genotypes.PackedReader.of(genotypes.packed_path(dataset))
+    n = len(mapped)
+    for rows in (
+        np.arange(n), np.array([0, 1, 2, 7, 8, 30]), np.array([9, 3, 3, 4, n - 1]),
+        np.array([], dtype=np.int64), np.sort(np.random.default_rng(0).choice(n, 50, False)),
+    ):  # fmt: skip
+        np.testing.assert_array_equal(reader[rows], mapped[rows])
+    np.testing.assert_array_equal(reader[n - 1], mapped[n - 1])
+    np.testing.assert_array_equal(pickle.loads(pickle.dumps(reader))[[4, 5]], mapped[[4, 5]])
+    with pytest.raises(IndexError):
+        reader[[n]]
+
+
 def test_auto_prefers_an_up_to_date_pack(dataset):
     assert genotypes.choose(dataset, "auto") == "ram"
     with pytest.raises(ValueError, match="pack-genotypes"):

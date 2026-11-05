@@ -114,8 +114,58 @@ def is_packed(dataset) -> bool:
     return json.loads(meta.read_text()) == _source(dataset)
 
 
+class PackedReader:
+    """Rows of a 2-bit copy read with plain file reads: ``reader[rows]`` is
+    ``packed[rows]``, one read per run of consecutive rows.
+
+    Indexing the memory map instead turns each 322 KB row (1.29M SNPs) into ~80
+    page faults of 4 KB, each a round trip: on Lustre, validation's ~105k scattered
+    rows went at ~3 MB/s. Opened lazily, once per process (loader workers fork).
+    """
+
+    def __init__(self, path, n_rows, row_bytes, offset):
+        self.path, self.n_rows, self.row_bytes, self.offset = Path(path), n_rows, row_bytes, offset
+        self._file, self._pid = None, None
+
+    @classmethod
+    def of(cls, path) -> PackedReader:
+        with open(path, "rb") as f:
+            version = np.lib.format.read_magic(f)
+            shape, _, _ = np.lib.format._read_array_header(f, version)
+            return cls(path, shape[0], shape[1], f.tell())
+
+    def __getstate__(self):
+        return {**self.__dict__, "_file": None, "_pid": None}
+
+    def _handle(self):
+        if self._file is None or self._pid != os.getpid():
+            self._file, self._pid = open(self.path, "rb", buffering=0), os.getpid()
+        return self._file
+
+    def __getitem__(self, rows) -> np.ndarray:
+        scalar = np.ndim(rows) == 0
+        rows = np.atleast_1d(np.asarray(rows, dtype=np.int64))
+        if len(rows) and (rows.min() < 0 or rows.max() >= self.n_rows):
+            raise IndexError(f"rows out of range 0..{self.n_rows - 1}")
+        out = np.empty((len(rows), self.row_bytes), dtype=np.uint8)
+        if not len(rows):
+            return out
+        f = self._handle()
+        breaks = np.flatnonzero(np.diff(rows) != 1) + 1
+        for start, stop in zip(np.r_[0, breaks], np.r_[breaks, len(rows)]):
+            view = memoryview(out[start:stop]).cast("B")
+            f.seek(self.offset + int(rows[start]) * self.row_bytes)
+            done = 0
+            while done < len(view):
+                n = f.readinto(view[done:])
+                if not n:
+                    raise EOFError(f"{self.path}: short read at row {rows[start]}")
+                done += n
+        return out[0] if scalar else out
+
+
 class PackedStore:
-    """int8 rows decoded from the 2-bit copy, read through a memory map.
+    """int8 rows decoded from the 2-bit copy, read with file reads (:class:`PackedReader`).
 
     ``store[i]`` is one row, ``store[indices]`` a block of rows, as for a numpy
     array; :meth:`packed_rows` gives the undecoded bytes, for decoding on a GPU.
@@ -128,7 +178,7 @@ class PackedStore:
             )
         self.dataset = Path(dataset)
         self.n_snps = json.loads(_meta_path(dataset).read_text())["n_snps"]
-        self._packed = None
+        self._packed, self._reader = None, None
         self.shape = (len(self.packed), self.n_snps)
         self.dtype = np.dtype(np.int8)
 
@@ -144,12 +194,19 @@ class PackedStore:
     def __len__(self) -> int:
         return self.shape[0]
 
+    @property
+    def reader(self) -> PackedReader:
+        """The undecoded rows, read with file reads rather than through the memory map."""
+        if getattr(self, "_reader", None) is None:
+            self._reader = PackedReader.of(packed_path(self.dataset))
+        return self._reader
+
     def packed_rows(self, rows) -> np.ndarray:
-        return np.asarray(self.packed[rows])
+        return self.reader[rows]
 
     def __getitem__(self, rows) -> np.ndarray:
         if np.ndim(rows) == 0:
-            return decode(self.packed[int(rows)], self.n_snps)[0]
+            return decode(self.reader[int(rows)][None], self.n_snps)[0]
         return decode(self.packed_rows(rows), self.n_snps)
 
 

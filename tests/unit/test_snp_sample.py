@@ -48,7 +48,7 @@ def test_a_buffer_decodes_to_the_kept_columns_of_the_store():
 
     class Store:
         def __init__(self):
-            self.packed = packed
+            self.reader = packed
 
     labels = np.arange(50.0)
     plan = ChunkPlan(np.arange(50), n_snps, 10, 2, 8, 0.5, seed=3)
