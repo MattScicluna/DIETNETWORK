@@ -37,6 +37,14 @@ def test_a_memory_map_gives_exactly_the_rows_upstream_copies(dataset):
     np.testing.assert_array_equal(mapped[17], ram[17])
 
 
+def test_the_map_is_read_only_and_batches_are_writable_copies(dataset):
+    # Copy-on-write counts against the node's memory: the kernel refuses a mapping larger
+    # than its RAM, which a biobank's dataset is.
+    x = ds.memmap_inputs(dataset)
+    assert x.mode == "r" and not x.flags.writeable
+    assert genotypes.open_store(dataset, "memmap")[np.array([0, 3])].flags.writeable
+
+
 def test_auto_keeps_small_datasets_in_ram_and_maps_large_ones(dataset, monkeypatch):
     assert genotypes.choose(dataset, "auto") == "ram"
 
