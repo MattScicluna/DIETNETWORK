@@ -170,14 +170,15 @@ peak early (best epoch 3 on 3 of 5 height folds).
 
 | lambda | height | BMI | SNPs with a free weight (height) |
 |---|---|---|---|
-| 0.3 | **0.543** | (training) | ~1.29M (all) |
+| 0.3 | **0.543** | **0.320** | ~1.29M (all) |
 | 1 | 0.445 | 0.289 | ~0.9M |
 | 3 | 0.411 | 0.279 | ~0.6M |
-| 6 | 0.398 | (scoring) | ~7k |
+| 6 | 0.398 | 0.271 | ~7k |
 | plain `dec` | 0.393 | 0.257 | - |
 | lassosum2 / LDpred2-auto, fold 0 | 0.518 / 0.394 | 0.289 / 0.302 | |
 
-The hybrid at lambda 0.3 beats lassosum2 on fold 0 for height. Smaller lambda is
+The hybrid at lambda 0.3 beats the best linear model on fold 0 for both traits
+(height 0.543 vs lassosum2 0.518, BMI 0.320 vs LDpred2-auto 0.302). Smaller lambda is
 better so far; queued: lambda 0.3 on folds 1-4 (array 8611164), lambda 0.1 and 0.03
 on fold 0 (8611165, 8611166), both traits.
 
