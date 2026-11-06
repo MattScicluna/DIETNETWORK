@@ -16,7 +16,35 @@ Living document: each pull request that moves the plan updates it.
 | 7. Quantitative traits | ✅ `adjust-phenotype`, `genotype_freq` features, r/R²/RMSE in `check` (PR #17); UKB height & BMI runs set up (`experiments/ukbb_traits/`) |
 | MLP baseline (published split) | ✅ 0.9117 vs Diet Network 0.9282 retrained (−1.65 points paired, 1 of 15 higher) |
 
-### Resume here (2026-11-03): toward height r ~ 0.5
+### Resume here (2026-11-05, evening): hybrid Diet Network on HM3+
+
+**Read `docs/specs/2026-11-03-ukbb-imputed-hm3.md` ("Results on HM3+").** State:
+
+- Data: `$SCRATCH/dietnet_traits/exp_hm3` on Narval, 424,142 samples x 1,290,149 imputed
+  HapMap3+ SNPs, same 5 folds as `exp_maf01` (partition rebuilt by sample id).
+- Linear baselines (5 folds): height lassosum2 0.517, LDpred2-auto 0.396; BMI
+  LDpred2-auto 0.308, lassosum2 0.296.
+- Diet Network (5 folds): `dec` 0.394 / 0.260, `gwas` 0.392 / 0.230.
+- **Hybrid (`--free-snp-weights`, B3), fold 0: lambda 0.3 gives height 0.543, BMI 0.320,
+  above both linear models.** Lambda 1 / 3 / 6: 0.445 / 0.411 / 0.398 (height), 0.289 /
+  0.279 / 0.271 (BMI). Lambda chosen on validation agrees.
+- **Queued (SLURM est. start 2026-11-06 ~01:00):** array 8611164 (lambda 0.3, folds 1-4),
+  8611165 (lambda 0.1, fold 0), 8611166 (lambda 0.03, fold 0), height+bmi each; run dirs
+  `runs/<label>/dec/b138_d50_bn_chunk_fw<lambda>`. Score with `dietnet check --packages
+  <run>/packages` in a CPU sbatch job (never the login node).
+- AlphaGenome for the 1,155,048 new SNPs: on the Mac, `~/dietnet_alphagenome/ukbb_hm3/`
+  (`run_scoring.sh`, resumable, watchdog), ~78% on 11-05 22:00. Then: merge with the array
+  table, `dec_ag` embedding on HM3+, hybrid `dec_ag` at the best lambda on 5 folds, paired
+  against hybrid `dec`.
+- Training recipe for 1.29M SNPs: `STAGE=0` (train on Lustre in place), TRAIN_FLAGS
+  `--bn-recalibrate 20000 --snp-sample 0.5 --chunk-rows 2048 --chunks-per-buffer 4
+  --snp-blocks 64 [--free-snp-weights L]`, `--mem=128G --time=12:00:00`; ~70-100 s an epoch
+  (~150-240 s with free weights). Statistics: `compute-input-stats --engine dietnet`.
+- Ops: the Mac must not sleep (closed-lid + monitor off = sleep, which drops SSH and pauses
+  AlphaGenome): `sudo pmset -a disablesleep 1` is set; **undo with `sudo pmset -a
+  disablesleep 0` when done.** Narval needs MFA: Matt runs `ssh -fN narval` in a terminal.
+
+### Earlier: toward height r ~ 0.5 (2026-11-03)
 
 **Next work is specified in `docs/specs/2026-11-03-ukbb-traits-toward-0.5.md`**
 (agreed with Matt): A1 regenie -> LDpred2-auto benchmark; per-fold precomputed
