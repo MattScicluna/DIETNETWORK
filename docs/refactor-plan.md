@@ -32,10 +32,29 @@ per fold, is there, with where it came from. Report r and R^2, not test loss.** 
 - Evaluate packages with `dietnet predict --scores` and `benchmark/rescale_eval.py`
   (`benchmark/rescale.sbatch`, GPU), which also checks predictions against training.
   `dietnet check` gives raw R^2, without the rescaling the PRS baselines get.
-- **AlphaGenome scored for the 1,155,048 new SNPs; on Narval at
-  `exp_hm3/alphagenome/alphagenome_hm3.tsv.gz`, backup on the Mac. Next, agreed with Matt:**
-  merge with the array table, `dec_ag` embedding on HM3+, then plain `dec_ag` against `dec`
-  and `penDN-dec_ag` at lambda 0.3 against `penDN-dec`, 5 folds, both traits, paired by fold.
+- AlphaGenome scored for the 1,155,048 new SNPs; on Narval
+  `exp_hm3/alphagenome/alphagenome_hm3.tsv.gz`, and merged with the array table at the cohort's
+  positions as `alphagenome_merged.tsv.gz` (1,290,276 rows). Backup on the Mac,
+  `~/dietnet_alphagenome/ukbb_hm3/`.
+- **Running on Narval (submitted 2026-11-06, needs no laptop): AlphaGenome as a prior.** Each
+  job starts only if the one before succeeded (`afterok`), so one failed task halts the rest:
+  embeddings 8666992 (`dec_ag@height`, `dec_ag@bmi`) -> plain `dec_ag` 8666993 and `penDN-dec_ag`
+  at lambda 0.3 8666994 (5 folds, both traits, the `dec` recipe) -> scoring 8674872
+  (`benchmark/rescale.sbatch`; rebuilds the 547 GB matched cohort, ~3 h). Run dirs
+  `runs/<label>/dec_ag/b138_d50_bn_chunk{,_fw0.3}`.
+- **On return:** Matt runs `ssh -fN narval`. Check `sacct -j 8666992,8666993,8666994,8674872 -X`.
+  Results: `exp_hm3/rescale/<label>_dec_ag_b138_d50_bn_chunk{,_fw0.3}.json` (per-fold r, R^2 and
+  the match with training; the job fails if predictions differ by more than 1e-3). Report
+  `dec_ag` against `dec` and `penDN-dec_ag` against `penDN-dec`, paired by fold, and against the
+  PRS, in r and R^2, using the `dec` numbers in the spec. Also report AlphaGenome's coverage,
+  in `embeddings/dec_ag@height.npz.json` (100% on the array SNPs; the merged table has 127 more
+  rows than cohort SNPs, probably other alleles at kept positions, which matching should drop).
+  Then add the results to the spec.
+- If a step failed, read `exp_hm3/logs/traits_{embedding,train,rescale}.<job>*.out`. Embeddings
+  were given 480G (array peak ~100 GB at 416k SNPs). `imputed/submit_dec_ag.sh` resubmits the
+  whole chain, including the merge; it needs `EXP_DIR` and `traits.env`. Queue scoring from
+  `exp_hm3` with `BENCH=<repo>/experiments/ukbb_traits/benchmark`, `RUNS="dec_ag/...
+  dec_ag/..._fw0.3"`, `DIETNET_VENV` from `traits.env`, `sbatch --export=ALL`.
 - Training recipe for 1.29M SNPs: `STAGE=0` (train on Lustre in place), TRAIN_FLAGS
   `--bn-recalibrate 20000 --snp-sample 0.5 --chunk-rows 2048 --chunks-per-buffer 4
   --snp-blocks 64 [--free-snp-weights L]`, `--mem=128G --time=12:00:00`; ~70-100 s an epoch
