@@ -149,6 +149,38 @@ The Diet Network on HM3+ is judged against the better of the two per trait: heig
   already scored, on the Mac (`~/dietnet_alphagenome/ukbb_hm3/run_scoring.sh`,
   resumable, ~2.5 days at the API's rate); then merged with the array table.
 
+### Results on HM3+ (2026-11-05)
+
+Chunked reads (`--chunk-rows 2048 --chunks-per-buffer 4 --snp-blocks 64
+--snp-sample 0.5`), `--bn-recalibrate 20000`, b138_d50, trained in place on Lustre
+(`STAGE=0`; packed rows read with file reads through gaps, evaluation rows cached in
+memory: ~70-100 s an epoch, ~155 s with free weights). Mean held-out r over 5 folds:
+
+| | height | BMI |
+|---|---|---|
+| Diet Network `dec` | 0.394 | 0.260 |
+| Diet Network `gwas` (A2: per-fold GWAS z, beta, signed -log10 p) | 0.392 | 0.230 |
+| LDpred2-auto | 0.396 | **0.308** |
+| lassosum2 | 0.517 | 0.296 |
+
+A2: GWAS features do no better than decile frequencies (height) or worse (BMI); runs
+peak early (best epoch 3 on 3 of 5 height folds).
+
+**B3 hybrid, lambda grid on fold 0 (held-out r):**
+
+| lambda | height | BMI | SNPs with a free weight (height) |
+|---|---|---|---|
+| 0.3 | **0.543** | (training) | ~1.29M (all) |
+| 1 | 0.445 | 0.289 | ~0.9M |
+| 3 | 0.411 | 0.279 | ~0.6M |
+| 6 | 0.398 | (scoring) | ~7k |
+| plain `dec` | 0.393 | 0.257 | - |
+| lassosum2 / LDpred2-auto, fold 0 | 0.518 / 0.394 | 0.289 / 0.302 | |
+
+The hybrid at lambda 0.3 beats lassosum2 on fold 0 for height. Smaller lambda is
+better so far; queued: lambda 0.3 on folds 1-4 (array 8611164), lambda 0.1 and 0.03
+on fold 0 (8611165, 8611166), both traits.
+
 ### C. Diet Network on HapMap3+ (GPU, after B and Matt's go)
 
 - Dataset, partition from the fold lists (same folds, by sample id), per-fold
