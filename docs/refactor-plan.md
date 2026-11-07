@@ -42,14 +42,20 @@ per fold, is there, with where it came from. Report r and R^2, not test loss.** 
   at lambda 0.3 8666994 (5 folds, both traits, the `dec` recipe) -> scoring 8674872
   (`benchmark/rescale.sbatch`; rebuilds the 547 GB matched cohort, ~3 h). Run dirs
   `runs/<label>/dec_ag/b138_d50_bn_chunk{,_fw0.3}`.
-- **Also running, Matt's priority: AlphaGenome alone (`ag`, 64 PCs, no decile features), a purely
-  functional prior.** Embedding 8687561 -> `penDN-ag` at lambda 0.3 8687562 -> plain `ag` 8687563
-  (control) -> scoring `penDN-ag` 8687573 (waits for 8674872, since each scoring job deletes
-  `rescale/work`). Plain `ag` has no scoring job yet. Lambda 0.3 was tuned with `dec`, so it may
-  not be `ag`'s best. So far (raw R^2, 5 folds) plain `dec_ag` adds nothing to `dec`: height
-  0.155 vs 0.155, BMI 0.066 vs 0.067.
+- **Also running, Matt's priority: AlphaGenome alone (`ag200`, no decile features), a purely
+  functional prior: tracks standardized, then 200 PCs, 94.9% of the variance.** Without
+  standardizing, 95% takes 98 PCs, 64 PCs reach 92.5%, and RNA-seq is 0.65% of the variance
+  (`exp_hm3/alphagenome/spectrum.json`, `.npz` has the eigenvectors). Embedding 8688652 ->
+  `penDN-ag200` at lambda 0.3 8688653 -> plain `ag200` 8688655 (control); scoring `penDN-ag200`
+  8688668 (waits for 8674872, since each scoring job deletes `rescale/work`). Plain `ag200` has no
+  scoring job yet. Lambda 0.3 was tuned with `dec`, so it may not be `ag200`'s best. `dec_ag` has
+  64 unstandardized PCs, so it differs from `ag200` in more than the decile features. The earlier
+  64-PC `ag` chain was cancelled before training; `embeddings/ag.npz` remains, unused. So far
+  (raw R^2, 5 folds) plain `dec_ag` adds nothing to `dec`: height 0.155 vs 0.155, BMI 0.066 vs
+  0.067. Parked, to return to with Matt: regress per-fold GWAS signal on the PCs to test directly
+  whether the annotations predict it.
 - **On return:** Matt runs `ssh -fN narval`. Check `sacct -X -j
-  8666993,8666994,8674872,8687561,8687562,8687563,8687573`.
+  8666993,8666994,8674872,8688652,8688653,8688655,8688668`.
   Results: `exp_hm3/rescale/<label>_dec_ag_b138_d50_bn_chunk{,_fw0.3}.json` (per-fold r, R^2 and
   the match with training; the job fails if predictions differ by more than 1e-3). Report
   `dec_ag` against `dec` and `penDN-dec_ag` against `penDN-dec`, paired by fold, and against the
