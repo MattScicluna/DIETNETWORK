@@ -185,6 +185,27 @@ def test_controls_transforms_and_mixing_shared_with_per_fold_blocks(tmp_path, pr
     assert saved["shape"] == list(values.shape)
 
 
+def test_standardize_keeps_large_valued_columns_from_deciding_the_components():
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((500, 6))
+    large = x * np.array([1000.0, 1, 1, 1, 1, 1])
+    block = features.Block(large, [f"t:{i}" for i in range(6)], {})
+
+    plain = features._transform(block, {"pca": 2})
+    scaled = features._transform(block, {"pca": 2, "standardize": True})
+    # Without it, the first component is the large column; with it, scale makes no difference.
+    assert abs(np.corrcoef(plain.values[:, 0], large[:, 0])[0, 1]) > 0.999
+    reference = features._pca(x, 2, standardize=True)
+    np.testing.assert_allclose(np.abs(scaled.values), np.abs(reference), atol=1e-8)
+    assert scaled.info["standardize"] is True and "standardize" not in plain.info
+
+    with pytest.raises(ValueError, match="applies to pca"):
+        features._transform(block, {"standardize": True})
+    constant = features.Block(np.ones((10, 3)), ["t:0", "t:1", "t:2"], {})
+    with pytest.raises(ValueError, match="does not vary"):
+        features._transform(constant, {"pca": 2, "standardize": True})
+
+
 def test_an_excluded_block_feeds_shuffled_but_not_the_matrix(tmp_path, prepared):
     """The shuffled control on its own: the original is built, then left out."""
     h5, partition = prepared

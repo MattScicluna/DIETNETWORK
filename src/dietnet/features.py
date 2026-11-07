@@ -53,10 +53,11 @@ copy it, but left out of the matrix: a shuffled control without the original.
 
 Transforms per block, applied after the provider: ``center: true`` subtracts
 each column's mean over SNPs; ``pca: k`` keeps the first k principal
-components over SNPs (computed per fold for a per-fold block). Upstream's
-per-column L2 normalisation undoes any per-column scaling, so these are the
-transforms that matter: centering, and controlling how many columns -- and so
-how much weight -- a block brings.
+components over SNPs (computed per fold for a per-fold block), and with
+``standardize: true`` scales each column to unit variance first, so that large-valued
+columns do not decide the components. Upstream's per-column L2 normalisation undoes any
+per-column scaling of the columns it receives, so these are the transforms that matter:
+centering, and controlling how many columns -- and so how much weight -- a block brings.
 
 Every column must vary: an all-zero column would be divided by a zero norm
 inside the model and turn it to NaN, so building refuses one.
@@ -285,8 +286,13 @@ PROVIDERS = {
 }
 
 
-def _pca(values: np.ndarray, k: int) -> np.ndarray:
+def _pca(values: np.ndarray, k: int, standardize: bool = False) -> np.ndarray:
     centred = values - values.mean(axis=0)
+    if standardize:
+        sd = centred.std(axis=0)
+        if (sd == 0).any():
+            raise ValueError("standardize: a column does not vary")
+        centred = centred / sd
     u, s, _ = np.linalg.svd(centred, full_matrices=False)
     return u[:, :k] * s[:k]
 
@@ -295,16 +301,20 @@ def _transform(block: Block, spec: dict) -> Block:
     values = block.values
     if spec.get("center"):
         values = values - values.mean(axis=-2, keepdims=True)
+    standardize = bool(spec.get("standardize"))
+    if standardize and "pca" not in spec:
+        raise ValueError("standardize applies to pca: upstream's L2 normalisation undoes it")
     if "pca" in spec:
         k = int(spec["pca"])
         if k > values.shape[-1]:
             raise ValueError(f"pca: {k} components from {values.shape[-1]} columns")
         if values.ndim == 3:
-            values = np.stack([_pca(v, k) for v in values])
+            values = np.stack([_pca(v, k, standardize) for v in values])
         else:
-            values = _pca(values, k)
+            values = _pca(values, k, standardize)
         stem = block.columns[0].split(":")[0]
-        return Block(values, [f"{stem}:pc{i}" for i in range(k)], {**block.info, "pca": k})
+        info = {**block.info, "pca": k, **({"standardize": True} if standardize else {})}
+        return Block(values, [f"{stem}:pc{i}" for i in range(k)], info)
     return Block(values, block.columns, block.info)
 
 

@@ -122,10 +122,13 @@ Applied to a block after its provider:
 - `center: true` subtracts each column's mean over SNPs.
 - `pca: k` keeps the first k principal components over SNPs, per fold for a
   per-fold block.
+- `standardize: true`, with `pca`, scales each column to unit variance before the
+  components, so that large-valued columns do not decide them. On the AlphaGenome table,
+  RNA-seq is 0.65% of the variance without it.
 
-Upstream's per-column L2 normalisation undoes any per-column scaling, so these
-are the transforms that matter: centring, and controlling how many columns,
-and so how much weight, a block brings.
+Upstream's per-column L2 normalisation undoes any per-column scaling of the columns it
+receives, so these are the transforms that matter: centring, and controlling how many
+columns, and so how much weight, a block brings.
 
 A fold-independent block is repeated for every fold when combined with a
 per-fold one. Every column must vary: an all-zero column would be divided by a
