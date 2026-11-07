@@ -42,7 +42,14 @@ per fold, is there, with where it came from. Report r and R^2, not test loss.** 
   at lambda 0.3 8666994 (5 folds, both traits, the `dec` recipe) -> scoring 8674872
   (`benchmark/rescale.sbatch`; rebuilds the 547 GB matched cohort, ~3 h). Run dirs
   `runs/<label>/dec_ag/b138_d50_bn_chunk{,_fw0.3}`.
-- **On return:** Matt runs `ssh -fN narval`. Check `sacct -j 8666992,8666993,8666994,8674872 -X`.
+- **Also running, Matt's priority: AlphaGenome alone (`ag`, 64 PCs, no decile features), a purely
+  functional prior.** Embedding 8687561 -> `penDN-ag` at lambda 0.3 8687562 -> plain `ag` 8687563
+  (control) -> scoring `penDN-ag` 8687573 (waits for 8674872, since each scoring job deletes
+  `rescale/work`). Plain `ag` has no scoring job yet. Lambda 0.3 was tuned with `dec`, so it may
+  not be `ag`'s best. So far (raw R^2, 5 folds) plain `dec_ag` adds nothing to `dec`: height
+  0.155 vs 0.155, BMI 0.066 vs 0.067.
+- **On return:** Matt runs `ssh -fN narval`. Check `sacct -X -j
+  8666993,8666994,8674872,8687561,8687562,8687563,8687573`.
   Results: `exp_hm3/rescale/<label>_dec_ag_b138_d50_bn_chunk{,_fw0.3}.json` (per-fold r, R^2 and
   the match with training; the job fails if predictions differ by more than 1e-3). Report
   `dec_ag` against `dec` and `penDN-dec_ag` against `penDN-dec`, paired by fold, and against the
