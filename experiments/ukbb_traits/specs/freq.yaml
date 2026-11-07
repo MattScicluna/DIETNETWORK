@@ -1,0 +1,3 @@
+# The baseline: genotype frequencies per fold, over all its training samples.
+blocks:
+  - provider: genotype_freq

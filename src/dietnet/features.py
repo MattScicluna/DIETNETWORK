@@ -27,11 +27,16 @@ Providers:
     pooled: the same definition without the split by class, for regression
     tasks (which have no classes) or as a baseline. Read a block of samples at a
     time from a genotype store (``inputs``: as for ``train``), so it scales to
-    a biobank.
+    a biobank. With ``classes`` (a sample id / class TSV), per class instead:
+    ``class_genotype_freq``'s values, streamed, for classes the dataset does
+    not hold (deciles of a trait, say).
 ``precomputed``
     A table with ``chrom``, ``pos``, ``ref``, ``alt`` and numeric feature
     columns (TSV, optionally gzipped, or parquet), matched to the dataset's SNPs
-    by position and alleles, on either strand. With ``orient: effect`` a value
+    by position and alleles, on either strand. A ``path`` containing ``{fold}``
+    names one table per fold (``gwas_fold{fold}.tsv``: statistics from each
+    fold's training samples), read and matched fold by fold into a per-fold
+    block. With ``orient: effect`` a value
     describes ALT relative to REF, so it is negated where the dataset counts
     REF (plink 1.9 makes the minor allele A1, which is REF for a quarter of the
     1KGP SNPs). SNPs the table lacks get zeros and are marked in an added
@@ -43,12 +48,16 @@ Providers:
     Another block with its SNP rows permuted (``of``: that block's index): the
     control for "this information" rather than "information of this shape".
 
+A block with ``include: false`` is built, so a later ``shuffled`` block can
+copy it, but left out of the matrix: a shuffled control without the original.
+
 Transforms per block, applied after the provider: ``center: true`` subtracts
 each column's mean over SNPs; ``pca: k`` keeps the first k principal
-components over SNPs (computed per fold for a per-fold block). Upstream's
-per-column L2 normalisation undoes any per-column scaling, so these are the
-transforms that matter: centering, and controlling how many columns -- and so
-how much weight -- a block brings.
+components over SNPs (computed per fold for a per-fold block), and with
+``standardize: true`` scales each column to unit variance first, so that large-valued
+columns do not decide the components. Upstream's per-column L2 normalisation undoes any
+per-column scaling of the columns it receives, so these are the transforms that matter:
+centering, and controlling how many columns -- and so how much weight -- a block brings.
 
 Every column must vary: an all-zero column would be divided by a zero norm
 inside the model and turn it to NaN, so building refuses one.
@@ -62,6 +71,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import h5py
 import numpy as np
 import pandas as pd
 import yaml
@@ -110,12 +120,16 @@ def _class_genotype_freq(ctx: Context, spec: dict) -> Block:
 
 
 def _genotype_freq(ctx: Context, spec: dict) -> Block:
-    """Genotype frequencies over each fold's training samples, classes pooled.
+    """Genotype frequencies over each fold's training samples, classes pooled or
+    per class.
 
-    Upstream's definition (generate_embedding.py) without the split by class:
-    ``count(genotype == g) / n`` for g in 0, 1, 2, missing genotypes counted in
-    ``n``. For tasks without classes, such as regression. One pass over the
-    rows any fold trains on, a block at a time from a genotype store, so it
+    Upstream's definition (generate_embedding.py): ``count(genotype == g) / n``
+    for g in 0, 1, 2, missing genotypes counted in ``n``. Pooled by default, for
+    tasks without classes such as regression; with ``classes:`` (a TSV of
+    sample id and class, as for ``--labels``) per class, in upstream's column
+    order, so that classes can be defined apart from the dataset (deciles of a
+    trait, say). Rows are grouped by class and by the folds they train in, and
+    each group is counted once, a block at a time from a genotype store, so it
     scales to a biobank.
     """
     from dietnet import genotypes
@@ -125,23 +139,30 @@ def _genotype_freq(ctx: Context, spec: dict) -> Block:
         ctx.dataset, genotypes.choose(ctx.dataset, spec.get("inputs", "auto"))
     )
     n_rows, n_snps = store.shape
-    member = np.zeros((len(folds), n_rows), dtype=bool)
-    for f, fold in enumerate(folds):
-        member[f, np.asarray(fold[0])] = True
-    counts = np.zeros((len(folds), n_snps, 3))
-    rows = np.flatnonzero(member.any(axis=0))
-    block = int(spec.get("block", 2048))
-    for start in range(0, len(rows), block):
-        chunk = rows[start : start + block]
-        g = np.asarray(store[chunk])
-        for f in range(len(folds)):
-            sel = g[member[f, chunk]]
-            for value in range(3):
-                counts[f, :, value] += (sel == value).sum(axis=0)
-    n = member.sum(axis=1)
-    values = counts / n[:, None, None]
-    columns = [f"all:genotype{value}" for value in range(3)]
-    return Block(values, columns, {"fold_dependent": True, "training_samples": n.tolist()})
+    if "classes" in spec:
+        with h5py.File(ctx.dataset, "r") as h5:
+            samples = np.array(h5["samples"]).astype(str)
+        labels = ds._ordered(ds.read_labels(spec["classes"]), samples, spec["classes"])
+        names, klass = np.unique(labels, return_inverse=True)
+    else:
+        names, klass = np.array(["all"]), None
+
+    counts, n = genotypes.count_by_fold(
+        store, [fold[0] for fold in folds], klass, len(names), int(spec.get("block", 2048))
+    )
+    values = np.zeros((len(folds), n_snps, 3 * len(names)))
+    for f in range(len(folds)):
+        for c in range(len(names)):
+            if n[f, c] == 0:
+                raise ValueError(
+                    f"genotype_freq: class {names[c]!r} has no training samples in fold {f}"
+                )
+            values[f, :, 3 * c : 3 * c + 3] = counts[f, c] / n[f, c]
+    columns = [f"{c}:genotype{value}" for c in names for value in range(3)]
+    info = {"fold_dependent": True, "training_samples": n.sum(axis=1).tolist()}
+    if "classes" in spec:
+        info["classes"] = {"path": str(spec["classes"]), "names": names.tolist()}
+    return Block(values, columns, info)
 
 
 def _read_table(path) -> pd.DataFrame:
@@ -151,12 +172,14 @@ def _read_table(path) -> pd.DataFrame:
     return pd.read_csv(path, sep="\t")
 
 
-def _precomputed(ctx: Context, spec: dict) -> Block:
-    table = _read_table(spec["path"])
+def _match_table(ctx: Context, spec: dict, path: Path):
+    """One table matched to the dataset's SNPs: values (SNPs x features, signed as
+    ``orient`` says), which SNPs it covers, the feature names and a description."""
+    table = _read_table(path)
     keys = ["chrom", "pos", "ref", "alt"]
     missing = [k for k in keys if k not in table.columns]
     if missing:
-        raise ValueError(f"{spec['path']}: missing columns {missing}")
+        raise ValueError(f"{path}: missing columns {missing}")
     features = spec.get("columns") or [c for c in table.columns if c not in keys]
     orient = spec.get("orient", "none")
     if orient not in ("effect", "none"):
@@ -183,26 +206,59 @@ def _precomputed(ctx: Context, spec: dict) -> Block:
     pairs = pairs[usable].drop_duplicates("row")
     sign = np.where(counts_ref[pairs.index] & (orient == "effect"), -1.0, 1.0)
 
-    name = spec.get("name", Path(spec["path"]).stem)
     values = np.zeros((len(snps), len(features)))
     values[pairs["row"].to_numpy()] = pairs[features].to_numpy(dtype=float) * sign[:, None]
     covered = np.zeros(len(snps), dtype=bool)
     covered[pairs["row"].to_numpy()] = True
     if np.isnan(values).any():
-        raise ValueError(f"{spec['path']}: NaN feature values; fill or drop them first")
-
-    columns = [f"{name}:{c}" for c in features]
-    if not covered.all():
-        values = np.column_stack([values, (~covered).astype(float)])
-        columns.append(f"{name}:missing")
+        raise ValueError(f"{path}: NaN feature values; fill or drop them first")
     info = {
-        "path": str(spec["path"]),
-        "orient": orient,
+        "path": str(path),
         "coverage": float(covered.mean()),
         "negated": int((sign < 0).sum()),
-        "sha256": hashlib.sha256(Path(spec["path"]).read_bytes()).hexdigest(),
+        "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(),
     }
-    return Block(values, columns, info)
+    return values, covered, list(features), info
+
+
+def _precomputed(ctx: Context, spec: dict) -> Block:
+    """A fold-independent table or, with ``{fold}`` in ``path``, one table per fold
+    (statistics from each fold's training samples, say) stacked into a
+    folds x SNPs x features block."""
+    template = str(spec["path"])
+    per_fold = "{fold}" in template
+    if per_fold:
+        paths = [Path(template.replace("{fold}", str(f))) for f in range(ctx.n_folds)]
+    else:
+        paths = [Path(template)]
+    absent = [str(p) for p in paths if not p.exists()]
+    if absent:
+        raise FileNotFoundError(f"precomputed: no table at {', '.join(absent)}")
+    matched = [_match_table(ctx, spec, p) for p in paths]
+    features = matched[0][2]
+    for p, (_, _, names, _) in zip(paths, matched):
+        if names != features:
+            raise ValueError(f"{p}: feature columns {names} differ from {paths[0]}'s {features}")
+
+    name = spec.get("name", Path(template.replace("{fold}", "")).stem)
+    values = np.stack([m[0] for m in matched])
+    covered = np.stack([m[1] for m in matched])
+    columns = [f"{name}:{c}" for c in features]
+    if not covered.all():
+        complete = [str(p) for p, c in zip(paths, covered) if c.all()]
+        if complete:
+            # The missing column would be all zeros there: NaN in the model.
+            raise ValueError(
+                f"precomputed: {', '.join(complete)} cover every SNP but other folds' "
+                "tables do not; give every fold's table the same SNPs"
+            )
+        values = np.concatenate([values, (~covered).astype(float)[..., None]], axis=-1)
+        columns.append(f"{name}:missing")
+    orient = {"orient": spec.get("orient", "none")}
+    if per_fold:
+        info = {**orient, "fold_dependent": True, "folds": [m[3] for m in matched]}
+        return Block(values, columns, info)
+    return Block(values[0], columns, {**matched[0][3], **orient})
 
 
 def _random(ctx: Context, spec: dict) -> Block:
@@ -230,8 +286,13 @@ PROVIDERS = {
 }
 
 
-def _pca(values: np.ndarray, k: int) -> np.ndarray:
+def _pca(values: np.ndarray, k: int, standardize: bool = False) -> np.ndarray:
     centred = values - values.mean(axis=0)
+    if standardize:
+        sd = centred.std(axis=0)
+        if (sd == 0).any():
+            raise ValueError("standardize: a column does not vary")
+        centred = centred / sd
     u, s, _ = np.linalg.svd(centred, full_matrices=False)
     return u[:, :k] * s[:k]
 
@@ -240,16 +301,20 @@ def _transform(block: Block, spec: dict) -> Block:
     values = block.values
     if spec.get("center"):
         values = values - values.mean(axis=-2, keepdims=True)
+    standardize = bool(spec.get("standardize"))
+    if standardize and "pca" not in spec:
+        raise ValueError("standardize applies to pca: upstream's L2 normalisation undoes it")
     if "pca" in spec:
         k = int(spec["pca"])
         if k > values.shape[-1]:
             raise ValueError(f"pca: {k} components from {values.shape[-1]} columns")
         if values.ndim == 3:
-            values = np.stack([_pca(v, k) for v in values])
+            values = np.stack([_pca(v, k, standardize) for v in values])
         else:
-            values = _pca(values, k)
+            values = _pca(values, k, standardize)
         stem = block.columns[0].split(":")[0]
-        return Block(values, [f"{stem}:pc{i}" for i in range(k)], {**block.info, "pca": k})
+        info = {**block.info, "pca": k, **({"standardize": True} if standardize else {})}
+        return Block(values, [f"{stem}:pc{i}" for i in range(k)], info)
     return Block(values, block.columns, block.info)
 
 
@@ -273,16 +338,19 @@ def build(spec, dataset, partition, out) -> tuple[np.ndarray, dict]:
         ctx.built.append(block)
         described.append({"provider": provider, "spec": block_spec, **block.info})
 
-    if any(b.fold_dependent for b in ctx.built):
+    kept = [b for b, s in zip(ctx.built, spec["blocks"]) if s.get("include", True)]
+    if not kept:
+        raise ValueError("every block has include: false; nothing to write")
+    if any(b.fold_dependent for b in kept):
         values = np.concatenate(
             [b.values if b.fold_dependent else np.broadcast_to(b.values, (n_folds, *b.values.shape))
-             for b in ctx.built],
+             for b in kept],
             axis=-1,
         )  # fmt: skip
     else:
-        values = np.concatenate([b.values for b in ctx.built], axis=-1)
+        values = np.concatenate([b.values for b in kept], axis=-1)
 
-    columns = [c for b in ctx.built for c in b.columns]
+    columns = [c for b in kept for c in b.columns]
     flat = values.reshape(-1, values.shape[-2], values.shape[-1])
     constant = sorted(
         {columns[j] for v in flat for j in np.flatnonzero(np.abs(v).sum(axis=0) == 0)}
@@ -295,6 +363,9 @@ def build(spec, dataset, partition, out) -> tuple[np.ndarray, dict]:
 
     start = 0
     for entry, block in zip(described, ctx.built):
+        if not entry["spec"].get("include", True):
+            entry["columns"] = None  # built for a later block, not in the matrix
+            continue
         entry["columns"] = [start, start + len(block.columns)]
         start += len(block.columns)
     meta = {

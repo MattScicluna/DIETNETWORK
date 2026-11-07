@@ -146,6 +146,9 @@ def build_embedding(dataset_path, partition_path, spec, out):
     except (ValueError, training.InputError) as error:
         raise click.ClickException(str(error)) from None
     for block in meta["blocks"]:
+        if block["columns"] is None:
+            click.echo(f"  {block['provider']:20s} built, not included")
+            continue
         start, stop = block["columns"]
         click.echo(f"  {block['provider']:20s} columns {start}-{stop - 1}")
     click.echo(f"wrote {out} {tuple(values.shape)} and {out}.json")
@@ -258,9 +261,31 @@ def pack_genotypes(dataset_path):
 @_partition
 @_out
 @_ncpus
-def compute_input_stats(dataset_path, partition_path, out, ncpus):
+@click.option(
+    "--engine",
+    type=click.Choice(["upstream", "dietnet"]),
+    default="upstream",
+    show_default=True,
+    help="upstream: its script, which holds a fold's training genotypes in memory; "
+    "dietnet: the same statistics from genotype counts, a block of samples at a time.",
+)
+@click.option(
+    "--inputs",
+    type=click.Choice(["auto", "ram", "memmap", "packed"]),
+    default="auto",
+    show_default=True,
+    help="engine dietnet: where genotypes are read from (as for train).",
+)
+def compute_input_stats(dataset_path, partition_path, out, ncpus, engine, inputs):
     """Per-fold SNP means and SDs (upstream compute_input_features_statistics.py)."""
-    _per_fold_step("compute_input_features_statistics.py", dataset_path, partition_path, out, ncpus)
+    if engine == "upstream":
+        _per_fold_step(
+            "compute_input_features_statistics.py", dataset_path, partition_path, out, ncpus
+        )
+        return
+    from dietnet import input_stats
+
+    click.echo(f"wrote {input_stats.write(dataset_path, partition_path, _npz(out), inputs)}")
 
 
 @main.command()
@@ -329,6 +354,63 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus):
     "train.py's per-batch bookkeeping (~20x faster training pass; not bit-identical). Default: "
     "'upstream' on one GPU, 'dietnet' for --gpus > 1.",
 )
+@click.option(
+    "--bn-recalibrate",
+    type=click.IntRange(min=0),
+    default=0,
+    show_default=True,
+    help="Engine 'dietnet' only: before each validation, recompute the batch-norm statistics "
+    "on this many training samples without dropout (0: off). Upstream's fat layer is "
+    "batch-normalised right after input dropout, so its training statistics misfit evaluation.",
+)
+@click.option(
+    "--snp-sample",
+    type=click.FloatRange(0, 1, min_open=True),
+    default=1.0,
+    show_default=True,
+    help="Engine 'dietnet', Diet Network only: train each batch on this share of the SNPs, "
+    "the same for the whole batch, in place of per-sample input dropout (1: off). The "
+    "auxiliary network and the fat layer then do that share of the work; evaluation uses "
+    "every SNP. 1 - input_dropout keeps the dropout rate.",
+)
+@click.option(
+    "--chunk-rows",
+    type=click.IntRange(min=0),
+    default=0,
+    show_default=True,
+    help="Engine 'dietnet' only: read training rows in contiguous chunks of this size into "
+    "shuffled in-memory buffers, not batches of random rows, so the genotype file need not "
+    "fit in the page cache (0: off).",
+)
+@click.option(
+    "--chunks-per-buffer",
+    type=click.IntRange(min=1),
+    default=4,
+    show_default=True,
+    help="With --chunk-rows: random chunks read into each buffer.",
+)
+@click.option(
+    "--snp-blocks",
+    type=click.IntRange(min=0),
+    default=0,
+    show_default=True,
+    help="With --chunk-rows and --snp-sample: cut the SNPs into this many contiguous blocks "
+    "and keep a --snp-sample share of the blocks per buffer, not random SNPs per batch (0: off).",
+)
+@click.option(
+    "--free-snp-weights",
+    type=click.FloatRange(min=0),
+    default=0.0,
+    show_default=True,
+    help="Engine 'dietnet', Diet Network only: add free per-SNP fat-layer weights to the "
+    "auxiliary network's, under a group-lasso penalty of this strength (one group per SNP), "
+    "so the model can weigh SNPs jointly, as a penalised regression does (0: off).",
+)
+@click.option(
+    "--free-snp-lr",
+    type=click.FloatRange(min=0, min_open=True),
+    help="With --free-snp-weights: their Adam learning rate. Default: the config's lr_main.",
+)
 def train(
     dataset_path,
     partition_path,
@@ -346,6 +428,13 @@ def train(
     workers,
     gpus,
     engine,
+    bn_recalibrate,
+    snp_sample,
+    chunk_rows,
+    chunks_per_buffer,
+    snp_blocks,
+    free_snp_weights,
+    free_snp_lr,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -357,6 +446,9 @@ def train(
             folds=folds, task=task, normalize=normalize,
             model={"dietnet": "Dietnet", "mlp": "Mlp"}[model],
             inputs=inputs, loader=loader, workers=workers, gpus=gpus, engine=engine,
+            bn_recalibrate=bn_recalibrate, snp_sample=snp_sample, chunk_rows=chunk_rows,
+            chunks_per_buffer=chunks_per_buffer, snp_blocks=snp_blocks,
+            free_snp_weights=free_snp_weights, free_snp_lr=free_snp_lr,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

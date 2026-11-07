@@ -104,7 +104,7 @@ def predict(packages: list[Package], matched: Path, batch_size: int = 1024, devi
     with torch.no_grad():
         for start in range(0, n, batch_size):
             stop = min(start + batch_size, n)
-            batch = [(torch.arange(start, stop), torch.from_numpy(np.asarray(inputs[start:stop])))]
+            batch = [(torch.arange(start, stop), torch.from_numpy(np.array(inputs[start:stop])))]
             for i, (handler, mus, sds, normalize) in enumerate(models):
                 results = m.mainloop_utils.indep_test_step(
                     handler, device, range(stop - start), batch, mus, sds, normalize, None, 0, scale

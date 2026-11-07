@@ -33,9 +33,9 @@ if [ "${STAGE:-0}" = 1 ]; then
     start=$(date +%s)
     # -p keeps modification times: a packed copy is checked against its dataset's.
     if [ "$INPUTS" = packed ]; then
-        cp -p "$DATASET" "$DATASET".packed.* "$SLURM_TMPDIR/"
+        cp --preserve=timestamps "$DATASET" "$DATASET".packed.* "$SLURM_TMPDIR/"
     else
-        cp -p "$DATASET" "$SLURM_TMPDIR/"
+        cp --preserve=timestamps "$DATASET" "$SLURM_TMPDIR/"
     fi
     echo "staged to local disk in $(( $(date +%s) - start )) s"
     DATASET="$SLURM_TMPDIR/dataset.h5"

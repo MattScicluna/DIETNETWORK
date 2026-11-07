@@ -1,0 +1,17 @@
+# The published config, but for UK Biobank's size. 1KGP's ~1,400 training
+# samples made 10 steps an epoch, so 8,000 epochs and patience 2,000 were ~80,000
+# and ~20,000 steps; at ~255,000 samples an epoch is ~1,850 steps, and the same
+# budget would take days per model. 200 epochs (~370,000 steps) with patience
+# 20 is the pilot's ceiling: its logs show where validation loss bottoms out.
+batch_size: 138
+epochs: 200
+input_dropout: 0.995
+dropout_main: 0.1
+lr_aux: 0.0006
+lr_main: 0.0003
+learning_rate_annealing: 0.99
+nb_hidden_u_aux: [100, 100]
+nb_hidden_u_main: [100]
+patience: 20
+seed: 78  # overridden per --seeds
+uniform_init_limit: 0.02

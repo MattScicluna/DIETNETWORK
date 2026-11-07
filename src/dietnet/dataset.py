@@ -176,6 +176,8 @@ def memmap_inputs(path) -> np.ndarray:
         if offset is None or ds.chunks is not None or ds.compression is not None:
             raise ValueError(f"{path}: 'inputs' is not contiguous and uncompressed")
         shape, dtype = ds.shape, ds.dtype
-    # Copy-on-write: rows read as writable arrays (torch warns on read-only ones)
-    # while the file itself is never modified.
-    return np.memmap(path, dtype=dtype, mode="c", offset=offset, shape=shape)
+    # Not copy-on-write: a private writable mapping counts against the machine's memory,
+    # so the kernel can refuse a dataset larger than RAM ("Cannot allocate memory"). A
+    # read-only one needs no RAM beyond the pages in use, whatever the machine has. Slices
+    # are read-only views; a caller handing one to torch copies it first.
+    return np.memmap(path, dtype=dtype, mode="r", offset=offset, shape=shape)

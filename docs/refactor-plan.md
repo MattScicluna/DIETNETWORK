@@ -13,61 +13,187 @@ Living document: each pull request that moves the plan updates it.
 | 4. Pluggable SNP features (`build-embedding`) | ✅ |
 | 5. AlphaGenome (`dietnet alphagenome`) | ✅ UK Biobank array scored (485,516 SNPs × 3,849 tracks), table on Narval |
 | 6. Training at biobank scale | ✅ `--inputs memmap/packed`, fast loader (bit-identical), `--engine dietnet` (13.5 s/epoch vs 65–80 s, 8 GB vs 82 GB), DDP; batch study: 552 with √-scaled LR keeps accuracy (docs/scaling.md) |
-| 7. Quantitative traits | ✅ `adjust-phenotype`, `genotype_freq` features, r/R²/RMSE in `check` (PR #17) |
+| 7. Quantitative traits | ✅ `adjust-phenotype`, `genotype_freq` features, r/R²/RMSE in `check` (PR #17); UKB height & BMI runs set up (`experiments/ukbb_traits/`) |
 | MLP baseline (published split) | ✅ 0.9117 vs Diet Network 0.9282 retrained (−1.65 points paired, 1 of 15 higher) |
 
-### Resume here: UK Biobank height (2026-10-28)
+### Resume here (2026-11-06): penalized Diet Network on HM3+
 
-Goal: predict standing height from autosomal genotypes with the Diet Network,
+**Read `docs/specs/2026-11-03-ukbb-imputed-hm3.md` ("Results on HM3+"): every number,
+per fold, is there, with where it came from. Report r and R^2, not test loss.** State:
+
+- Data: `$SCRATCH/dietnet_traits/exp_hm3` on Narval, 424,142 samples x 1,290,149 imputed
+  HapMap3+ SNPs, same 5 folds as `exp_maf01` (partition rebuilt by sample id).
+- **Prior-informed penalized Diet Network (`penDN-dec`; "hybrid" until 11-06; in code
+  `--free-snp-weights`), lambda 0.3, beats every GWAS PRS on 5 folds, on every fold.** Mean
+  r / R^2, all rescaled on validation: height 0.540 / 0.292 (lassosum2 0.517 / 0.267), BMI
+  0.318 / 0.101 (LDpred2-auto 0.308 / 0.095). Plain `dec` 0.394 / 0.155 and 0.260 / 0.068.
+- Lambda on fold 0, height r: 0.03 0.442, 0.1 0.490, 0.3 0.543, 1 0.445, 3 0.411, 6 0.398;
+  the same peak for BMI. The optimum lies between 0.1 and 1.
+- Evaluate packages with `dietnet predict --scores` and `benchmark/rescale_eval.py`
+  (`benchmark/rescale.sbatch`, GPU), which also checks predictions against training.
+  `dietnet check` gives raw R^2, without the rescaling the PRS baselines get.
+- AlphaGenome scored for the 1,155,048 new SNPs; on Narval
+  `exp_hm3/alphagenome/alphagenome_hm3.tsv.gz`, and merged with the array table at the cohort's
+  positions as `alphagenome_merged.tsv.gz` (1,290,276 rows). Backup on the Mac,
+  `~/dietnet_alphagenome/ukbb_hm3/`.
+- **Running on Narval (submitted 2026-11-06, needs no laptop): AlphaGenome as a prior.** Each
+  job starts only if the one before succeeded (`afterok`), so one failed task halts the rest:
+  embeddings 8666992 (`dec_ag@height`, `dec_ag@bmi`) -> plain `dec_ag` 8666993 and `penDN-dec_ag`
+  at lambda 0.3 8666994 (5 folds, both traits, the `dec` recipe) -> scoring 8674872
+  (`benchmark/rescale.sbatch`; rebuilds the 547 GB matched cohort, ~3 h). Run dirs
+  `runs/<label>/dec_ag/b138_d50_bn_chunk{,_fw0.3}`.
+- **Also running, Matt's priority: AlphaGenome alone (`ag200`, no decile features), a purely
+  functional prior: tracks standardized, then 200 PCs, 94.9% of the variance.** Without
+  standardizing, 95% takes 98 PCs, 64 PCs reach 92.5%, and RNA-seq is 0.65% of the variance
+  (`exp_hm3/alphagenome/spectrum.json`, `.npz` has the eigenvectors). Embedding 8688652 ->
+  `penDN-ag200` at lambda 0.3 8688653 -> plain `ag200` 8688655 (control); scoring `penDN-ag200`
+  8711569. Plain `ag200` has no scoring job yet. **Raw results (5 folds, lambda 0.3), r / R^2:
+  `penDN-ag200` height 0.513 / 0.251, BMI 0.250 / 0.060; `penDN-dec_ag` 0.539 / 0.285 and 0.316 /
+  0.100, the same as `penDN-dec` (0.540 / 0.287, 0.318 / 0.101). So AlphaGenome adds nothing
+  next to `dec`, and alone it falls short of `dec`; BMI's best epochs came early (18-26).**
+  Lambda 0.3 was tuned with `dec`, so `ag200` gets its own grid on fold 0: 0.1 8711570, 1 8711571,
+  3 8711572 (both traits; score with `dietnet check`). Not yet run: a penalized control with a
+  shuffled `ag200` embedding, the test of whether AlphaGenome carries any signal.
+- **The matched cohort is kept** (`rescale/matched/`, 547 GB; `rescale.sbatch` no longer deletes
+  it, commit 48d019d): reuse it for every scoring job on this cohort, and remove it by hand when
+  the experiments are done. Job 8711534 hard-links it there before 8674872, submitted with the
+  old script, deletes `rescale/work`. `dec_ag` has
+  64 unstandardized PCs, so it differs from `ag200` in more than the decile features. The earlier
+  64-PC `ag` chain was cancelled before training; `embeddings/ag.npz` remains, unused. So far
+  (raw R^2, 5 folds) plain `dec_ag` adds nothing to `dec`: height 0.155 vs 0.155, BMI 0.066 vs
+  0.067. Parked, to return to with Matt: regress per-fold GWAS signal on the PCs to test directly
+  whether the annotations predict it.
+- **On return:** Matt runs `ssh -fN narval`. Check `sacct -X -j
+  8674872,8688655,8711534,8711569,8711570,8711571,8711572`.
+  Results: `exp_hm3/rescale/<label>_dec_ag_b138_d50_bn_chunk{,_fw0.3}.json` (per-fold r, R^2 and
+  the match with training; the job fails if predictions differ by more than 1e-3). Report
+  `dec_ag` against `dec` and `penDN-dec_ag` against `penDN-dec`, paired by fold, and against the
+  PRS, in r and R^2, using the `dec` numbers in the spec. Also report AlphaGenome's coverage,
+  in `embeddings/dec_ag@height.npz.json` (100% on the array SNPs; the merged table has 127 more
+  rows than cohort SNPs, probably other alleles at kept positions, which matching should drop).
+  Then add the results to the spec.
+- If a step failed, read `exp_hm3/logs/traits_{embedding,train,rescale}.<job>*.out`. Embeddings
+  were given 480G (array peak ~100 GB at 416k SNPs). `imputed/submit_dec_ag.sh` resubmits the
+  whole chain, including the merge; it needs `EXP_DIR` and `traits.env`. Queue scoring from
+  `exp_hm3` with `BENCH=<repo>/experiments/ukbb_traits/benchmark`, `RUNS="dec_ag/...
+  dec_ag/..._fw0.3"`, `DIETNET_VENV` from `traits.env`, `sbatch --export=ALL`.
+- Training recipe for 1.29M SNPs: `STAGE=0` (train on Lustre in place), TRAIN_FLAGS
+  `--bn-recalibrate 20000 --snp-sample 0.5 --chunk-rows 2048 --chunks-per-buffer 4
+  --snp-blocks 64 [--free-snp-weights L]`, `--mem=128G --time=12:00:00`; ~70-100 s an epoch
+  (~150-240 s with free weights). Statistics: `compute-input-stats --engine dietnet`.
+- Ops: AlphaGenome no longer needs the Mac awake. `sudo pmset -a disablesleep 1` was set for
+  it: **undo with `sudo pmset -a disablesleep 0`** unless it is already undone. A sleeping Mac
+  still drops SSH. Narval needs MFA: Matt runs `ssh -fN narval` in a terminal.
+
+### Earlier: toward height r ~ 0.5 (2026-11-03)
+
+**Next work is specified in `docs/specs/2026-11-03-ukbb-traits-toward-0.5.md`**
+(agreed with Matt): A1 regenie -> LDpred2-auto benchmark; per-fold precomputed
+features; A2 Diet Network on regenie GWAS features (+/- AlphaGenome); B2
+LD-aware SNP features; B3 hybrid model with free per-SNP weights under a group
+lasso; A3 (optional) SBayesRC with AlphaGenome annotations. Current results
+(height / BMI, mean r over 5 folds): Diet Network dec 0.336 / 0.221, dec_ag
+0.334 / 0.219, regenie C+T 0.351 / 0.165. Run directory on Narval:
+`$SCRATCH/dietnet_traits/exp_maf01` (MAF >= 1%). The history below records how
+we got here.
+
+**Done 2026-11-03:** A1 (LDpred2-auto: height 0.372, BMI 0.277 over 5 folds;
+details in the spec's A1 section) and the per-fold precomputed features
+(`{fold}` in a `precomputed` path; `docs/features.md`). **Next: A2**, whose
+GWAS tables should come from the plain marginal GWAS
+(`bench/fold<k>/gwas_marginal_<label>.regenie`), not regenie's LOCO one (see A1).
+
+### UK Biobank height and BMI (2026-10-28, history)
+
+Goal: predict height and BMI from autosomal genotypes with the Diet Network,
 and test whether AlphaGenome features for the auxiliary network help.
+Everything is set up in `experiments/ukbb_traits/` (README there).
 
-Decided with Matt:
-- Target: height (field 50) regressed on sex (31) and age at recruitment
-  (21022), then standardised: `dietnet adjust-phenotype --trait height
-  --covariates sex,age`. Autosomes cannot predict sex, so it is adjusted for.
-- Samples: White British, relatives removed so none span folds.
-- Train with `--task regression --engine dietnet --inputs packed`, one model
-  per GPU (docs/scaling.md); compare auxiliary features: `genotype_freq`
-  (baseline), AlphaGenome, `random`, `shuffled` AlphaGenome, and the MLP.
+Decided with Matt (2026-10-28):
+- **Genotypes: the UK Biobank array** (485,516 SNPs, GRCh38, AlphaGenome
+  already scored), not Camille's 408,940 imputed SNPs. The two are different
+  UKB applications with no id map between them: the array, grenier2's
+  `variables/` and the Pan-UKB files share ids; Camille's genotypes, her
+  phenotype tables and the lab's White British / kinship lists
+  (`shared/UKBiobank_data/useful_ID_lists/`) are application 49731.
+- **Traits: height and BMI**, each regressed on sex and age (main analysis),
+  and on sex, age and Townsend deprivation (22189) as a variant. Covariates
+  explain R^2 = 0.527 / 0.530 of height and 0.009 / 0.017 of BMI.
+- **Samples:** Pan-UKB `EUR` with every field present: 424,768. Relatedness
+  later: Pan-UKB's `related` flag (64,087 of them) is in
+  `inputs/phenotypes.tsv`, and dropping them needs only a new partition.
+- As fast as possible: dietnet engine, packed genotypes staged to node disk,
+  one model per A100, per-fold statistics in parallel, everything chained.
 
-Where the data is, on Narval, under the lab's `ctb-hussinju` project space
-(compute down until 2026-11-03 04:00, reservation POWEROUT20261027; the login
-node and storage work):
-- One file per UKBB field: `grenier2/variables/<field>.csv.gz` (columns
-  `variable_id,sample_id,instance,index,value`): 50 height, 31 sex, 21022 age.
-  No 22006/22020/22021 there.
-- Camille's tables: `cam27/UKBB/PHENOTYPES/{height,sex,bmi}.tab` (`f.eid`,
-  `f.50.0.0`; sex.tab has `f.31.0.0`, `f.22001.0.0`); White British ids:
-  `cam27/UKBB/WB/USEFUL_IDS/wb_ids.txt`.
-- Camille's earlier Diet Network height work: `cam27/DIETNET_EXP/HEIGHT/`:
-  407,686 White British x 408,940 imputed LD-pruned SNPs (`DATA/GENOTYPES/`,
-  41.7 GB .bed), raw-height labels, GIANT-GWAS SNP subsets, PRS-LASSO,
-  females-only sets. Ask her what she found.
-- The UKBB array, QC'd and REF-fixed (485,516 SNPs, GRCh38): grenier2's
-  `Matt_PHATE_project/UKB/liftover_GRCh38/GRCh38/noINDELs_fixref_vcf/`.
-- AlphaGenome scores for those array SNPs, in the user's Narval scratch:
-  `dietnet_refactor/features/alphagenome_ukbb.tsv.gz` (485,516 x 3,849
-  tracks; ids chr:pos:REF:ALT, REF = the .bim's A2).
+State on Narval (user's scratch, `dietnet_traits/`):
+- `repo/`: checkout of `feat/ukbb-traits` with its venv (the older
+  `dietnet_refactor/` checkout is left alone for its queued benchmark jobs);
+  `traits.env`: the paths and accounts.
+- `exp/inputs/`: phenotypes, keep list, classes and the four label files
+  (`prepare.sh` done).
+- `submit.sh prep` queued (subset, 4 datasets, partition, 5 stats folds,
+  merge, 5 embeddings, then the pilot: height / freq / fold 0 at batch 138 and
+  552); job ids in `exp/logs/jobs.txt`.
 
-Open decisions (ask Matt):
-1. SNP set: the 485,516 array SNPs (AlphaGenome already scored) or Camille's
-   408,940 imputed SNPs (comparable to her work; would need ~1 day of
-   AlphaGenome scoring).
-2. Relatedness: the UKBB kinship / sample-QC files were not found by name in
-   the lab space (the PI's directory is not readable); ask where they are, or
-   compute with `plink2 --king-cutoff` (a CPU job) and drop one of each pair.
-
-Then: adjust-phenotype, plink --keep (unrelated White British with height),
-create-dataset --regression-labels, partition, compute-input-stats,
-pack-genotypes, build-embedding per feature set, train (pilot fold first,
-batch 138 vs 552 with learning rates x2), dietnet check (r, R^2).
+When Narval is back:
+1. Watch the chain (`squeue -u $USER`, `exp/logs/`). Every step was timed on
+   Mila at full shape with simulated data (`dryrun/scale.sh`; table in the
+   experiment's README): datasets 30 min (53 GB), statistics 11 min to 2 h a
+   fold (124 GB), embeddings up to 45 min (117 GB), an epoch 26 s, so a model
+   is at most ~1.5 h. That run caught create-dataset's memory (32G killed it;
+   now 80G, and the pending Narval jobs were updated).
+2. Pilot: best epoch and held-out r at batch 138 vs 552
+   (`dietnet check --packages exp/runs/height/freq/<config>/packages`). Batch
+   552 is only ~8% faster an epoch, so 138 (published) is the grid's default.
+3. Grid, cut with Matt to what answers the question: `height bmi` x
+   `freq freq_ag`, folds 0-4, seed 78, b138. **Ran 2026-10-30 (job array
+   7527042, all 20 completed, 15 min-2 h each): held-out r ~ 0 everywhere**
+   (height 0.0008 / 0.0025, BMI -0.0004 / -0.0006 for freq / freq_ag);
+   training loss stays at the label variance (~0.998), so the models predict
+   the mean. Not a data problem: a marginal linear score on fold 0
+   (`linear_check.py`, training rows only) gives test r = 0.33 for height and
+   0.18 for BMI. Likely cause: the Diet Network's first-layer weights are a
+   function of each SNP's embedding, and pooled genotype frequencies (and
+   AlphaGenome effects, which carry no sign for the trait) say nothing about
+   a SNP's effect on height, so the model cannot single out causal SNPs.
+   Camille's height runs used embeddings that do: genotype frequencies per
+   trait decile (`class_genotype_freq` over decile classes, per fold, on
+   training samples) and GWAS summary statistics. Next, if Matt agrees:
+   decile classes as the baseline, then decile + AlphaGenome.
+   Run fixes along the way: `keep.txt` needs FID and IID for plink2;
+   staging uses `cp --preserve=timestamps` (cp -p fails on Narval's node disk).
+   **Resolved 2026-11-02: the cause was rare SNPs, not the features.** The
+   decile run also gave r ~ 0; lowering input dropout (0.5, 0.1, 0) let the
+   model fit its training data but validation loss swung between 2 and 330.
+   895 SNPs had no carrier among fold 0's training samples (SD at upstream's
+   1e-6 floor), so a validation carrier's standardised input was ~1e6, and
+   ~19,000 more had SD <= 0.01. With SNPs at MAF >= 1% only (`subset.sbatch`,
+   416,084 kept; run directory `exp_maf01`), height / dec / fold 0 at input
+   dropout 0.5 gives held-out r = 0.328, and 0.332 with `--bn-recalibrate
+   20000` (smoother validation): the linear score's 0.33.
+   **Grid, 2026-11-02 (array 7731383, all 20 completed; b138_d50 +
+   `--bn-recalibrate 20000`), mean held-out r over 5 folds:** height dec
+   0.336 (sd 0.004), dec_ag 0.334 (0.005); BMI dec 0.221 (0.006), dec_ag
+   0.219 (0.009). AlphaGenome adds nothing: per-fold differences have mixed
+   signs, mean -0.001 (height) and -0.003 (BMI). Height matches the naive
+   marginal score (0.33) and sits below good polygenic scores (~0.5-0.6);
+   BMI beats the naive score (0.18). **Benchmark on the same test folds**
+   (`submit.sh bench`, array 7732912; regenie GWAS on the training samples,
+   clumping, threshold chosen on validation): height r = 0.351 (sd 0.006,
+   p < 1e-6 in every fold), BMI r = 0.165 (sd 0.003, p < 1e-4). So the Diet
+   Network is slightly behind clumping/thresholding for height (-0.015) and
+   clearly ahead for BMI (+0.056). Next, if wanted: a joint linear model
+   (bigsnpr lasso, installed on Narval) toward height r ~ 0.5.
+4. Later: relatedness (partition without Pan-UKB `related`), and Camille's
+   results for comparison (her runs are in `cam27/DIETNET_EXP/HEIGHT/` and
+   `BMI/`, on her imputed SNPs).
 
 Lessons from the cluster work:
 - Mila: `ssh mila`, SLURM only, nothing on the login node; benchmark data and
   checkout in the Mila scratch `dietnet_bench/`. The locked torch (CUDA 13) has
   no V100 kernels: request A100s. Never update a checkout from inside
   concurrent jobs that share it (they collided); update it once, then submit.
-- Stage data to `$SLURM_TMPDIR` with `cp -p` (packed copies check mtimes);
+- Stage data to `$SLURM_TMPDIR` with `cp --preserve=timestamps` (packed copies check mtimes; `cp -p` fails on Narval's node disk, which refuses Lustre's permissions);
   network storage is unusable for training.
 - Narval benchmark jobs on real UKBB genotypes are queued for after the outage
   (`runs/bench_train` in the user's scratch).

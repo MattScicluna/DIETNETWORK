@@ -51,6 +51,37 @@ def test_genotype_freq_pools_upstreams_per_class_frequencies(prepared, tmp_path)
         np.testing.assert_allclose(pooled[f], weighted.sum(axis=1))
 
 
+def test_genotype_freq_by_class_from_a_table_is_upstreams_embedding(prepared, tmp_path, kgp_mini):
+    """Classes given as a table (deciles of a trait, say) rather than stored in the
+    dataset: the same values and columns as upstream's per-class embedding."""
+    h5, partition = prepared
+    by_table, meta = features.build(
+        {"blocks": [{"provider": "genotype_freq", "classes": str(kgp_mini.labels), "block": 37}]},
+        h5, partition, tmp_path / "t.npz",
+    )  # fmt: skip
+    upstream_values, upstream_meta = features.build(
+        {"blocks": [{"provider": "class_genotype_freq"}]}, h5, partition, tmp_path / "c.npz"
+    )
+
+    np.testing.assert_allclose(by_table, upstream_values, rtol=0, atol=1e-12)
+    assert meta["column_names"] == upstream_meta["column_names"]
+    assert meta["blocks"][0]["classes"]["names"] == ds.class_label_names(h5)
+
+
+def test_genotype_freq_refuses_a_class_missing_from_a_fold(prepared, tmp_path):
+    h5, partition = prepared
+    with h5py.File(h5, "r") as f:
+        samples = np.array(f["samples"]).astype(str)
+    train0 = np.asarray(np.load(partition, allow_pickle=True)["folds_indexes"][0][0])
+    classes = np.where(np.isin(np.arange(len(samples)), train0), "a", "b")
+    pd.DataFrame({"sample": samples, "class": classes}).to_csv(
+        tmp_path / "classes.tsv", sep="\t", index=False
+    )
+    spec = {"blocks": [{"provider": "genotype_freq", "classes": str(tmp_path / "classes.tsv")}]}
+    with pytest.raises(ValueError, match="class 'b' has no training samples in fold 0"):
+        features.build(spec, h5, partition, tmp_path / "e.npz")
+
+
 def table_from_ids(h5):
     """A table keyed by the chr:pos:REF:ALT ids, one effect column of +1 (ALT raises it)."""
     snps = ds.snp_table(h5)
@@ -154,6 +185,56 @@ def test_controls_transforms_and_mixing_shared_with_per_fold_blocks(tmp_path, pr
     assert saved["shape"] == list(values.shape)
 
 
+def test_standardize_keeps_large_valued_columns_from_deciding_the_components():
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((500, 6))
+    large = x * np.array([1000.0, 1, 1, 1, 1, 1])
+    block = features.Block(large, [f"t:{i}" for i in range(6)], {})
+
+    plain = features._transform(block, {"pca": 2})
+    scaled = features._transform(block, {"pca": 2, "standardize": True})
+    # Without it, the first component is the large column; with it, scale makes no difference.
+    assert abs(np.corrcoef(plain.values[:, 0], large[:, 0])[0, 1]) > 0.999
+    reference = features._pca(x, 2, standardize=True)
+    np.testing.assert_allclose(np.abs(scaled.values), np.abs(reference), atol=1e-8)
+    assert scaled.info["standardize"] is True and "standardize" not in plain.info
+
+    with pytest.raises(ValueError, match="applies to pca"):
+        features._transform(block, {"standardize": True})
+    constant = features.Block(np.ones((10, 3)), ["t:0", "t:1", "t:2"], {})
+    with pytest.raises(ValueError, match="does not vary"):
+        features._transform(constant, {"pca": 2, "standardize": True})
+
+
+def test_an_excluded_block_feeds_shuffled_but_not_the_matrix(tmp_path, prepared):
+    """The shuffled control on its own: the original is built, then left out."""
+    h5, partition = prepared
+    spec = {
+        "blocks": [
+            {"provider": "random", "columns": 4, "seed": 1, "include": False},
+            {"provider": "shuffled", "of": 0, "seed": 2},
+        ]
+    }
+    values, meta = features.build(spec, h5, partition, tmp_path / "e.npz")
+    original = np.random.default_rng(1).standard_normal((2000, 4))
+
+    assert values.shape == (2000, 4)
+    assert sorted(map(tuple, values)) == sorted(map(tuple, original))
+    assert not np.array_equal(values, original)
+    assert [b["columns"] for b in meta["blocks"]] == [None, [0, 4]]
+    assert meta["column_names"] == [f"shuffled2:random1:{i}" for i in range(4)]
+
+    (tmp_path / "spec.yaml").write_text(json.dumps(spec))  # JSON is YAML
+    report = dietnet("build-embedding", dataset=h5, partition=partition,
+                     spec=tmp_path / "spec.yaml", out=tmp_path / "cli.npz")  # fmt: skip
+    assert "random               built, not included" in report
+    assert np.array_equal(np.load(tmp_path / "cli.npz")["emb"], values)
+
+    spec["blocks"][1]["include"] = False
+    with pytest.raises(ValueError, match="nothing to write"):
+        features.build(spec, h5, partition, tmp_path / "e.npz")
+
+
 def test_all_zero_columns_are_refused(tmp_path, prepared):
     h5, partition = prepared
     _, table = table_from_ids(h5)
@@ -161,4 +242,87 @@ def test_all_zero_columns_are_refused(tmp_path, prepared):
     spec = {"blocks": [{"provider": "precomputed", "path": str(tmp_path / "t.tsv")}]}
 
     with pytest.raises(ValueError, match="all-zero"):
+        features.build(spec, h5, partition, tmp_path / "e.npz")
+
+
+def per_fold_tables(tmp_path, h5, n_folds, dropped=()):
+    """One table per fold, gwas_fold<k>.tsv, with fold-specific values."""
+    _, table = table_from_ids(h5)
+    rng = np.random.default_rng(0)
+    for f in range(n_folds):
+        t = table.assign(z=rng.standard_normal(len(table)), beta=rng.standard_normal(len(table)))
+        t.drop(columns="effect").drop(index=list(dropped)).to_csv(
+            tmp_path / f"gwas_fold{f}.tsv", sep="\t", index=False
+        )
+    return str(tmp_path / "gwas_fold{fold}.tsv")
+
+
+def test_a_per_fold_table_stacks_the_per_fold_builds(tmp_path, prepared):
+    """`{fold}` in the path: fold k's matrix is exactly what fold k's table gives alone,
+    matched and oriented as a fold-independent table is."""
+    h5, partition = prepared
+    n_folds = len(np.load(partition, allow_pickle=True)["folds_indexes"])
+    template = per_fold_tables(tmp_path, h5, n_folds, dropped=range(0, 400, 7))
+
+    block = {"provider": "precomputed", "orient": "effect", "name": "gwas"}
+    values, meta = features.build(
+        {"blocks": [{**block, "path": template}]}, h5, partition, tmp_path / "e.npz"
+    )
+
+    assert meta["fold_dependent"] and values.shape[0] == n_folds
+    assert meta["column_names"] == ["gwas:z", "gwas:beta", "gwas:missing"]
+    for f in range(n_folds):
+        path = template.replace("{fold}", str(f))
+        alone, alone_meta = features.build(
+            {"blocks": [{**block, "path": path}]}, h5, partition, tmp_path / "one.npz"
+        )
+        np.testing.assert_array_equal(values[f], alone)
+        assert meta["column_names"] == alone_meta["column_names"]
+        assert meta["blocks"][0]["folds"][f]["sha256"] == alone_meta["blocks"][0]["sha256"]
+    assert not np.array_equal(values[0], values[1])
+
+
+def test_a_missing_fold_table_is_an_error_naming_it(tmp_path, prepared):
+    h5, partition = prepared
+    n_folds = len(np.load(partition, allow_pickle=True)["folds_indexes"])
+    template = per_fold_tables(tmp_path, h5, n_folds)
+    (tmp_path / f"gwas_fold{n_folds - 1}.tsv").unlink()
+
+    spec = {"blocks": [{"provider": "precomputed", "path": template}]}
+    with pytest.raises(FileNotFoundError, match=f"gwas_fold{n_folds - 1}.tsv"):
+        features.build(spec, h5, partition, tmp_path / "e.npz")
+
+
+def test_per_fold_tables_mix_with_per_fold_and_shared_blocks(tmp_path, prepared):
+    h5, partition = prepared
+    n_folds = len(np.load(partition, allow_pickle=True)["folds_indexes"])
+    template = per_fold_tables(tmp_path, h5, n_folds)
+    blocks = [
+        {"provider": "genotype_freq"},
+        {"provider": "precomputed", "path": template, "orient": "effect", "pca": 1},
+        {"provider": "random", "columns": 2, "seed": 4},
+    ]
+
+    values, meta = features.build({"blocks": blocks}, h5, partition, tmp_path / "e.npz")
+
+    alone = [
+        features.build({"blocks": [b]}, h5, partition, tmp_path / f"{i}.npz")[0]
+        for i, b in enumerate(blocks)
+    ]
+    np.testing.assert_array_equal(values[..., :3], alone[0])
+    np.testing.assert_array_equal(values[..., 3:4], alone[1])
+    np.testing.assert_array_equal(values[..., 4:], np.broadcast_to(alone[2], values[..., 4:].shape))
+    assert [b["columns"] for b in meta["blocks"]] == [[0, 3], [3, 4], [4, 6]]
+
+
+def test_per_fold_tables_must_cover_the_same_snps(tmp_path, prepared):
+    """A fold whose table covers every SNP would get an all-zero missing column."""
+    h5, partition = prepared
+    n_folds = len(np.load(partition, allow_pickle=True)["folds_indexes"])
+    template = per_fold_tables(tmp_path, h5, n_folds)
+    t = pd.read_csv(tmp_path / "gwas_fold1.tsv", sep="\t")
+    t.iloc[10:].to_csv(tmp_path / "gwas_fold1.tsv", sep="\t", index=False)
+
+    spec = {"blocks": [{"provider": "precomputed", "path": template}]}
+    with pytest.raises(ValueError, match="same SNPs"):
         features.build(spec, h5, partition, tmp_path / "e.npz")

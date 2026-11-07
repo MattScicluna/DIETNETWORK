@@ -130,7 +130,9 @@ Per-fold SNP means and SDs (upstream `compute_input_features_statistics.py`).
 | `--dataset PATH` | *existing* dataset | required |
 | `--partition PATH` | *existing* partition | required |
 | `--out PATH` | output `.npz` | required |
-| `--ncpus INTEGER` | processes | 1 |
+| `--ncpus INTEGER` | processes (engine `upstream`) | 1 |
+| `--engine` | `upstream`: its script, which holds a fold's training genotypes in memory (int8, samples x SNPs: ~330 GB at 254k x 1.29M); `dietnet`: the same statistics from genotype counts, a block of samples at a time, in a few GB (means identical, SDs to floating-point rounding) | `upstream` |
+| `--inputs` | engine `dietnet`: where genotypes are read from, as for `train` | auto |
 
 ## `dietnet train`
 
@@ -155,6 +157,13 @@ Train each (seed, fold) with upstream `train.py`; package the results under
 | `--workers INTEGER` | loader processes for `--loader fast` | the CPUs available, less one, at most 8 |
 | `--gpus INTEGER` | above 1, train each model data-parallel over this many GPUs on one node (CPU processes where there are none): upstream's model and epoch logic, the config's `batch_size` split across them; not bit-identical to train.py, see Scaling | 1 |
 | `--engine` | `upstream`: train.py itself, unmodified (bit-identical model); `dietnet`: upstream's model and epoch logic in dietnet's own loop, packed genotypes decoded on the GPU, without train.py's per-batch bookkeeping (much faster; not bit-identical) | `upstream` on one GPU, `dietnet` for `--gpus` > 1 |
+| `--bn-recalibrate` | engine `dietnet` only: before each validation, recompute the batch-norm statistics on this many training samples without dropout. Upstream batch-normalises the fat layer right after input dropout, so the statistics learned in training misfit evaluation | 0 (off) |
+| `--snp-sample` | engine `dietnet`, Diet Network only: each training batch uses this share of the SNPs, the same for the whole batch, scaled up to keep the fat layer's expected input, in place of per-sample input dropout. The dropped SNPs are skipped, so the auxiliary network and the fat layer do that share of the work; evaluation uses every SNP. `1 - input_dropout` keeps the dropout rate | 1 (off) |
+| `--chunk-rows` | engine `dietnet` only: read training rows in contiguous chunks of this size into shuffled in-memory buffers, not batches of random rows, so the genotype file need not fit in the page cache | 0 (off) |
+| `--chunks-per-buffer` | with `--chunk-rows`: random chunks read into each buffer | 4 |
+| `--free-snp-weights` | engine `dietnet`, Diet Network only: each SNP's fat-layer weights become the auxiliary network's plus a free term, trained under a group-lasso penalty of this strength (one group per SNP, a proximal step after each update), so the model can weigh SNPs jointly, as a penalised regression does. Packages carry the free weights and `predict` applies them | 0 (off) |
+| `--free-snp-lr` | with `--free-snp-weights`: their Adam learning rate | the config's `lr_main` |
+| `--snp-blocks` | with `--chunk-rows` and `--snp-sample`: cut the SNPs into this many contiguous blocks and keep a `--snp-sample` share of the blocks per buffer, not random SNPs per batch | 0 (off) |
 
 ## `dietnet match`
 

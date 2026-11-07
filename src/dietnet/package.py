@@ -32,9 +32,11 @@ import torch
 import torch.nn as nn
 import yaml
 
-from dietnet import __version__, dataset, upstream
+from dietnet import __version__, dataset, hybrid, upstream
 
-FORMAT_VERSION = 2
+# 3: a Diet Network may carry free per-SNP weights (dietnet.hybrid; metadata key
+# "free_snp_weights"). Packages of format 2 load as before.
+FORMAT_VERSION = 3
 
 
 def _write_header(train_dataset, out: Path) -> None:
@@ -171,6 +173,8 @@ class Package:
             handler = m.model_handlers.DietNetworkHandler(
                 task, 0, str(self.path / "embedding.npz"), device, header, self.config, None
             )
+            if hybrid.PARAMETER in self.metadata:  # its weights then load strictly too
+                hybrid.attach(handler.model)
         checkpoint = torch.load(self.path / "model.pt", map_location=device, weights_only=False)
         handler.model.load_state_dict(checkpoint["model_state_dict"], strict=True)
         handler.model.to(device)

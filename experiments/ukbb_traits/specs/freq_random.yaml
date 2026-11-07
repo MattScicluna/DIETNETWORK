@@ -1,0 +1,5 @@
+# Control for freq_ag: as many columns, no information.
+blocks:
+  - provider: genotype_freq
+  - provider: random
+    columns: 64
