@@ -168,8 +168,7 @@ HapMap3 SNPs (~1.1M, about 2 days of API). Decide after A1/B3.
 ## Operational notes (all learned the hard way)
 
 - Narval needs MFA: if `ssh -o BatchMode=yes narval` asks for it, Matt runs
-  `ssh -fN narval` and approves; the control socket is
-  `~/.ssh/control-narval.computecanada.ca-22-sciclun4`.
+  `ssh -fN narval` and approves; the control socket is under `~/.ssh/`.
 - Nothing heavy on the login node, including `dietnet check` (it loads torch):
   summaries go through `sbatch --wait` CPU jobs.
 - GitHub over port 22 is flaky from Matt's network; push with

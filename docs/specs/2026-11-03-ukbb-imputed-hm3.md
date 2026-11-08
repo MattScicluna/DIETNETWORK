@@ -14,25 +14,21 @@ and gives the Diet Network the same inputs a strong PRS uses.
 
 ## What exists on Narval (surveyed 2026-11-03, read-only)
 
-- **No UK Biobank WGS or exome genotypes** anywhere the lab can read (all four
-  `*-hussinju` projects, `shared/UKBiobank_data` in full). Dube's project
-  (group `ctb-dubemar1`, holds the raw 20168 bgen) is not readable by us.
+- **No UK Biobank WGS or exome genotypes** anywhere the lab can read (all of the
+  lab's project folders, in full). The project that holds the raw genotype files is not
+  readable by us.
 - **UKB v3 imputed (HRC + UK10K), application 20168 (ours: same IDs as the array),
-  already hard-called and lifted to GRCh38** by grenier2:
-  `ctb-hussinju/shared/UKBiobank_data/20168_project_Dube/genotypes_imputation/
-  plink_format_INFO0.8_GP0.9/liftover_GRCh38/per_chr_clean_version/
-  ukb_v3.woWithrawalSamples.liftOverCommon.GRCh38.chr{1..22}.{bed,bim,fam}`
-  (811 GB; 41.3M variants incl. rare; 486,748 samples; calls at GP >= 0.9, MaCH
+  already hard-called and lifted to GRCh38** by a labmate, as per-chromosome PLINK files in
+  the lab's shared UK Biobank folder (811 GB; 41.3M variants incl. rare; 486,748 samples; calls at GP >= 0.9, MaCH
   R^2 >= 0.8; ids `chr:pos38:ref:alt`). **424,142 of our 424,768 cohort samples are
   in it** (626 are not, presumably later withdrawals).
-- UKB `mfi` INFO files (`shared/UKBiobank_data/Imputation_INFO_scores/`).
-- GATK bundle HapMap 3.3 sites, GRCh38
-  (`def-hussinju/shared/References/GRCh38/Resource-bundle_GATK/hapmap_3.3.hg38.vcf.gz`):
+- UKB `mfi` INFO files, in the same shared folder.
+- GATK bundle HapMap 3.3 sites, GRCh38 (`hapmap_3.3.hg38.vcf.gz`, in the lab's shared
+  references):
   3.6M polymorphic SNPs over all HapMap populations, with rsids. Not the curated EUR
   HapMap3 set; useful to map rsids to GRCh38.
-- **GIANT 2014 height GWAS (Wood et al., 253k Europeans, no UK Biobank)**:
-  `ctb-hussinju/cam27/DIETNET_EXP/HEIGHT/DATA/GENOTYPES_2014GIANTGWAS_SNPS/`
-  (2.55M HapMap2 SNPs by rsid; 2.54M of them map through the HapMap VCF).
+- **GIANT 2014 height GWAS (Wood et al., 253k Europeans, no UK Biobank)**, in a labmate's
+  project folder (2.55M HapMap2 SNPs by rsid; 2.54M of them map through the HapMap VCF).
 - Application 49731 data (Camille's) and a TOPMed-imputed 19,552-sample DietNet
   subset: wrong application / too few samples for us.
 
@@ -306,6 +302,6 @@ sets the prior variance) would mean AlphaGenome setting each SNP's penalty inste
 
 ## Not doing
 
-- WGS: not available to us. If Dube's project holds the 500k WGS, that is a data
+- WGS: not available to us. If another project holds the 500k WGS, that is a data
   request to make outside this work.
 - Rare variants (MAF < 1%): they broke the Diet Network's standardisation before.

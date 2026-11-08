@@ -8,4 +8,4 @@ PLINK, allele-aware matching of new cohorts, portable model packages, ensembles,
 biobank-scale inference and a command line around all of it.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

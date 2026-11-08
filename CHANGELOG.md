@@ -7,6 +7,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-08
+
+Height and BMI from 1.29M imputed SNPs in 424,142 UK Biobank participants: regression
+tasks, a training engine for biobank scale, and a penalized Diet Network that beats two
+polygenic scores (`docs/reports/2026-11-uk-biobank-height-bmi.md`).
+
 ### Added
 
 - Quantitative traits (height first):

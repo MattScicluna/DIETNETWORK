@@ -34,8 +34,8 @@ Report r and R^2, not test loss.** Nothing is running on Narval.
   but it is not merged or released (PyPI is at 0.3.0). Waiting on Matt: merge PR #19 and
   release, and confirm that AlphaGenome's terms allow training on its outputs (its README says
   they "should not be used for the training of other machine learning models"; never
-  recorded as cleared). Also flagged: this spec names internal Narval group folders and the
-  older spec Matt's Narval user name, on a public branch.
+  recorded as cleared). Internal Narval user, group and folder names were removed from the
+  docs on 2026-11-08, but remain in this branch's earlier commits.
 - **Ideas not yet tried:** AlphaGenome setting each SNP's penalty (lambda_j from the
   annotation) instead of the prior weights, as SBayesRC uses annotations; a penalized control
   with a shuffled AlphaGenome embedding; regressing per-fold GWAS signal on the AlphaGenome
@@ -89,7 +89,7 @@ Everything is set up in `experiments/ukbb_traits/` (README there).
 Decided with Matt (2026-10-28):
 - **Genotypes: the UK Biobank array** (485,516 SNPs, GRCh38, AlphaGenome
   already scored), not Camille's 408,940 imputed SNPs. The two are different
-  UKB applications with no id map between them: the array, grenier2's
+  UKB applications with no id map between them: the array, the lab's
   `variables/` and the Pan-UKB files share ids; Camille's genotypes, her
   phenotype tables and the lab's White British / kinship lists
   (`shared/UKBiobank_data/useful_ID_lists/`) are application 49731.
@@ -162,8 +162,8 @@ When Narval is back:
    clearly ahead for BMI (+0.056). Next, if wanted: a joint linear model
    (bigsnpr lasso, installed on Narval) toward height r ~ 0.5.
 4. Later: relatedness (partition without Pan-UKB `related`), and Camille's
-   results for comparison (her runs are in `cam27/DIETNET_EXP/HEIGHT/` and
-   `BMI/`, on her imputed SNPs).
+   results for comparison (her runs are in her project folder, on
+   her imputed SNPs).
 
 Lessons from the cluster work:
 - Mila: `ssh mila`, SLURM only, nothing on the login node; benchmark data and
