@@ -93,5 +93,7 @@ nav:
   - Scaling: scaling.md
   - Command line: cli.md
   - Python API: api.md
+  - Reports:
+      - UK Biobank height and BMI (2026-11): reports/2026-11-uk-biobank-height-bmi.md
   - Development:
       - Refactor plan: refactor-plan.md

@@ -245,16 +245,53 @@ page cache from the map, so it does not measure what `predict` needs.
 
 **AlphaGenome for the 1,155,048 new SNPs: scored 2026-11-06.** 3,853 columns, as the array
 table. On Narval: `exp_hm3/alphagenome/alphagenome_hm3.tsv.gz` (20 GB; SHA-256 checked against
-the Mac). Not yet merged with the array table. Backup on the Mac,
+the Mac), and `alphagenome_merged.tsv.gz`: the array table at the cohort's positions plus the
+new SNPs (1,290,276 rows; the embeddings cover all 1,290,149 cohort SNPs). Backup on the Mac,
 `~/dietnet_alphagenome/ukbb_hm3/`: the table, its parts and the array table
 (`alphagenome_ukbb_array.tsv.gz`). `dec_ag` mixes in UKB-derived `dec` features, so it stays
 on Narval. `run_scoring.sh`'s watchdog kills an attempt that writes no part for 15 min,
 which includes the final combine (~1.5 h): stop the script once all parts exist, or raise
 `STALL`, or it retries forever.
 
-**Next, agreed with Matt: AlphaGenome as a prior.** Plain `dec_ag` paired by fold against
-`dec`, and `penDN-dec_ag` at lambda 0.3 against `penDN-dec`, 5 folds, both traits, evaluated
-as above.
+### AlphaGenome as a prior (2026-11-06 to 11-08): a null result
+
+Two embeddings, both with the `dec` recipe and evaluated as above:
+
+- `dec_ag`: `dec` plus 64 PCs of the AlphaGenome tracks, centred only, as `specs/dec_ag.yaml`.
+- `ag200`: AlphaGenome alone, tracks standardized then 200 PCs (`specs/ag200.yaml`, 94.9% of
+  the variance). Spectrum (`imputed/pca_spectrum.py`, `exp_hm3/alphagenome/spectrum.json`):
+  95% takes 98 PCs centred only and 204 standardized; 64 PCs reach 92.5% and 86.8%. Centred
+  only, the variance is DNase 37.9%, ChIP-TF 29.9%, ATAC 11.4%, ChIP-histone 10.5%, CAGE 9.7%,
+  RNA-seq 0.65%.
+
+Test r and R^2 per fold 0-4, rescaled on validation (`rescale/<label>_<spec>_<config>.json`;
+predictions within 5.7e-7 of training):
+
+| | r | R^2 | mean r / R^2 |
+|---|---|---|---|
+| Height, `penDN-dec_ag` | 0.5397 0.5425 0.5380 0.5368 0.5384 | 0.2912 0.2943 0.2894 0.2881 0.2898 | 0.539 / 0.291 |
+| Height, `dec_ag` | 0.3933 0.3981 0.3895 0.3963 0.3914 | 0.1546 0.1585 0.1516 0.1570 0.1531 | 0.394 / 0.155 |
+| Height, `penDN-ag200` | 0.5143 0.5027 0.5137 0.5161 0.5183 | 0.2644 0.2527 0.2639 0.2664 0.2687 | 0.513 / 0.263 |
+| BMI, `penDN-dec_ag` | 0.3184 0.3172 0.3170 0.3109 0.3181 | 0.1014 0.1006 0.1005 0.0966 0.1011 | 0.316 / 0.100 |
+| BMI, `dec_ag` | 0.2489 0.2657 0.2647 0.2529 0.2521 | 0.0619 0.0706 0.0700 0.0638 0.0635 | 0.257 / 0.066 |
+| BMI, `penDN-ag200` | 0.2522 0.2568 0.2457 0.2470 0.2486 | 0.0636 0.0659 0.0603 0.0610 0.0618 | 0.250 / 0.063 |
+
+Plain `ag200` (raw, `dietnet check`, not rescaled): height r 0.0422 0.0467 0.0402 0.0452
+0.0515 (mean 0.045, R^2 0.002), BMI r 0.0066 0.0102 0.0122 0.0070 0.0096 (0.009, R^2 0.000).
+
+`penDN-dec_ag` minus `penDN-dec`, R^2 by fold: height -0.004 +0.001 -0.001 +0.001 -0.002, BMI
+-0.001 -0.001 -0.003 +0.003 -0.002. Lambda grid for `ag200` on fold 0 (raw r / R^2): 0.1 height
+0.490 / 0.231, BMI 0.225 / 0.049; 0.3 0.514 / 0.250, 0.252 / 0.060; 1 0.320 / 0.097, 0.115 /
+0.013; 3 0.149 / 0.022, 0.053 / 0.003. Best epochs at lambda 0.1: 9 (height), 6 (BMI); at 0.3,
+`penDN-ag200` BMI stopped early (18-26) against 64-111 for `penDN-dec`.
+
+Reading: AlphaGenome adds nothing next to `dec`, predicts almost nothing alone, and in the
+penalized model the free weights carry nearly all of `penDN-ag200`'s accuracy; lambda 0.3 is
+best and larger lambda, which pulls toward the AlphaGenome prior, collapses fast. Likely
+reason (untested): the auxiliary network predicts each SNP's weights, so features must give
+an effect's sign and size; `dec` measures them, AlphaGenome predicts molecular effects that
+bear on how likely a SNP is to matter but not on direction. SBayesRC-style use (annotation
+sets the prior variance) would mean AlphaGenome setting each SNP's penalty instead.
 
 ### C. Diet Network on HapMap3+ (GPU, after B and Matt's go)
 

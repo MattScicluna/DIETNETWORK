@@ -59,8 +59,28 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `benchmarks/`: training time by genotype store, and training throughput by
   loader, workers, missing-value fill and batch size, on real or simulated
   genotypes at any shape.
+- Training at 1.3M SNPs with `--engine dietnet`: `--chunk-rows`,
+  `--chunks-per-buffer` and `--snp-blocks` read training rows in contiguous chunks,
+  `--snp-sample` trains each batch on a share of the SNPs, and `--bn-recalibrate`
+  recomputes the batch-norm statistics on a training subset before each validation.
+- `dietnet train --free-snp-weights LAMBDA` (and `--free-snp-lr`): a penalized Diet
+  Network. Each SNP's first-layer weights become the auxiliary network's output plus a
+  free term, trained under a group-lasso penalty that shrinks it toward that output.
+  Packages carry the free weights (package format 3), and older packages still load.
+- `build-embedding`: `standardize: true` scales a block's columns to unit variance
+  before `pca`, so that large-valued columns do not decide the components. A
+  `precomputed` path with `{fold}` reads one table per fold.
+- `experiments/ukbb_traits/`: the cohort on imputed HapMap3+ SNPs, LDpred2-auto and
+  lassosum2 baselines, `benchmark/rescale_eval.py` (Diet Network packages evaluated as
+  the polygenic scores are, rescaled on validation), and the AlphaGenome runs
+  (`imputed/merge_alphagenome.sbatch`, `imputed/submit_dec_ag.sh`,
+  `imputed/pca_spectrum.py`). Results are in `docs/reports/2026-11-uk-biobank-height-bmi.md`.
 
 ### Fixed
+
+- `dietnet predict` on a cohort larger than the machine's memory: the genotypes were
+  memory-mapped copy-on-write, a private writable mapping that the kernel refuses when
+  it exceeds RAM ("Cannot allocate memory"). The map is now read-only.
 
 - `dietnet alphagenome` combines its parts one at a time instead of reading
   them all into memory and copying them three times. For a biobank array

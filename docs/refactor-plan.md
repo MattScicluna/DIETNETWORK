@@ -16,67 +16,44 @@ Living document: each pull request that moves the plan updates it.
 | 7. Quantitative traits | ✅ `adjust-phenotype`, `genotype_freq` features, r/R²/RMSE in `check` (PR #17); UKB height & BMI runs set up (`experiments/ukbb_traits/`) |
 | MLP baseline (published split) | ✅ 0.9117 vs Diet Network 0.9282 retrained (−1.65 points paired, 1 of 15 higher) |
 
-### Resume here (2026-11-06): penalized Diet Network on HM3+
+### Resume here (2026-11-08): UK Biobank experiments done; sharing next
 
-**Read `docs/specs/2026-11-03-ukbb-imputed-hm3.md` ("Results on HM3+"): every number,
-per fold, is there, with where it came from. Report r and R^2, not test loss.** State:
+**The findings, for a collaborator, are in `docs/reports/2026-11-uk-biobank-height-bmi.md`;
+every number per fold, with its source on Narval, is in
+`docs/specs/2026-11-03-ukbb-imputed-hm3.md` ("Results on HM3+" and "AlphaGenome as a prior").
+Report r and R^2, not test loss.** Nothing is running on Narval.
 
+- **Result:** the penalized Diet Network (`penDN-dec`: `dec` features, `--free-snp-weights
+  0.3`) beats both polygenic scores on all 5 folds. Rescaled R^2: height 0.292 (lassosum2
+  0.267), BMI 0.101 (LDpred2-auto 0.095).
+- **AlphaGenome is a null result** in every form tried: next to `dec` (64 PCs, plain and
+  penalized) it changes nothing; alone (200 standardized PCs) it predicts almost nothing
+  plainly (height r 0.045) and stays below `dec` in the penalized model at every lambda.
+- **Next (Matt, 2026-11-08):** share the code on the public repo with a collaborator, with the
+  report. The branch `feat/ukbb-traits` (draft PR #19 into `master`) is public and CI passes,
+  but it is not merged or released (PyPI is at 0.3.0). Waiting on Matt: merge PR #19 and
+  release, and confirm that AlphaGenome's terms allow training on its outputs (its README says
+  they "should not be used for the training of other machine learning models"; never
+  recorded as cleared). Also flagged: this spec names internal Narval group folders and the
+  older spec Matt's Narval user name, on a public branch.
+- **Ideas not yet tried:** AlphaGenome setting each SNP's penalty (lambda_j from the
+  annotation) instead of the prior weights, as SBayesRC uses annotations; a penalized control
+  with a shuffled AlphaGenome embedding; regressing per-fold GWAS signal on the AlphaGenome
+  PCs, to test directly whether they predict it; relatives removed; genetic PCs as covariates;
+  stronger baselines (PRS-CS, SBayesRC, snpnet).
 - Data: `$SCRATCH/dietnet_traits/exp_hm3` on Narval, 424,142 samples x 1,290,149 imputed
   HapMap3+ SNPs, same 5 folds as `exp_maf01` (partition rebuilt by sample id).
-- **Prior-informed penalized Diet Network (`penDN-dec`; "hybrid" until 11-06; in code
-  `--free-snp-weights`), lambda 0.3, beats every GWAS PRS on 5 folds, on every fold.** Mean
-  r / R^2, all rescaled on validation: height 0.540 / 0.292 (lassosum2 0.517 / 0.267), BMI
-  0.318 / 0.101 (LDpred2-auto 0.308 / 0.095). Plain `dec` 0.394 / 0.155 and 0.260 / 0.068.
-- Lambda on fold 0, height r: 0.03 0.442, 0.1 0.490, 0.3 0.543, 1 0.445, 3 0.411, 6 0.398;
-  the same peak for BMI. The optimum lies between 0.1 and 1.
-- Evaluate packages with `dietnet predict --scores` and `benchmark/rescale_eval.py`
-  (`benchmark/rescale.sbatch`, GPU), which also checks predictions against training.
-  `dietnet check` gives raw R^2, without the rescaling the PRS baselines get.
-- AlphaGenome scored for the 1,155,048 new SNPs; on Narval
-  `exp_hm3/alphagenome/alphagenome_hm3.tsv.gz`, and merged with the array table at the cohort's
-  positions as `alphagenome_merged.tsv.gz` (1,290,276 rows). Backup on the Mac,
-  `~/dietnet_alphagenome/ukbb_hm3/`.
-- **Running on Narval (submitted 2026-11-06, needs no laptop): AlphaGenome as a prior.** Each
-  job starts only if the one before succeeded (`afterok`), so one failed task halts the rest:
-  embeddings 8666992 (`dec_ag@height`, `dec_ag@bmi`) -> plain `dec_ag` 8666993 and `penDN-dec_ag`
-  at lambda 0.3 8666994 (5 folds, both traits, the `dec` recipe) -> scoring 8674872
-  (`benchmark/rescale.sbatch`; rebuilds the 547 GB matched cohort, ~3 h). Run dirs
-  `runs/<label>/dec_ag/b138_d50_bn_chunk{,_fw0.3}`.
-- **Also running, Matt's priority: AlphaGenome alone (`ag200`, no decile features), a purely
-  functional prior: tracks standardized, then 200 PCs, 94.9% of the variance.** Without
-  standardizing, 95% takes 98 PCs, 64 PCs reach 92.5%, and RNA-seq is 0.65% of the variance
-  (`exp_hm3/alphagenome/spectrum.json`, `.npz` has the eigenvectors). Embedding 8688652 ->
-  `penDN-ag200` at lambda 0.3 8688653 -> plain `ag200` 8688655 (control); scoring `penDN-ag200`
-  8711569. Plain `ag200` has no scoring job yet. **Raw results (5 folds, lambda 0.3), r / R^2:
-  `penDN-ag200` height 0.513 / 0.251, BMI 0.250 / 0.060; `penDN-dec_ag` 0.539 / 0.285 and 0.316 /
-  0.100, the same as `penDN-dec` (0.540 / 0.287, 0.318 / 0.101). So AlphaGenome adds nothing
-  next to `dec`, and alone it falls short of `dec`; BMI's best epochs came early (18-26).**
-  Lambda 0.3 was tuned with `dec`, so `ag200` gets its own grid on fold 0: 0.1 8711570, 1 8711571,
-  3 8711572 (both traits; score with `dietnet check`). Not yet run: a penalized control with a
-  shuffled `ag200` embedding, the test of whether AlphaGenome carries any signal.
-- **The matched cohort is kept** (`rescale/matched/`, 547 GB; `rescale.sbatch` no longer deletes
-  it, commit 48d019d): reuse it for every scoring job on this cohort, and remove it by hand when
-  the experiments are done. Job 8711534 hard-links it there before 8674872, submitted with the
-  old script, deletes `rescale/work`. `dec_ag` has
-  64 unstandardized PCs, so it differs from `ag200` in more than the decile features. The earlier
-  64-PC `ag` chain was cancelled before training; `embeddings/ag.npz` remains, unused. So far
-  (raw R^2, 5 folds) plain `dec_ag` adds nothing to `dec`: height 0.155 vs 0.155, BMI 0.066 vs
-  0.067. Parked, to return to with Matt: regress per-fold GWAS signal on the PCs to test directly
-  whether the annotations predict it.
-- **On return:** Matt runs `ssh -fN narval`. Check `sacct -X -j
-  8674872,8688655,8711534,8711569,8711570,8711571,8711572`.
-  Results: `exp_hm3/rescale/<label>_dec_ag_b138_d50_bn_chunk{,_fw0.3}.json` (per-fold r, R^2 and
-  the match with training; the job fails if predictions differ by more than 1e-3). Report
-  `dec_ag` against `dec` and `penDN-dec_ag` against `penDN-dec`, paired by fold, and against the
-  PRS, in r and R^2, using the `dec` numbers in the spec. Also report AlphaGenome's coverage,
-  in `embeddings/dec_ag@height.npz.json` (100% on the array SNPs; the merged table has 127 more
-  rows than cohort SNPs, probably other alleles at kept positions, which matching should drop).
-  Then add the results to the spec.
-- If a step failed, read `exp_hm3/logs/traits_{embedding,train,rescale}.<job>*.out`. Embeddings
-  were given 480G (array peak ~100 GB at 416k SNPs). `imputed/submit_dec_ag.sh` resubmits the
-  whole chain, including the merge; it needs `EXP_DIR` and `traits.env`. Queue scoring from
-  `exp_hm3` with `BENCH=<repo>/experiments/ukbb_traits/benchmark`, `RUNS="dec_ag/...
-  dec_ag/..._fw0.3"`, `DIETNET_VENV` from `traits.env`, `sbatch --export=ALL`.
+- Evaluate packages with `benchmark/rescale.sbatch` (`dietnet predict --scores` then
+  `benchmark/rescale_eval.py`, GPU), which also checks predictions against training. Submit
+  from `exp_hm3` with `BENCH=<repo>/experiments/ukbb_traits/benchmark`, `RUNS="<spec>/<config>
+  ..."`, `traits.env` sourced and `sbatch --export=ALL`. It reuses the matched cohort in
+  `rescale/matched/` (547 GB, ~3 h to rebuild): **delete it by hand when done with this cohort.**
+  `dietnet check` gives raw R^2, without the calibration the PRS baselines get.
+- AlphaGenome tables: `exp_hm3/alphagenome/` (`alphagenome_hm3.tsv.gz`, the new SNPs;
+  `alphagenome_merged.tsv.gz`, with the array SNPs at the cohort's positions; `spectrum.json`
+  and `.npz`, the eigenvalues and eigenvectors). Backup on the Mac,
+  `~/dietnet_alphagenome/ukbb_hm3/`. Embeddings: `dec_ag@<label>`, `ag200`, and an unused 64-PC
+  `ag`. `imputed/submit_dec_ag.sh` reruns the merge and `dec_ag` chain.
 - Training recipe for 1.29M SNPs: `STAGE=0` (train on Lustre in place), TRAIN_FLAGS
   `--bn-recalibrate 20000 --snp-sample 0.5 --chunk-rows 2048 --chunks-per-buffer 4
   --snp-blocks 64 [--free-snp-weights L]`, `--mem=128G --time=12:00:00`; ~70-100 s an epoch
