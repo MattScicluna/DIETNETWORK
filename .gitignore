@@ -27,6 +27,7 @@ Models_1KGP_24populations/
 !.claude/settings.json
 !.claude/hooks/
 .coverage
+.coverage.*
 coverage.xml
 coverage.lcov
 # Written by the CI install step
