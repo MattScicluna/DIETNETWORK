@@ -123,8 +123,7 @@ Applied to a block after its provider:
 - `pca: k` keeps the first k principal components over SNPs, per fold for a
   per-fold block.
 - `standardize: true`, with `pca`, scales each column to unit variance before the
-  components, so that large-valued columns do not decide them. On the AlphaGenome table,
-  RNA-seq is 0.65% of the variance without it.
+  components, so that large-valued columns do not decide them.
 
 Upstream's per-column L2 normalisation undoes any per-column scaling of the columns it
 receives, so these are the transforms that matter: centring, and controlling how many
@@ -200,5 +199,4 @@ against the MLP baseline (`dietnet train --model mlp`).
 
 !!! note
     The AlphaGenome step is tested against a stand-in for the API and against
-    the real client's types, but has not yet been run against the API itself
-    (see the [plan](refactor-plan.md)).
+    the real client's types.

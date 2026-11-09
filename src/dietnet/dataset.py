@@ -22,7 +22,7 @@ cohort by position and allele needs) and provenance attributes.
 
 The layout is contiguous and uncompressed on purpose: chunked or compressed
 layouts make the random minibatch reads training does 100-300x slower
-(docs/refactor-plan.md, section 2).
+(`benchmarks/bench_genotype_io.py`).
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
-# AlphaGenome variant effects alone: 200 components of the standardized tracks. Without
-# standardizing, RNA-seq is 0.65% of the variance; 200 components reach ~95% of it (HM3+).
+# AlphaGenome variant effects alone: 200 components of the standardized tracks, so that
+# large-valued assays do not decide the components.
 blocks:
   - provider: precomputed
     path: alphagenome.tsv.gz

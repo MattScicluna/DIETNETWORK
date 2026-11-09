@@ -201,5 +201,5 @@ uv sync --frozen --extra dev && uv run pre-commit install
 uv run pytest                                   # see tests/README.md for the parity tests
 ```
 
-See `CLAUDE.md` for conventions and `docs/refactor-plan.md` for the plan. The
+See `CLAUDE.md` for conventions. The
 documentation site is built from `docs/`: `uv sync --frozen --extra docs && uv run mkdocs serve`.

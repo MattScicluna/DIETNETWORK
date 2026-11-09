@@ -14,8 +14,7 @@ repository, and cohort data and everything derived from it stay on the cluster.
   Pan-UKB's `related` samples (64,087) are still in; dropping them later needs
   only a new partition, not new datasets.
 - **Label sets:** the trait regressed on covariates and standardised
-  (`dietnet adjust-phenotype`). Covariates explain R² = 0.527 of height and
-  0.009 of BMI with sex and age; 0.530 and 0.017 with Townsend as well.
+  (`dietnet adjust-phenotype`).
 
   | name | trait | covariates |
   |---|---|---|

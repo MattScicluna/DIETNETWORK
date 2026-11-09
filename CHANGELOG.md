@@ -9,9 +9,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [0.4.0] - 2026-11-08
 
-Height and BMI from 1.29M imputed SNPs in 424,142 UK Biobank participants: regression
-tasks, a training engine for biobank scale, and a penalized Diet Network that beats two
-polygenic scores (`docs/reports/2026-11-uk-biobank-height-bmi.md`).
+Quantitative traits at biobank scale: regression tasks, a training engine for millions of
+SNPs, and a penalized Diet Network with free per-SNP weights.
 
 ### Added
 
@@ -80,7 +79,7 @@ polygenic scores (`docs/reports/2026-11-uk-biobank-height-bmi.md`).
   lassosum2 baselines, `benchmark/rescale_eval.py` (Diet Network packages evaluated as
   the polygenic scores are, rescaled on validation), and the AlphaGenome runs
   (`imputed/merge_alphagenome.sbatch`, `imputed/submit_dec_ag.sh`,
-  `imputed/pca_spectrum.py`). Results are in `docs/reports/2026-11-uk-biobank-height-bmi.md`.
+  `imputed/pca_spectrum.py`).
 
 ### Fixed
 

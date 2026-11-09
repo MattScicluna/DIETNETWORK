@@ -19,7 +19,7 @@ Measured on UK Biobank (486,748 samples) on Narval:
 !!! note
     That fileset holds only 5,810 of the published models' SNPs, so the run
     measures scale, not accuracy. Real predictions from the published models
-    need genotypes at the published SNPs (see the [plan](refactor-plan.md)).
+    need genotypes at the published SNPs.
 
 ## Rules for cluster work
 
@@ -73,8 +73,7 @@ sbatch --account=ACCOUNT benchmarks/slurm/bench_io.sbatch
 
 `WORKDIR` defaults to the node-local `$SLURM_TMPDIR`; point it at scratch to
 time the shared filesystem. It needs about 2.2× the int8 matrix (samples × SNPs
-bytes) in memory. The outcome, contiguous HDF5, and the numbers are in the
-[plan](refactor-plan.md#on-disk-intermediate-benchmark).
+bytes) in memory. The outcome is contiguous HDF5.
 
 ## Training on a biobank
 

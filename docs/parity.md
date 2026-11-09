@@ -3,8 +3,8 @@
 `dietnet` exists to run the published Diet Network, so its definition of
 correct is *the same result as upstream*. Where this package does something
 upstream's scripts also do, a test runs both and compares. A change that moves
-a parity result is a bug, or a decision recorded in the
-[plan](refactor-plan.md); it is never a tolerance to loosen.
+a parity result is a bug, or a deliberate change recorded in the changelog; it is
+never a tolerance to loosen.
 
 ## Upstream's code, unmodified
 

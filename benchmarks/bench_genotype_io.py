@@ -1,6 +1,6 @@
 """How fast can each on-disk format hand the trainer its genotype matrix?
 
-Settles a design question in docs/refactor-plan.md: which intermediate the
+Settles a design question: which intermediate the
 pipeline should build once from PLINK and read in every later step. Candidates:
 
 * ``bed-pyplink``: today's path below 2 GB -- pyplink, one marker at a time,

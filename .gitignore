@@ -32,6 +32,9 @@ coverage.lcov
 # Written by the CI install step
 requirements-ci.txt
 
+# Analysis notes, plans and reports: kept locally, never committed
+notes/
+
 # The documentation site (uv run mkdocs build)
 site/
 .cache/
