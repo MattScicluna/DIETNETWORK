@@ -95,7 +95,8 @@ def test_the_other_allele_is_unknown_when_a1_is_neither_ref_nor_alt(tmp_path):
     """``a2`` is REF when A1 is ALT, ALT when A1 is REF, and unknown otherwise."""
     names = ["chr1:100:G:A_A", "chr1:200:G:A_G", "chr1:300:G:A_T"]
     table = ds.snp_table(write_names(tmp_path / "d.h5", names))
-    assert list(table["a2"][:2]) == ["G", "A"] and table["a2"][2] is None
+    # Missing as None or NaN, depending on the pandas version.
+    assert list(table["a2"][:2]) == ["G", "A"] and pd.isna(table["a2"][2])
 
 
 # --- plink ---------------------------------------------------------------------
