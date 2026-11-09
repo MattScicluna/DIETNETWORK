@@ -1,0 +1,11 @@
+# Control for freq_ag: AlphaGenome's values, on the wrong SNPs.
+blocks:
+  - provider: genotype_freq
+  - provider: precomputed
+    path: alphagenome.tsv.gz
+    name: alphagenome
+    orient: effect
+    pca: 64
+    include: false
+  - provider: shuffled
+    of: 1

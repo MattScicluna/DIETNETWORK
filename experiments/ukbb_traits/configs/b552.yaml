@@ -1,0 +1,14 @@
+# b138.yaml with four times the batch and the learning rates scaled by sqrt(4),
+# which kept accuracy on 1KGP (docs/scaling.md); fewer, larger steps run faster.
+batch_size: 552
+epochs: 200
+input_dropout: 0.995
+dropout_main: 0.1
+lr_aux: 0.0012
+lr_main: 0.0006
+learning_rate_annealing: 0.99
+nb_hidden_u_aux: [100, 100]
+nb_hidden_u_main: [100]
+patience: 20
+seed: 78  # overridden per --seeds
+uniform_init_limit: 0.02

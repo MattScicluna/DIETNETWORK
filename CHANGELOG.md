@@ -7,6 +7,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-08
+
+Quantitative traits at biobank scale: regression tasks, a training engine for millions of
+SNPs, and a penalized Diet Network with free per-SNP weights.
+
 ### Added
 
 - Quantitative traits (height first):
@@ -19,6 +24,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     of samples at a time, so it scales to a biobank.
   - `dietnet check` reports Pearson r, R² and RMSE for regression packages and
     numeric predictions.
+  - `experiments/ukbb_traits/`: height and BMI on the UK Biobank array, as a
+    chain of SLURM jobs (labels, datasets, partition, per-fold statistics in
+    parallel, feature specs, pilot, grid), with a dry run on fake data.
+- `build-embedding`: a block with `include: false` is built for a later
+  `shuffled` block and left out of the matrix, so a shuffled control can
+  stand without its original.
 
 - `dietnet train --inputs auto|ram|memmap`: where training reads genotypes.
   Upstream's train.py copies the whole matrix into RAM first (~83 GB for a
@@ -53,8 +64,28 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `benchmarks/`: training time by genotype store, and training throughput by
   loader, workers, missing-value fill and batch size, on real or simulated
   genotypes at any shape.
+- Training at 1.3M SNPs with `--engine dietnet`: `--chunk-rows`,
+  `--chunks-per-buffer` and `--snp-blocks` read training rows in contiguous chunks,
+  `--snp-sample` trains each batch on a share of the SNPs, and `--bn-recalibrate`
+  recomputes the batch-norm statistics on a training subset before each validation.
+- `dietnet train --free-snp-weights LAMBDA` (and `--free-snp-lr`): a penalized Diet
+  Network. Each SNP's first-layer weights become the auxiliary network's output plus a
+  free term, trained under a group-lasso penalty that shrinks it toward that output.
+  Packages carry the free weights (package format 3), and older packages still load.
+- `build-embedding`: `standardize: true` scales a block's columns to unit variance
+  before `pca`, so that large-valued columns do not decide the components. A
+  `precomputed` path with `{fold}` reads one table per fold.
+- `experiments/ukbb_traits/`: the cohort on imputed HapMap3+ SNPs, LDpred2-auto and
+  lassosum2 baselines, `benchmark/rescale_eval.py` (Diet Network packages evaluated as
+  the polygenic scores are, rescaled on validation), and the AlphaGenome runs
+  (`imputed/merge_alphagenome.sbatch`, `imputed/submit_dec_ag.sh`,
+  `imputed/pca_spectrum.py`).
 
 ### Fixed
+
+- `dietnet predict` on a cohort larger than the machine's memory: the genotypes were
+  memory-mapped copy-on-write, a private writable mapping that the kernel refuses when
+  it exceeds RAM ("Cannot allocate memory"). The map is now read-only.
 
 - `dietnet alphagenome` combines its parts one at a time instead of reading
   them all into memory and copying them three times. For a biobank array

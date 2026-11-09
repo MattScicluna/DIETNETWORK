@@ -19,7 +19,7 @@ Measured on UK Biobank (486,748 samples) on Narval:
 !!! note
     That fileset holds only 5,810 of the published models' SNPs, so the run
     measures scale, not accuracy. Real predictions from the published models
-    need genotypes at the published SNPs (see the [plan](refactor-plan.md)).
+    need genotypes at the published SNPs.
 
 ## Rules for cluster work
 
@@ -73,8 +73,7 @@ sbatch --account=ACCOUNT benchmarks/slurm/bench_io.sbatch
 
 `WORKDIR` defaults to the node-local `$SLURM_TMPDIR`; point it at scratch to
 time the shared filesystem. It needs about 2.2× the int8 matrix (samples × SNPs
-bytes) in memory. The outcome, contiguous HDF5, and the numbers are in the
-[plan](refactor-plan.md#on-disk-intermediate-benchmark).
+bytes) in memory. The outcome is contiguous HDF5.
 
 ## Training on a biobank
 
@@ -125,7 +124,7 @@ Training throughput by data path, upstream's model, samples/s
 What they say:
 
 - Network storage is unusable for training; stage the dataset (and its packed
-  copy, with `cp -p`) to `$SLURM_TMPDIR` first. Staging ~100 GB takes 3–5 min.
+  copy, with `cp --preserve=timestamps`; `cp -p` fails on Narval's node disk) to `$SLURM_TMPDIR` first. Staging ~100 GB takes 3–5 min.
 - The dietnet engine at the published batch size is 5–6× faster per epoch than
   upstream in RAM, in a tenth of the memory. At ~1,000–2,000 epochs per model
   that is hours, not days.
@@ -163,7 +162,7 @@ before using it for the ensemble.
 dietnet create-dataset --plink cohort --labels labels.tsv --out dataset.h5   # CPU job
 dietnet pack-genotypes --dataset dataset.h5                                # CPU job, ~30 min for UKBB
 # then, per (seed, fold), one GPU job (8 CPUs, 32 GB):
-cp -p dataset.h5 dataset.h5.packed.* "$SLURM_TMPDIR/"
+cp --preserve=timestamps dataset.h5 dataset.h5.packed.* "$SLURM_TMPDIR/"
 dietnet train --dataset "$SLURM_TMPDIR/dataset.h5" ... --engine dietnet --inputs packed \
     --seeds 78 --folds 0
 ```

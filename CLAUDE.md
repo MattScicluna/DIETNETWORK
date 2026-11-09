@@ -6,7 +6,9 @@ Guidance for Claude Code (claude.ai/code) in this repository.
 
 HussinLab's published Diet Network (AJHG 2026), with a `dietnet` CLI around it.
 The branch history is HussinLab/DIETNETWORK `main` with this repository's
-history merged in. Read `docs/refactor-plan.md` for the plan and where it stands.
+history merged in. The plan, specs and results live in `notes/` (gitignored, local
+only): read `notes/refactor-plan.md` for the plan and where it stands. The repository
+holds code and its documentation, never analyses or results.
 
 ## The rule that matters most
 

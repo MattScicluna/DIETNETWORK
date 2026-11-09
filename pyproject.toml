@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dietnetwork"
-version = "0.3.0"
+version = "0.4.0"
 description = "Diet Network for genetic ancestry prediction: HussinLab's published model behind a CLI, model packages and biobank-scale inference"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
@@ -135,6 +135,12 @@ profile = "black"
 line_length = 100
 skip_glob = ["Dietnet_train_and_evaluate/*"]
 known_first_party = ["dietnet"]
+
+[tool.coverage.run]
+source = ["dietnet"]
+# Training runs in child processes (upstream's train.py through the launcher, and
+# dietnet.parallel): measure them too, or most of the training engine reads as untested.
+patch = ["subprocess"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

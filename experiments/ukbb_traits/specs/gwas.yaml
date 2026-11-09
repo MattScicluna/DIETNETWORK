@@ -1,0 +1,9 @@
+# Each fold's GWAS on its training samples, per SNP: z, BETA and signed -log10 p
+# (features/gwas_tables.py; tables features/gwas_<label>_fold<k>.tsv.gz, BETA per the
+# effect allele, hence orient: effect). A template: embedding.sbatch fills in {label}
+# (spec name gwas@<label>); {fold} is read per fold by build-embedding.
+blocks:
+  - provider: precomputed
+    path: features/gwas_{label}_fold{fold}.tsv.gz
+    name: gwas
+    orient: effect

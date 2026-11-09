@@ -48,6 +48,13 @@ it was trained on.
     genotypes a block of samples at a time from a genotype store (`inputs:`,
     as for `train`; `block:` samples per read), so it scales to a biobank.
 
+    With `classes:` (a TSV of sample id and class, as for `--labels`), the
+    frequencies are per class instead, with the same values and columns as
+    `class_genotype_freq`, but streamed, and with classes that need not be the
+    dataset's: deciles of a quantitative trait, for example, which give each
+    SNP's frequencies along the trait's range. Each class must have training
+    samples in every fold.
+
 `precomputed`
 :   A table with `chrom`, `pos`, `ref`, `alt` and numeric feature columns (TSV,
     optionally gzipped, or parquet, which needs `pyarrow` installed), matched to the dataset's SNPs by position
@@ -66,6 +73,23 @@ it was trained on.
     SNPs the table lacks get zeros and are flagged in an added
     `<name>:missing` column.
 
+    **One table per fold.** A `path` containing `{fold}` names one table per
+    fold of the partition, `{fold}` replaced by 0, 1, ...: statistics that must
+    come from each fold's training samples only, such as a GWAS. Each table is
+    read, matched and oriented as above, and the block becomes per fold
+    (folds x SNPs x features), so it mixes with `genotype_freq` blocks and
+    fold-independent ones. The tables must have the same feature columns and
+    cover the same SNPs (otherwise the `missing` column would be all zeros in
+    some fold); a missing fold's table is an error that names it. `name:`
+    defaults to the stem with `{fold}` removed.
+
+    ```yaml
+    - provider: precomputed
+      path: features/gwas_height_fold{fold}.tsv   # gwas_height_fold0.tsv, ...
+      name: gwas
+      orient: effect
+    ```
+
 `random`
 :   `columns:` standard-normal columns (`seed:`, default 0): the control for
     "more columns" rather than "more information".
@@ -75,6 +99,22 @@ it was trained on.
     the list (0 for the first), `seed:` the permutation's seed: the control for
     "this information" rather than "information of this shape".
 
+    Every block goes into the matrix unless it has `include: false`: then it
+    is built, so a later `shuffled` block can copy it, and left out. That
+    gives a shuffled control without the original beside it:
+
+    ```yaml
+    blocks:
+      - provider: genotype_freq
+      - provider: precomputed          # built, not used ...
+        path: alphagenome.tsv
+        orient: effect
+        pca: 64
+        include: false
+      - provider: shuffled             # ... except shuffled
+        of: 1
+    ```
+
 ## Transforms
 
 Applied to a block after its provider:
@@ -82,10 +122,12 @@ Applied to a block after its provider:
 - `center: true` subtracts each column's mean over SNPs.
 - `pca: k` keeps the first k principal components over SNPs, per fold for a
   per-fold block.
+- `standardize: true`, with `pca`, scales each column to unit variance before the
+  components, so that large-valued columns do not decide them.
 
-Upstream's per-column L2 normalisation undoes any per-column scaling, so these
-are the transforms that matter: centring, and controlling how many columns,
-and so how much weight, a block brings.
+Upstream's per-column L2 normalisation undoes any per-column scaling of the columns it
+receives, so these are the transforms that matter: centring, and controlling how many
+columns, and so how much weight, a block brings.
 
 A fold-independent block is repeated for every fold when combined with a
 per-fold one. Every column must vary: an all-zero column would be divided by a
@@ -157,5 +199,4 @@ against the MLP baseline (`dietnet train --model mlp`).
 
 !!! note
     The AlphaGenome step is tested against a stand-in for the API and against
-    the real client's types, but has not yet been run against the API itself
-    (see the [plan](refactor-plan.md)).
+    the real client's types.

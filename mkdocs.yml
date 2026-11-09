@@ -93,5 +93,3 @@ nav:
   - Scaling: scaling.md
   - Command line: cli.md
   - Python API: api.md
-  - Development:
-      - Refactor plan: refactor-plan.md

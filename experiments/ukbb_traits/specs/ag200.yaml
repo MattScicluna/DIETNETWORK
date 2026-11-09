@@ -1,0 +1,9 @@
+# AlphaGenome variant effects alone: 200 components of the standardized tracks, so that
+# large-valued assays do not decide the components.
+blocks:
+  - provider: precomputed
+    path: alphagenome.tsv.gz
+    name: alphagenome
+    orient: effect
+    standardize: true
+    pca: 200

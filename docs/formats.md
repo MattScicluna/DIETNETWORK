@@ -55,7 +55,7 @@ from ids of the form `chr:pos:ref:alt`.
 
 `inputs` is contiguous and uncompressed on purpose: chunked or compressed
 layouts make the random minibatch reads of training 100 to 300 times slower
-(benchmark in the [plan](refactor-plan.md#on-disk-intermediate-benchmark)), and
+(`benchmarks/bench_genotype_io.py` measures it), and
 a contiguous array can be memory-mapped.
 
 ## Per-fold training inputs
