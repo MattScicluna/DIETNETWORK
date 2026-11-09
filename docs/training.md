@@ -153,3 +153,31 @@ Give `create-dataset` both `--labels` (class labels: upstream builds the
 embedding from them) and `--regression-labels` (a TSV of `sample id<TAB>value`),
 then train with `--task regression`. A regression ensemble's `predictions.tsv`
 has `sample`, `prediction` (the mean over models) and `sd_across_models`.
+
+## Free SNP weights
+
+In the Diet Network, the first layer's weights for SNP j are not learned directly: the
+auxiliary network computes them from the SNP's features, `W_j = aux(features_j)`, a column
+of one weight per hidden unit (100 by default). This keeps the model small, but it ties
+every SNP to what its features say. Two SNPs with similar features get similar weights,
+even when one of them only tags the other through linkage disequilibrium.
+
+`dietnet train --free-snp-weights LAMBDA` adds a free term to every one of those weights:
+
+    W_j = aux(features_j) + delta_j
+
+`delta` has one entry per first-layer weight (hidden units x SNPs), starts at 0 and has its
+own Adam optimizer (`--free-snp-lr`). After each step, a group-lasso proximal step shrinks
+each SNP's column toward zero as a whole, `delta_j <- delta_j * max(0, 1 - lr * LAMBDA /
+||delta_j||)`, and sets it exactly to zero when it is short enough. The penalty therefore
+pulls each SNP's weights toward what the auxiliary network predicts, not toward zero, and a
+SNP whose `delta_j` is zero is left entirely to the auxiliary network.
+
+LAMBDA sets the balance. A large value keeps most columns at zero, so the model is close to
+the plain Diet Network and only a few SNPs depart from it. A small value lets every SNP move
+away from its features' prediction, which fits per-SNP effects jointly, as penalized
+regression does, with the auxiliary network acting as a prior. Too small a value overfits:
+watch for a best epoch that comes early. Because Adam moves each entry by about the learning
+rate whatever the gradient, LAMBDA is relative to the learning rate, and useful values are
+of order 0.1 to 10 rather than the small values usual for a lasso. Choose it on validation.
+Packages carry `delta` (package format 3), and `predict` applies it.
