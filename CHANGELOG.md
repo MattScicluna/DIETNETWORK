@@ -7,6 +7,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- The release workflow creates the GitHub release for each tag it publishes to
+  PyPI, with the changelog's entry for the version as notes and the wheel and
+  sdist attached.
+
 ## [0.4.0] - 2026-11-08
 
 Quantitative traits at biobank scale: regression tasks, a training engine for millions of
