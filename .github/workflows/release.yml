@@ -1,7 +1,8 @@
 name: Release
 
 # Publishing is deliberately hard to do by accident and impossible to do from a
-# laptop: a tag push builds and publishes, and nothing else does. The artefacts
+# laptop: a tag push builds and publishes, and nothing else does. Once the
+# version is on PyPI, the same run creates the GitHub release for the tag. The artefacts
 # are built from a fresh checkout, which is the structural reason an untracked
 # local file (a cohort .bed, an HDF5 cache, cohort-trained weights) cannot reach
 # an index; tests/integration/test_sdist_contents.py checks the artefacts too.
@@ -186,3 +187,48 @@ jobs:
           # Re-running a release must not fail on files already uploaded; an
           # index cannot be overwritten, so this only ever skips work done.
           skip-existing: true
+
+  # The GitHub release for the tag, once the version is on PyPI: the changelog's
+  # entry for the version as notes, and the published wheel and sdist attached. It
+  # runs only after publishing succeeds, so GitHub never shows a release that pip
+  # cannot install. Re-running updates the notes and files instead of failing.
+  github-release:
+    needs: [build, publish-pypi]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Notes from the changelog
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 {on = 1; next}
+            on && /^## \[/ {exit}
+            on {print}
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "CHANGELOG.md has no entry for $version" >&2
+            exit 1
+          fi
+          printf '\n### Install\n\n```bash\npip install dietnetwork==%s\n```\n' "$version" >> notes.md
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          title="dietnetwork ${tag#v}"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh release edit "$tag" --title "$title" --notes-file notes.md
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" --verify-tag --title "$title" --notes-file notes.md dist/*
+          fi
