@@ -78,8 +78,19 @@ def build(
     class_labels=None,
     regression_labels=None,
     block_bytes: int = BLOCK_BYTES,
+    packed_only: bool = False,
 ) -> Path:
-    """Write ``out`` (upstream's HDF5 schema) from a PLINK fileset."""
+    """Write ``out`` (upstream's HDF5 schema) from a PLINK fileset.
+
+    ``packed_only``: write the genotypes only as the 2-bit copy
+    (:func:`dietnet.genotypes.pack`'s output, up to date), not as int8 ``inputs``. The
+    file still declares ``inputs`` with its shape, so everything that only reads the
+    shape, labels or SNP table works, but stores none of its values (attribute
+    ``inputs_stored`` false): a quarter of the disk and no int8 copy to write, for
+    datasets too large to hold twice. Genotypes are then read through the packed store.
+    """
+    from dietnet import genotypes  # it imports this module
+
     bed = Bed.open(plink_prefix)
     fam = read_fam(bed.prefix)
     bim = read_bim(bed.prefix)
@@ -88,10 +99,22 @@ def build(
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(out.name + ".partial")
+    packed = None
+    if packed_only:
+        packed_out = genotypes.packed_path(out)
+        packed_tmp = packed_out.with_name(packed_out.name + ".partial")
+        packed = np.lib.format.open_memmap(
+            packed_tmp, mode="w+", dtype=np.uint8, shape=(bed.n_samples, -(-bed.n_snps // 4))
+        )
     with h5py.File(tmp, "w") as f:
+        # Contiguous, so HDF5 allocates its storage on the first write: never, if packed_only.
         inputs = f.create_dataset("inputs", shape=(bed.n_samples, bed.n_snps), dtype=np.int8)
         for start, block in bed.sample_blocks(block_bytes=block_bytes):
-            inputs[start : start + len(block)] = block
+            if packed is None:
+                inputs[start : start + len(block)] = block
+            else:
+                packed[start : start + len(block)] = genotypes.encode(block)
+        f.attrs["inputs_stored"] = packed is None
 
         names = (bim["snp"] + "_" + bim["a1"]).to_numpy()
         f.create_dataset("snp_names", data=names.astype("S"))
@@ -118,6 +141,10 @@ def build(
         f.attrs["built_by"] = f"dietnet {__version__}"
         f.attrs["built_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     tmp.replace(out)
+    if packed is not None:
+        packed.flush()
+        del packed
+        genotypes.finish_pack(out, packed_tmp)
     return out
 
 

@@ -153,3 +153,48 @@ def test_an_explicit_mode_is_kept_and_an_unknown_one_refused(dataset):
     assert genotypes.choose(dataset, "memmap") == "memmap"
     with pytest.raises(ValueError, match="inputs mode"):
         genotypes.choose(dataset, "disk")
+
+
+@pytest.fixture
+def packed_only(tmp_path, kgp_mini):
+    return ds.build(
+        kgp_mini.plink_prefix, tmp_path / "p.h5", class_labels=kgp_mini.labels, packed_only=True
+    )
+
+
+def test_a_packed_only_dataset_is_the_pack_of_the_full_one(dataset, packed_only):
+    """create-dataset --packed-only: the same file minus the int8 values, and an up-to-date
+    2-bit copy with exactly the full dataset's pack."""
+    genotypes.pack(dataset)
+    assert genotypes.is_packed(packed_only)
+    assert np.array_equal(
+        np.load(genotypes.packed_path(packed_only)), np.load(genotypes.packed_path(dataset))
+    )
+    with h5py.File(dataset, "r") as full, h5py.File(packed_only, "r") as f:
+        assert f["inputs"].shape == full["inputs"].shape
+        assert f["inputs"].id.get_storage_size() == 0  # nothing stored
+        assert not f.attrs["inputs_stored"] and full.attrs["inputs_stored"]
+        for key in ("snp_names", "samples", "class_labels", "snps/pos"):
+            assert np.array_equal(f[key][()], full[key][()]), key
+    assert genotypes.inputs_stored(dataset) and not genotypes.inputs_stored(packed_only)
+    rows = np.array([3, 0, 7])
+    assert np.array_equal(
+        genotypes.open_store(packed_only, "packed")[rows],
+        genotypes.open_store(dataset, "ram")[rows],
+    )
+
+
+def test_a_packed_only_dataset_is_read_only_through_its_pack(packed_only):
+    """auto picks the pack; anything that would read the absent int8 values is refused,
+    including auto once the pack is stale, and re-packing."""
+    assert genotypes.choose(packed_only, "auto") == "packed"
+    assert genotypes.choose(packed_only, "packed") == "packed"
+    for mode in ("ram", "memmap"):
+        with pytest.raises(ValueError, match=f"--inputs {mode} reads the int8 genotypes"):
+            genotypes.choose(packed_only, mode)
+    with pytest.raises(ValueError, match="pack-genotypes reads the int8 genotypes"):
+        genotypes.pack(packed_only)
+    with h5py.File(packed_only, "a") as f:
+        f.attrs["rebuilt"] = 1
+    with pytest.raises(ValueError, match="only in its packed copy"):
+        genotypes.choose(packed_only, "auto")

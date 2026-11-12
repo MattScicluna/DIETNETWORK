@@ -91,6 +91,7 @@ def pack(dataset, block: int = 4096) -> Path:
     sidecar ``.packed.json`` records the dataset it came from.
     """
     dataset = Path(dataset)
+    require_inputs(dataset, "pack-genotypes")
     source = _source(dataset)
     n, m = source["n_samples"], source["n_snps"]
     out = packed_path(dataset)
@@ -101,9 +102,32 @@ def pack(dataset, block: int = 4096) -> Path:
             packed[start : start + block] = encode(f["inputs"][start : start + block])
     packed.flush()
     del packed
-    os.replace(tmp, out)
-    _meta_path(dataset).write_text(json.dumps(source))
+    return finish_pack(dataset, tmp, source)
+
+
+def finish_pack(dataset, written: Path, source: dict | None = None) -> Path:
+    """Put a fully written 2-bit copy of ``dataset`` in place and record what it was built
+    from (``source``, by default the dataset as it is now)."""
+    out = packed_path(dataset)
+    os.replace(written, out)
+    _meta_path(dataset).write_text(json.dumps(source or _source(dataset)))
     return out
+
+
+def inputs_stored(dataset) -> bool:
+    """Whether ``dataset`` stores its genotypes as int8 ``inputs``: not when built with
+    ``create-dataset --packed-only``, which keeps them only in the 2-bit copy."""
+    with h5py.File(dataset, "r") as f:
+        return bool(f.attrs.get("inputs_stored", True))
+
+
+def require_inputs(dataset, what: str) -> None:
+    """Refuse ``what`` on a dataset whose genotypes are only in the 2-bit copy."""
+    if not inputs_stored(dataset):
+        raise ValueError(
+            f"{what} reads the int8 genotypes, but {dataset} has them only in its packed "
+            "copy (create-dataset --packed-only): read them with --inputs packed"
+        )
 
 
 def is_packed(dataset) -> bool:
@@ -304,6 +328,8 @@ def choose(dataset, mode: str = "auto") -> str:
     uncompressed, as ``dietnet create-dataset`` writes it), else ``ram``."""
     if mode not in (*MODES, "auto"):
         raise ValueError(f"inputs mode must be one of {['auto', *MODES]}, not {mode!r}")
+    if mode != "packed" and not (mode == "auto" and is_packed(dataset)):
+        require_inputs(dataset, f"--inputs {mode}")
     if mode == "ram":
         return mode
     if mode == "packed" or (mode == "auto" and is_packed(dataset)):
