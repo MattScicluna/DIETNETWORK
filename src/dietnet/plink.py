@@ -191,4 +191,5 @@ class Bed:
                     dosages = BYTE_TO_DOSAGES[chunk].reshape(len(chunk), -1)[:, : s1 - s0]
                     out[:, c0 : c0 + len(chunk)] = dosages.T
                 yield s0, j0, out
-            del raw
+            # Free this stripe before reading the next: chunk is a view that keeps it alive.
+            del raw, chunk
