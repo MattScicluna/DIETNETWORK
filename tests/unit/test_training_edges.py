@@ -106,6 +106,10 @@ UNCHECKED = dict(
             dict(free_snp_weights=0.1, engine="dietnet", model="Mlp", embedding=None),
             "--free-snp-weights needs engine 'dietnet' and the Diet Network",
         ),
+        (
+            dict(snp_penalty_weights="w.npy", engine="dietnet"),
+            "--snp-penalty-weights needs --free-snp-weights",
+        ),
         (dict(snp_blocks=8, engine="dietnet", snp_sample=0.5), "--snp-blocks needs --chunk-rows"),
         (dict(snp_blocks=8, engine="dietnet", chunk_rows=64), "--snp-blocks needs --chunk-rows"),
         (dict(engine="dietnet", loader="upstream"), "--loader upstream applies to engine"),
@@ -259,3 +263,33 @@ def test_ranks_that_all_succeed_raise_nothing(tmp_path, monkeypatch):
     assert [proc.returncode for _, proc in launched] == [0, 0]
     assert log.read_text() == "rank 0 done\n"
     assert (tmp_path / "train.log.rank1").read_text() == "rank 1 done\n"
+
+
+def test_penalty_weights_are_checked_hashed_and_passed(inputs, monkeypatch, tmp_path):
+    """--snp-penalty-weights: the vector is checked against the dataset before any run,
+    then passed to the engine as an absolute path."""
+    import h5py
+    import numpy as np
+
+    with h5py.File(inputs["dataset"], "r") as f:
+        n_snps = f["inputs"].shape[1]
+    wrong = tmp_path / "wrong.npy"
+    np.save(wrong, np.ones(n_snps + 1))
+    with pytest.raises(ValueError, match="penalty weights, expected"):
+        training.train(**inputs, engine="dietnet", free_snp_weights=1e-3,
+                       snp_penalty_weights=wrong)  # fmt: skip
+
+    seen = []
+
+    def launch(args, processes, log):
+        seen.append(args)
+        raise _Stop
+
+    monkeypatch.setattr(training, "_run_parallel", launch)
+    weights = tmp_path / "weights.npy"
+    np.save(weights, np.ones(n_snps))
+    with pytest.raises(_Stop):
+        training.train(**inputs, engine="dietnet", inputs="ram", workers=0,
+                       free_snp_weights=1e-3, snp_penalty_weights=weights)  # fmt: skip
+    ((args,),) = [seen]
+    assert args[args.index("--snp-penalty-weights") + 1] == weights.resolve()

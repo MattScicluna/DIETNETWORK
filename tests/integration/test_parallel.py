@@ -133,6 +133,34 @@ def test_free_snp_weights_kept_at_zero_train_the_plain_model(tmp_path):
         assert torch.equal(a[key], b[key]), key
 
 
+def test_penalty_weights_of_zero_free_only_those_snps(tmp_path):
+    """--snp-penalty-weights under a penalty that holds every other SNP at 0: only the SNPs
+    weighted 0 get free weights, and the package records the weights file."""
+    import json
+
+    import numpy as np
+    import torch
+
+    from dietnet import package
+
+    data = DATASETS["synthetic"]
+    n_snps = sum(1 for _ in open(f"{data.plink_prefix}.bim"))
+    weights = np.ones(n_snps)
+    weights[: n_snps // 4] = 0
+    np.save(path := tmp_path / "weights.npy", weights)
+    flags = ["--engine=dietnet", "--workers=0", "--inputs=memmap", "--free-snp-weights=1e12",
+             f"--snp-penalty-weights={path}"]  # fmt: skip
+    (pkg,) = package.find(train_pipeline(tmp_path / "w", data, folds="0", flags=flags))
+    delta = torch.load(pkg.path / "model.pt", weights_only=False)["model_state_dict"][
+        "free_snp_weights"
+    ]
+    moved = delta.abs().sum(dim=0) > 0
+    assert moved.any() and not moved[n_snps // 4 :].any()
+    meta = json.loads((pkg.path / "metadata.json").read_text())["free_snp_weights"]
+    assert meta["penalty_weights"]["path"] == str(path.resolve())
+    assert meta["penalty_weights"]["mean"] == weights.mean()
+
+
 def test_a_hybrid_package_predicts_what_training_reported(tmp_path):
     """Free weights that do change the model: the package carries them, loads them
     strictly, and predict gives the held-out predictions training wrote."""
