@@ -163,6 +163,7 @@ Train each (seed, fold) with upstream `train.py`; package the results under
 | `--chunks-per-buffer` | with `--chunk-rows`: random chunks read into each buffer | 4 |
 | `--free-snp-weights` | engine `dietnet`, Diet Network only: each SNP's fat-layer weights become the auxiliary network's plus a free term, trained under a group-lasso penalty of this strength (one group per SNP, a proximal step after each update), so the model can weigh SNPs jointly, as a penalised regression does. Packages carry the free weights and `predict` applies them | 0 (off) |
 | `--free-snp-lr` | with `--free-snp-weights`: their Adam learning rate | the config's `lr_main` |
+| `--snp-penalty-weights` | with `--free-snp-weights`: a `.npy` vector of per-SNP multipliers of the penalty, in the dataset's SNP order (1: unchanged, below 1: shrink the SNP less, 0: not at all), for example from a prior on which SNPs are causal. Packages record its path and checksum | none (every SNP 1) |
 | `--snp-blocks` | with `--chunk-rows` and `--snp-sample`: cut the SNPs into this many contiguous blocks and keep a `--snp-sample` share of the blocks per buffer, not random SNPs per batch | 0 (off) |
 
 ## `dietnet match`

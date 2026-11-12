@@ -87,3 +87,43 @@ def test_the_proximal_step_is_group_soft_thresholding():
     untouched = original.clone()
     hybrid.prox(untouched, 0.0)
     assert torch.equal(untouched, original)
+
+
+def test_per_snp_thresholds_scale_each_columns_penalty():
+    """A threshold per SNP: each column is soft-thresholded by its own; all equal is the
+    scalar step, and 0 leaves a column as it was."""
+    torch.manual_seed(3)
+    delta = torch.randn(4, 30) * torch.linspace(0.1, 3, 30)
+    weights = torch.rand(30) * 2
+    weights[:5] = 0
+    thresholds = 2.0 * weights
+    shrunk = delta.clone()
+    hybrid.prox(shrunk, thresholds)
+    norms = delta.norm(dim=0)
+    expected = delta * torch.clamp(1 - thresholds / norms, min=0)
+    torch.testing.assert_close(shrunk, expected)
+    assert torch.equal(shrunk[:, :5], delta[:, :5])
+
+    scalar, vector = delta.clone(), delta.clone()
+    hybrid.prox(scalar, 2.0)
+    hybrid.prox(vector, torch.full((30,), 2.0))
+    torch.testing.assert_close(vector, scalar)
+
+
+def test_penalty_weights_are_checked(tmp_path):
+    """One finite, non-negative weight per SNP, returned as float32."""
+    import pytest
+
+    good = tmp_path / "good.npy"
+    np.save(good, np.array([0.0, 0.5, 2.0]))
+    loaded = hybrid.load_penalty_weights(good, 3)
+    assert loaded.dtype == np.float32 and loaded.tolist() == [0.0, 0.5, 2.0]
+    with pytest.raises(ValueError, match=r"\(3,\) penalty weights, expected \(4,\)"):
+        hybrid.load_penalty_weights(good, 4)
+    for bad in ([0.0, -1.0, 1.0], [0.0, np.nan, 1.0], [0.0, np.inf, 1.0]):
+        np.save(path := tmp_path / "bad.npy", np.array(bad))
+        with pytest.raises(ValueError, match="finite and non-negative"):
+            hybrid.load_penalty_weights(path, 3)
+    np.save(path := tmp_path / "matrix.npy", np.ones((3, 1)))
+    with pytest.raises(ValueError, match="expected"):
+        hybrid.load_penalty_weights(path, 3)

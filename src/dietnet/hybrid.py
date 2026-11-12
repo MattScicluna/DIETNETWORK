@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import types
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -64,15 +65,28 @@ def attach(model) -> nn.Parameter:
 
 
 @torch.no_grad()
-def prox(delta: torch.Tensor, threshold: float) -> None:
+def prox(delta: torch.Tensor, threshold: float | torch.Tensor) -> None:
     """The group-lasso proximal step, in place: each SNP's column delta_j becomes
-    ``delta_j * max(0, 1 - threshold / ||delta_j||)``, so a column shorter than the
-    threshold becomes exactly 0. ``threshold`` is the step size times lambda."""
-    if threshold <= 0:
+    ``delta_j * max(0, 1 - threshold_j / ||delta_j||)``, so a column shorter than its
+    threshold becomes exactly 0. ``threshold`` is the step size times lambda: one number for
+    every SNP, or one per SNP (a tensor of length SNPs) to shrink some SNPs more than others."""
+    if not torch.is_tensor(threshold) and threshold <= 0:
         return
     norms = delta.norm(dim=0)
     scale = torch.clamp(1 - threshold / norms.clamp_min(torch.finfo(delta.dtype).tiny), min=0)
     delta.mul_(scale)
+
+
+def load_penalty_weights(path, n_snps: int) -> np.ndarray:
+    """Per-SNP multipliers of the group-lasso penalty, from a .npy vector in the dataset's SNP
+    order: 1 leaves a SNP's penalty as it is, below 1 shrinks its free weights less (a SNP
+    more likely to matter), 0 not at all, above 1 more."""
+    weights = np.load(path, allow_pickle=False)
+    if weights.ndim != 1 or len(weights) != n_snps:
+        raise ValueError(f"{path}: {weights.shape} penalty weights, expected ({n_snps},)")
+    if not np.isfinite(weights).all() or (weights < 0).any():
+        raise ValueError(f"{path}: penalty weights must be finite and non-negative")
+    return weights.astype(np.float32)
 
 
 def nonzero(delta: torch.Tensor) -> int:
