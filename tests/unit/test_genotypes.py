@@ -184,6 +184,32 @@ def test_a_packed_only_dataset_is_the_pack_of_the_full_one(dataset, packed_only)
     )
 
 
+@pytest.mark.parametrize("load_bytes", [1, 7 * 1000, 10**9])
+def test_snp_stripes_give_the_whole_matrix_and_the_same_pack(
+    tmp_path, kgp_mini, dataset, load_bytes
+):
+    """Stripes of SNPs (one per 4 SNPs at the smallest, several of uneven width, or the
+    whole file) cover the matrix exactly, and a packed-only build from them is the full
+    dataset's pack."""
+    from dietnet.plink import Bed
+
+    bed = Bed.open(kgp_mini.plink_prefix)
+    whole = np.full((bed.n_samples, bed.n_snps), 9, dtype=np.int8)
+    for start, snp, block in bed.snp_stripes(load_bytes, block_bytes=4 * 1000):
+        assert snp % 4 == 0 and start % 4 == 0
+        assert (whole[start : start + len(block), snp : snp + block.shape[1]] == 9).all()
+        whole[start : start + len(block), snp : snp + block.shape[1]] = block
+    with h5py.File(dataset, "r") as f:
+        assert np.array_equal(whole, f["inputs"][()])
+
+    out = ds.build(kgp_mini.plink_prefix, tmp_path / "s.h5", class_labels=kgp_mini.labels,
+                   packed_only=True, load_bytes=load_bytes, block_bytes=4 * 1000)  # fmt: skip
+    genotypes.pack(dataset)
+    assert np.array_equal(
+        np.load(genotypes.packed_path(out)), np.load(genotypes.packed_path(dataset))
+    )
+
+
 def test_a_packed_only_dataset_is_read_only_through_its_pack(packed_only):
     """auto picks the pack; anything that would read the absent int8 values is refused,
     including auto once the pack is stale, and re-packing."""

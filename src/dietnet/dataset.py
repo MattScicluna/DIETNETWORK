@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 
 from dietnet import __version__
-from dietnet.plink import BLOCK_BYTES, Bed, read_bim, read_fam
+from dietnet.plink import BLOCK_BYTES, LOAD_BYTES, Bed, read_bim, read_fam
 
 
 def read_labels(path) -> pd.Series:
@@ -79,6 +79,7 @@ def build(
     regression_labels=None,
     block_bytes: int = BLOCK_BYTES,
     packed_only: bool = False,
+    load_bytes: int = LOAD_BYTES,
 ) -> Path:
     """Write ``out`` (upstream's HDF5 schema) from a PLINK fileset.
 
@@ -88,6 +89,8 @@ def build(
     shape, labels or SNP table works, but stores none of its values (attribute
     ``inputs_stored`` false): a quarter of the disk and no int8 copy to write, for
     datasets too large to hold twice. Genotypes are then read through the packed store.
+    The .bed is then read once, in stripes of SNPs of at most ``load_bytes``
+    (:meth:`dietnet.plink.Bed.snp_stripes`), so its size is not bounded by memory.
     """
     from dietnet import genotypes  # it imports this module
 
@@ -109,11 +112,14 @@ def build(
     with h5py.File(tmp, "w") as f:
         # Contiguous, so HDF5 allocates its storage on the first write: never, if packed_only.
         inputs = f.create_dataset("inputs", shape=(bed.n_samples, bed.n_snps), dtype=np.int8)
-        for start, block in bed.sample_blocks(block_bytes=block_bytes):
-            if packed is None:
+        if packed is None:
+            for start, block in bed.sample_blocks(block_bytes=block_bytes, load_bytes=load_bytes):
                 inputs[start : start + len(block)] = block
-            else:
-                packed[start : start + len(block)] = genotypes.encode(block)
+        else:
+            for start, snp, block in bed.snp_stripes(load_bytes, block_bytes):
+                col = snp // 4  # stripes start on a byte: a multiple of 4 SNPs
+                encoded = genotypes.encode(block)
+                packed[start : start + len(block), col : col + encoded.shape[1]] = encoded
         f.attrs["inputs_stored"] = packed is None
 
         names = (bim["snp"] + "_" + bim["a1"]).to_numpy()
