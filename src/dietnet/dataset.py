@@ -106,9 +106,7 @@ def build(
     if packed_only:
         packed_out = genotypes.packed_path(out)
         packed_tmp = packed_out.with_name(packed_out.name + ".partial")
-        packed = np.lib.format.open_memmap(
-            packed_tmp, mode="w+", dtype=np.uint8, shape=(bed.n_samples, -(-bed.n_snps // 4))
-        )
+        packed = genotypes.PackedWriter(packed_tmp, bed.n_samples, bed.n_snps)
     with h5py.File(tmp, "w") as f:
         # Contiguous, so HDF5 allocates its storage on the first write: never, if packed_only.
         inputs = f.create_dataset("inputs", shape=(bed.n_samples, bed.n_snps), dtype=np.int8)
@@ -118,8 +116,7 @@ def build(
         else:
             for start, snp, block in bed.snp_stripes(load_bytes, block_bytes):
                 col = snp // 4  # stripes start on a byte: a multiple of 4 SNPs
-                encoded = genotypes.encode(block)
-                packed[start : start + len(block), col : col + encoded.shape[1]] = encoded
+                packed.write(start, col, genotypes.encode(block))
         f.attrs["inputs_stored"] = packed is None
 
         names = (bim["snp"] + "_" + bim["a1"]).to_numpy()
@@ -148,8 +145,7 @@ def build(
         f.attrs["built_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     tmp.replace(out)
     if packed is not None:
-        packed.flush()
-        del packed
+        packed.close()
         genotypes.finish_pack(out, packed_tmp)
     return out
 

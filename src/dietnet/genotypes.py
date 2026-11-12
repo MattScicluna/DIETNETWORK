@@ -105,6 +105,39 @@ def pack(dataset, block: int = 4096) -> Path:
     return finish_pack(dataset, tmp, source)
 
 
+class PackedWriter:
+    """Writes a 2-bit copy (the .npy :func:`pack` writes) a block at a time, in bounded memory.
+
+    A memory map would do, but its dirty pages count against a cluster job's memory limit
+    until the filesystem writes them back: a stripe of SNPs written across every sample of a
+    biobank is tens of GB of them. Here each block goes out with plain writes, is synced,
+    and its pages are dropped from the cache (Linux; elsewhere only synced).
+    """
+
+    def __init__(self, path, n_samples: int, n_snps: int):
+        shape = (n_samples, -(-n_snps // 4))
+        header = np.lib.format.open_memmap(path, mode="w+", dtype=np.uint8, shape=shape)
+        self.offset, self.row_bytes = header.offset, shape[1]
+        del header  # the file now has its header and full (sparse) size
+        self._fd = os.open(path, os.O_WRONLY)
+
+    def write(self, start: int, col: int, encoded: np.ndarray) -> None:
+        """Rows ``start`` onward, from byte ``col`` of each row: ``encoded`` (rows x bytes)."""
+        encoded = np.ascontiguousarray(encoded, dtype=np.uint8)
+        first = self.offset + start * self.row_bytes + col
+        for i, row in enumerate(encoded):
+            os.pwrite(self._fd, row.data, first + i * self.row_bytes)
+        os.fsync(self._fd)
+        if hasattr(os, "posix_fadvise"):
+            os.posix_fadvise(
+                self._fd, self.offset + start * self.row_bytes, len(encoded) * self.row_bytes,
+                os.POSIX_FADV_DONTNEED,
+            )  # fmt: skip
+
+    def close(self) -> None:
+        os.close(self._fd)
+
+
 def finish_pack(dataset, written: Path, source: dict | None = None) -> Path:
     """Put a fully written 2-bit copy of ``dataset`` in place and record what it was built
     from (``source``, by default the dataset as it is now)."""
