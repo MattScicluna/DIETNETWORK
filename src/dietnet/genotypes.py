@@ -91,6 +91,7 @@ def pack(dataset, block: int = 4096) -> Path:
     sidecar ``.packed.json`` records the dataset it came from.
     """
     dataset = Path(dataset)
+    require_inputs(dataset, "pack-genotypes")
     source = _source(dataset)
     n, m = source["n_samples"], source["n_snps"]
     out = packed_path(dataset)
@@ -101,9 +102,111 @@ def pack(dataset, block: int = 4096) -> Path:
             packed[start : start + block] = encode(f["inputs"][start : start + block])
     packed.flush()
     del packed
-    os.replace(tmp, out)
-    _meta_path(dataset).write_text(json.dumps(source))
+    return finish_pack(dataset, tmp, source)
+
+
+def _sync_and_drop(fd: int) -> None:
+    """Write ``fd``'s dirty pages out and drop its cached pages: on a cluster both count
+    against the job's memory limit (Linux; elsewhere only synced)."""
+    os.fsync(fd)
+    if hasattr(os, "posix_fadvise"):
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+
+
+def _pwrite_all(fd: int, data, offset: int) -> None:
+    view = memoryview(data).cast("B")
+    while len(view):
+        n = os.pwrite(fd, view, offset)
+        view, offset = view[n:], offset + n
+
+
+def _pread_all(fd: int, size: int, offset: int) -> np.ndarray:
+    out = np.empty(size, dtype=np.uint8)
+    view, done = memoryview(out), 0
+    while done < size:
+        n = os.preadv(fd, [view[done:]], offset + done)
+        if not n:
+            raise EOFError(f"expected {size} bytes at offset {offset}, got {done}")
+        done += n
+    if hasattr(os, "posix_fadvise"):
+        os.posix_fadvise(fd, offset, size, os.POSIX_FADV_DONTNEED)
     return out
+
+
+def pack_bed(bed, path, load_bytes: int, block_bytes: int) -> None:
+    """Write the 2-bit copy of a PLINK fileset's genotypes (samples x SNPs) to ``path``,
+    from :meth:`dietnet.plink.Bed.snp_stripes`, in bounded memory and sequential I/O only.
+
+    Writing each stripe's bytes into every row of the final file would be strided writes
+    that start mid-page, which a shared filesystem serves with a read per row. Instead:
+    each stripe goes to its own file, sample-major and appended in order; then the final
+    rows are assembled a block at a time from the matching range of every stripe file and
+    written contiguously. Takes the final file's size again in temporary space, removed at
+    the end.
+    """
+    path = Path(path)
+    parts, fd = [], None  # (file, bytes per row) per stripe
+    ins, out = [], None
+    try:
+        for start, _, block in bed.snp_stripes(load_bytes, block_bytes):
+            if start == 0:  # a new stripe
+                if fd is not None:
+                    _sync_and_drop(fd)
+                    os.close(fd)
+                part = path.with_name(f"{path.name}.stripe{len(parts)}")
+                fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666)
+                parts.append((part, -(-block.shape[1] // 4)))
+            _pwrite_all(fd, encode(block), os.lseek(fd, 0, os.SEEK_END))
+            _sync_and_drop(fd)
+        if fd is not None:
+            _sync_and_drop(fd)
+            os.close(fd)
+            fd = None
+
+        n, width = bed.n_samples, sum(w for _, w in parts)
+        header = np.lib.format.open_memmap(path, mode="w+", dtype=np.uint8, shape=(n, width))
+        offset = header.offset
+        del header
+        out = os.open(path, os.O_WRONLY)
+        ins = [os.open(part, os.O_RDONLY) for part, _ in parts]
+        rows = max(1, block_bytes // max(width, 1))
+        for r0 in range(0, n, rows):
+            r1 = min(r0 + rows, n)
+            pieces = [_pread_all(f, (r1 - r0) * w, r0 * w).reshape(r1 - r0, w)
+                      for f, (_, w) in zip(ins, parts)]  # fmt: skip
+            _pwrite_all(out, np.concatenate(pieces, axis=1), offset + r0 * width)
+            _sync_and_drop(out)
+    finally:
+        for f in [fd, out, *ins]:
+            if f is not None:
+                os.close(f)
+        for part, _ in parts:
+            part.unlink(missing_ok=True)
+
+
+def finish_pack(dataset, written: Path, source: dict | None = None) -> Path:
+    """Put a fully written 2-bit copy of ``dataset`` in place and record what it was built
+    from (``source``, by default the dataset as it is now)."""
+    out = packed_path(dataset)
+    os.replace(written, out)
+    _meta_path(dataset).write_text(json.dumps(source or _source(dataset)))
+    return out
+
+
+def inputs_stored(dataset) -> bool:
+    """Whether ``dataset`` stores its genotypes as int8 ``inputs``: not when built with
+    ``create-dataset --packed-only``, which keeps them only in the 2-bit copy."""
+    with h5py.File(dataset, "r") as f:
+        return bool(f.attrs.get("inputs_stored", True))
+
+
+def require_inputs(dataset, what: str) -> None:
+    """Refuse ``what`` on a dataset whose genotypes are only in the 2-bit copy."""
+    if not inputs_stored(dataset):
+        raise ValueError(
+            f"{what} reads the int8 genotypes, but {dataset} has them only in its packed "
+            "copy (create-dataset --packed-only): read them with --inputs packed"
+        )
 
 
 def is_packed(dataset) -> bool:
@@ -304,6 +407,8 @@ def choose(dataset, mode: str = "auto") -> str:
     uncompressed, as ``dietnet create-dataset`` writes it), else ``ram``."""
     if mode not in (*MODES, "auto"):
         raise ValueError(f"inputs mode must be one of {['auto', *MODES]}, not {mode!r}")
+    if mode != "packed" and not (mode == "auto" and is_packed(dataset)):
+        require_inputs(dataset, f"--inputs {mode}")
     if mode == "ram":
         return mode
     if mode == "packed" or (mode == "auto" and is_packed(dataset)):

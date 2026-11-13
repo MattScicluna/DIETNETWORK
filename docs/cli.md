@@ -37,6 +37,7 @@ Build upstream's HDF5 dataset from PLINK, without the text round-trip
 | `--labels PATH` | *existing* TSV: sample id, class label | |
 | `--regression-labels PATH` | *existing* TSV: sample id, value | |
 | `--out PATH` | output `.h5` | required |
+| `--packed-only` | write the genotypes only as the 2-bit copy that `pack-genotypes` makes, not as int8 in the `.h5`: a quarter of the disk and no int8 copy to write, for datasets too large to hold twice. The `.h5` keeps the labels, SNP table and the shape of `inputs`. Steps that read the int8 genotypes refuse it (`pack-genotypes`, `generate-embedding`, upstream's statistics engine, and the `ram` and `memmap` genotype stores); dietnet's statistics engine, `build-embedding` and training from the packed store read it | off |
 
 ## `dietnet partition`
 

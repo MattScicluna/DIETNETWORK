@@ -12,6 +12,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - The release workflow creates the GitHub release for each tag it publishes to
   PyPI, with the changelog's entry for the version as notes and the wheel and
   sdist attached.
+- `dietnet create-dataset --packed-only`: the genotypes only as the 2-bit packed copy,
+  written straight from the PLINK file, without the int8 copy in the HDF5 file (a
+  quarter of the disk for biobank-scale SNP sets). Steps that need the int8 genotypes
+  refuse such a dataset.
 
 ## [0.4.0] - 2026-11-08
 
