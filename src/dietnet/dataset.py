@@ -102,22 +102,17 @@ def build(
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(out.name + ".partial")
-    packed = None
     if packed_only:
         packed_out = genotypes.packed_path(out)
         packed_tmp = packed_out.with_name(packed_out.name + ".partial")
-        packed = genotypes.PackedWriter(packed_tmp, bed.n_samples, bed.n_snps)
+        genotypes.pack_bed(bed, packed_tmp, load_bytes, block_bytes)
     with h5py.File(tmp, "w") as f:
         # Contiguous, so HDF5 allocates its storage on the first write: never, if packed_only.
         inputs = f.create_dataset("inputs", shape=(bed.n_samples, bed.n_snps), dtype=np.int8)
-        if packed is None:
+        if not packed_only:
             for start, block in bed.sample_blocks(block_bytes=block_bytes, load_bytes=load_bytes):
                 inputs[start : start + len(block)] = block
-        else:
-            for start, snp, block in bed.snp_stripes(load_bytes, block_bytes):
-                col = snp // 4  # stripes start on a byte: a multiple of 4 SNPs
-                packed.write(start, col, genotypes.encode(block))
-        f.attrs["inputs_stored"] = packed is None
+        f.attrs["inputs_stored"] = not packed_only
 
         names = (bim["snp"] + "_" + bim["a1"]).to_numpy()
         f.create_dataset("snp_names", data=names.astype("S"))
@@ -144,8 +139,7 @@ def build(
         f.attrs["built_by"] = f"dietnet {__version__}"
         f.attrs["built_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     tmp.replace(out)
-    if packed is not None:
-        packed.close()
+    if packed_only:
         genotypes.finish_pack(out, packed_tmp)
     return out
 

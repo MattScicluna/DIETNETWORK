@@ -105,37 +105,83 @@ def pack(dataset, block: int = 4096) -> Path:
     return finish_pack(dataset, tmp, source)
 
 
-class PackedWriter:
-    """Writes a 2-bit copy (the .npy :func:`pack` writes) a block at a time, in bounded memory.
+def _sync_and_drop(fd: int) -> None:
+    """Write ``fd``'s dirty pages out and drop its cached pages: on a cluster both count
+    against the job's memory limit (Linux; elsewhere only synced)."""
+    os.fsync(fd)
+    if hasattr(os, "posix_fadvise"):
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
 
-    A memory map would do, but its dirty pages count against a cluster job's memory limit
-    until the filesystem writes them back: a stripe of SNPs written across every sample of a
-    biobank is tens of GB of them. Here each block goes out with plain writes, is synced,
-    and its pages are dropped from the cache (Linux; elsewhere only synced).
+
+def _pwrite_all(fd: int, data, offset: int) -> None:
+    view = memoryview(data).cast("B")
+    while len(view):
+        n = os.pwrite(fd, view, offset)
+        view, offset = view[n:], offset + n
+
+
+def _pread_all(fd: int, size: int, offset: int) -> np.ndarray:
+    out = np.empty(size, dtype=np.uint8)
+    view, done = memoryview(out), 0
+    while done < size:
+        n = os.preadv(fd, [view[done:]], offset + done)
+        if not n:
+            raise EOFError(f"expected {size} bytes at offset {offset}, got {done}")
+        done += n
+    if hasattr(os, "posix_fadvise"):
+        os.posix_fadvise(fd, offset, size, os.POSIX_FADV_DONTNEED)
+    return out
+
+
+def pack_bed(bed, path, load_bytes: int, block_bytes: int) -> None:
+    """Write the 2-bit copy of a PLINK fileset's genotypes (samples x SNPs) to ``path``,
+    from :meth:`dietnet.plink.Bed.snp_stripes`, in bounded memory and sequential I/O only.
+
+    Writing each stripe's bytes into every row of the final file would be strided writes
+    that start mid-page, which a shared filesystem serves with a read per row. Instead:
+    each stripe goes to its own file, sample-major and appended in order; then the final
+    rows are assembled a block at a time from the matching range of every stripe file and
+    written contiguously. Takes the final file's size again in temporary space, removed at
+    the end.
     """
+    path = Path(path)
+    parts, fd = [], None  # (file, bytes per row) per stripe
+    ins, out = [], None
+    try:
+        for start, _, block in bed.snp_stripes(load_bytes, block_bytes):
+            if start == 0:  # a new stripe
+                if fd is not None:
+                    _sync_and_drop(fd)
+                    os.close(fd)
+                part = path.with_name(f"{path.name}.stripe{len(parts)}")
+                fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666)
+                parts.append((part, -(-block.shape[1] // 4)))
+            _pwrite_all(fd, encode(block), os.lseek(fd, 0, os.SEEK_END))
+            _sync_and_drop(fd)
+        if fd is not None:
+            _sync_and_drop(fd)
+            os.close(fd)
+            fd = None
 
-    def __init__(self, path, n_samples: int, n_snps: int):
-        shape = (n_samples, -(-n_snps // 4))
-        header = np.lib.format.open_memmap(path, mode="w+", dtype=np.uint8, shape=shape)
-        self.offset, self.row_bytes = header.offset, shape[1]
-        del header  # the file now has its header and full (sparse) size
-        self._fd = os.open(path, os.O_WRONLY)
-
-    def write(self, start: int, col: int, encoded: np.ndarray) -> None:
-        """Rows ``start`` onward, from byte ``col`` of each row: ``encoded`` (rows x bytes)."""
-        encoded = np.ascontiguousarray(encoded, dtype=np.uint8)
-        first = self.offset + start * self.row_bytes + col
-        for i, row in enumerate(encoded):
-            os.pwrite(self._fd, row.data, first + i * self.row_bytes)
-        os.fsync(self._fd)
-        if hasattr(os, "posix_fadvise"):
-            os.posix_fadvise(
-                self._fd, self.offset + start * self.row_bytes, len(encoded) * self.row_bytes,
-                os.POSIX_FADV_DONTNEED,
-            )  # fmt: skip
-
-    def close(self) -> None:
-        os.close(self._fd)
+        n, width = bed.n_samples, sum(w for _, w in parts)
+        header = np.lib.format.open_memmap(path, mode="w+", dtype=np.uint8, shape=(n, width))
+        offset = header.offset
+        del header
+        out = os.open(path, os.O_WRONLY)
+        ins = [os.open(part, os.O_RDONLY) for part, _ in parts]
+        rows = max(1, block_bytes // max(width, 1))
+        for r0 in range(0, n, rows):
+            r1 = min(r0 + rows, n)
+            pieces = [_pread_all(f, (r1 - r0) * w, r0 * w).reshape(r1 - r0, w)
+                      for f, (_, w) in zip(ins, parts)]  # fmt: skip
+            _pwrite_all(out, np.concatenate(pieces, axis=1), offset + r0 * width)
+            _sync_and_drop(out)
+    finally:
+        for f in [fd, out, *ins]:
+            if f is not None:
+                os.close(f)
+        for part, _ in parts:
+            part.unlink(missing_ok=True)
 
 
 def finish_pack(dataset, written: Path, source: dict | None = None) -> Path:

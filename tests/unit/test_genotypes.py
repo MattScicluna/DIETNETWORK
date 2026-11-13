@@ -208,6 +208,7 @@ def test_snp_stripes_give_the_whole_matrix_and_the_same_pack(
     assert np.array_equal(
         np.load(genotypes.packed_path(out)), np.load(genotypes.packed_path(dataset))
     )
+    assert not list(tmp_path.glob("*.stripe*"))  # the per-stripe files are removed
 
 
 def test_a_packed_only_dataset_is_read_only_through_its_pack(packed_only):
