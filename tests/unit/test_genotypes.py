@@ -125,6 +125,14 @@ def test_reads_through_gaps_and_cached_rows_give_the_same_bytes(dataset):
     with pytest.raises(KeyError):
         cache[absent]
 
+    # In a file instead of memory, filled a few rows at a time: the same rows.
+    on_disk = genotypes.CachedRows(
+        lambda r: reader.read(r, max_gap=4), rows[::-1], directory=dataset.parent, batch=3
+    )
+    assert on_disk.path.parent == dataset.parent and isinstance(on_disk.data, np.memmap)
+    np.testing.assert_array_equal(on_disk.data, cache.data)
+    np.testing.assert_array_equal(on_disk[some], mapped[some])
+
 
 def test_auto_prefers_an_up_to_date_pack(dataset):
     assert genotypes.choose(dataset, "auto") == "ram"
