@@ -12,6 +12,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - The release workflow creates the GitHub release for each tag it publishes to
   PyPI, with the changelog's entry for the version as notes and the wheel and
   sdist attached.
+- `dietnet train --eval-cache-dir DIR`: with `--chunk-rows`, the cached evaluation rows
+  live in a memory-mapped file in DIR (a node's local disk) instead of memory.
 
 ## [0.4.0] - 2026-11-08
 

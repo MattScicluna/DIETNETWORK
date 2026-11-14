@@ -411,6 +411,12 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus, engine, inputs
     type=click.FloatRange(min=0, min_open=True),
     help="With --free-snp-weights: their Adam learning rate. Default: the config's lr_main.",
 )
+@click.option(
+    "--eval-cache-dir",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="With --chunk-rows on packed genotypes: keep the cached validation and test rows in "
+    "a file in this directory (e.g. the node's local disk), not in memory.",
+)
 def train(
     dataset_path,
     partition_path,
@@ -435,6 +441,7 @@ def train(
     snp_blocks,
     free_snp_weights,
     free_snp_lr,
+    eval_cache_dir,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -449,6 +456,7 @@ def train(
             bn_recalibrate=bn_recalibrate, snp_sample=snp_sample, chunk_rows=chunk_rows,
             chunks_per_buffer=chunks_per_buffer, snp_blocks=snp_blocks,
             free_snp_weights=free_snp_weights, free_snp_lr=free_snp_lr,
+            eval_cache_dir=eval_cache_dir,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

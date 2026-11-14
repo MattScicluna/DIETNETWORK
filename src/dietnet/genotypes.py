@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from pathlib import Path
 
 import h5py
@@ -186,6 +187,13 @@ class PackedReader:
         return out[0] if scalar else out
 
 
+def _pwrite_all(fd: int, data, offset: int) -> None:
+    view = memoryview(data).cast("B")
+    while len(view):
+        n = os.pwrite(fd, view, offset)
+        view, offset = view[n:], offset + n
+
+
 class CachedRows:
     """Some rows of a genotype source held in memory: ``cache[rows]`` for any of them.
 
@@ -193,11 +201,38 @@ class CachedRows:
     the test set): one pass over the file, then no disk at all. ``read`` is the
     source's reader, called once with the sorted rows (e.g. ``PackedReader.read``
     with a ``max_gap``, so the pass is a few large reads).
+
+    With ``directory``, the rows are held in a file there instead, memory-mapped: a node's
+    local disk, when they would not fit in the job's memory (at 9.1M SNPs, validation and
+    test are ~190 GB each, packed). They are read ``batch`` rows at a time and written
+    sequentially, each batch synced, so memory stays bounded while the file fills; its
+    pages are then clean, cached while memory allows and dropped when it does not.
     """
 
-    def __init__(self, read, rows):
+    def __init__(self, read, rows, directory=None, batch: int = 512):
         self.rows = np.unique(np.asarray(rows, dtype=np.int64))
-        self.data = np.asarray(read(self.rows))
+        self.path = None
+        if directory is None:
+            self.data = np.asarray(read(self.rows))
+            return
+        handle, path = tempfile.mkstemp(suffix=".npy", prefix="cached_rows_", dir=directory)
+        os.close(handle)
+        self.path = Path(path)
+        first = np.asarray(read(self.rows[:batch]))
+        header = np.lib.format.open_memmap(
+            self.path, mode="w+", dtype=first.dtype, shape=(len(self.rows), *first.shape[1:])
+        )
+        offset, row_bytes = header.offset, first[0].nbytes if len(first) else 0
+        del header
+        fd = os.open(self.path, os.O_WRONLY)
+        try:
+            for start in range(0, len(self.rows), batch):
+                block = first if start == 0 else np.asarray(read(self.rows[start : start + batch]))
+                _pwrite_all(fd, np.ascontiguousarray(block), offset + start * row_bytes)
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+        self.data = np.load(self.path, mmap_mode="r")
 
     def __getitem__(self, rows) -> np.ndarray:
         rows = np.asarray(rows, dtype=np.int64)
