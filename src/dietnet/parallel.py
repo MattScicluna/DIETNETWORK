@@ -589,9 +589,20 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
     say(f"Executed training in {time.time() - started} seconds")
 
     if lead:
-        checkpoint = torch.load(best_path, map_location=device, weights_only=False)
+        # The test pass needs only the model: free what training held on the GPU (the
+        # optimisers' state and the last gradients, ~11 GB for 9.1M SNPs' free weights) and
+        # load the checkpoint to the CPU, so that only the model's own parameters are on
+        # the GPU, not a second copy of them.
+        for optimizer in optimizers:
+            optimizer.zero_grad(set_to_none=True)
+            optimizer.state.clear()
+        checkpoint = torch.load(best_path, map_location="cpu", weights_only=False)
         say(f"Loading best model from epoch {checkpoint['epoch']}")
         model.load_state_dict(checkpoint["model_state_dict"])
+        epoch_best = checkpoint["epoch"]
+        del checkpoint
+        if cuda:
+            torch.cuda.empty_cache()
         model.eval()
         test_set, test_loader = eval_loader(test_rows, cached(test_rows))
         with torch.no_grad():
@@ -600,7 +611,7 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
                 str(results), "test_step",
             )  # fmt: skip
         task.print_test_results(test)
-        task.save_predictions(test, str(results / f"test_results_epoch{checkpoint['epoch']}"))
+        task.save_predictions(test, str(results / f"test_results_epoch{epoch_best}"))
     dist.barrier()
     dist.destroy_process_group()
 
