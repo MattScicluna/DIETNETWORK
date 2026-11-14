@@ -206,3 +206,26 @@ def test_recalibrated_batchnorm_trains_a_model_as_good(tmp_path):
     report = dietnet("check", packages=packages)
     accuracy = float(re.search(r"(\d\.\d+)", report.splitlines()[-1]).group(1))
     assert accuracy >= 0.9, report
+
+
+def test_the_evaluation_batch_size_changes_no_prediction(tmp_path):
+    """--eval-batch-size: training is untouched and held-out predictions are the same
+    (no dropout, batch norm in evaluation mode, no recalibration here)."""
+    import pandas as pd
+    import torch
+
+    data = DATASETS["synthetic"]
+    flags = ["--engine=dietnet", "--workers=0", "--inputs=memmap"]
+    default = train_pipeline(tmp_path / "default", data, folds="0", flags=flags)
+    small = train_pipeline(
+        tmp_path / "small", data, folds="0", flags=[*flags, "--eval-batch-size=7"]
+    )
+
+    def outputs(packages):
+        (fold,) = packages.glob("seed_*/fold_*")
+        state = torch.load(fold / "model.pt", weights_only=False)["model_state_dict"]
+        return state, pd.read_csv(fold / "test_predictions.tsv", sep="\t")
+
+    (a, pa), (b, pb) = outputs(default), outputs(small)
+    assert a.keys() == b.keys() and all(torch.equal(a[k], b[k]) for k in a)
+    pd.testing.assert_frame_equal(pa, pb)

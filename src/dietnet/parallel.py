@@ -291,6 +291,11 @@ def _args(argv=None):
         help="with --chunk-rows and packed inputs: hold the cached evaluation rows in a file "
         "in this directory (a node's local disk), not in memory",
     )  # fmt: skip
+    p.add_argument(
+        "--eval-batch-size", type=int,
+        help="samples per evaluation and batch-norm recalibration batch (default: "
+        "eval_batch_size(); fewer when whole rows of millions of SNPs do not fit the GPU)",
+    )  # fmt: skip
     return p.parse_args(argv)
 
 
@@ -408,7 +413,7 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
 
     # Evaluation has no dropout, so its batch size changes no prediction, only how
     # many batches upstream's eval_step does its per-batch bookkeeping for.
-    eval_batch = eval_batch_size(batch_size, n_snps)
+    eval_batch = args.eval_batch_size or eval_batch_size(batch_size, n_snps)
 
     def decoded(batches):
         """Batches with packed genotypes decoded on the GPU: upstream's eval_step

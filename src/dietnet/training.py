@@ -195,6 +195,7 @@ def train(
     free_snp_weights: float = 0.0,
     free_snp_lr: float | None = None,
     eval_cache_dir=None,
+    eval_batch_size: int | None = None,
 ) -> list[package.Package]:
     """Train every (seed, fold); return their packages.
 
@@ -256,6 +257,8 @@ def train(
         raise ValueError("--free-snp-weights needs engine 'dietnet' and the Diet Network")
     if eval_cache_dir is not None and not chunk_rows:
         raise ValueError("--eval-cache-dir needs --chunk-rows (only chunked reads cache rows)")
+    if eval_batch_size is not None and (engine != "dietnet" or eval_batch_size < 1):
+        raise ValueError("--eval-batch-size needs engine 'dietnet' and a positive size")
     if snp_blocks and (not chunk_rows or snp_sample >= 1):
         raise ValueError("--snp-blocks needs --chunk-rows and a --snp-sample below 1")
     if engine == "dietnet" and loader == "upstream":
@@ -324,6 +327,8 @@ def train(
                     args += ["--free-snp-lr", free_snp_lr]  # fmt: skip
                 if eval_cache_dir is not None:
                     args += ["--eval-cache-dir", Path(eval_cache_dir).resolve()]  # fmt: skip
+                if eval_batch_size is not None:
+                    args += ["--eval-batch-size", eval_batch_size]  # fmt: skip
                 _run_parallel(args, gpus, log)
             else:
                 upstream.run("train.py", args, log=log, env=env)

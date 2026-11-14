@@ -14,6 +14,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   sdist attached.
 - `dietnet train --eval-cache-dir DIR`: with `--chunk-rows`, the cached evaluation rows
   live in a memory-mapped file in DIR (a node's local disk) instead of memory.
+- `dietnet train --eval-batch-size N`: the evaluation and recalibration batch size, for
+  inputs too wide for the default.
 
 ## [0.4.0] - 2026-11-08
 

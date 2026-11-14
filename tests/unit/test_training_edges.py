@@ -107,6 +107,8 @@ UNCHECKED = dict(
             "--free-snp-weights needs engine 'dietnet' and the Diet Network",
         ),
         (dict(eval_cache_dir="cache", engine="dietnet"), "--eval-cache-dir needs --chunk-rows"),
+        (dict(eval_batch_size=32), "--eval-batch-size needs engine 'dietnet'"),
+        (dict(eval_batch_size=0, engine="dietnet"), "--eval-batch-size needs engine 'dietnet'"),
         (dict(snp_blocks=8, engine="dietnet", snp_sample=0.5), "--snp-blocks needs --chunk-rows"),
         (dict(snp_blocks=8, engine="dietnet", chunk_rows=64), "--snp-blocks needs --chunk-rows"),
         (dict(engine="dietnet", loader="upstream"), "--loader upstream applies to engine"),
