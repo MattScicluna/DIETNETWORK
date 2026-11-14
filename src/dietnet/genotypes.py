@@ -194,6 +194,105 @@ def _pwrite_all(fd: int, data, offset: int) -> None:
         view, offset = view[n:], offset + n
 
 
+def block_edges(n_snps: int, n_blocks: int) -> np.ndarray:
+    """SNP edges of ``n_blocks`` contiguous blocks (``n_blocks + 1`` values): multiples of 4
+    but the last, so that every block is whole bytes of a 2-bit row."""
+    edges = np.linspace(0, n_snps, n_blocks + 1).astype(np.int64) // 4 * 4
+    edges[-1] = n_snps
+    return edges
+
+
+def blocks_path(dataset, n_blocks: int) -> Path:
+    """Where :func:`pack_blocks` writes the blocked 2-bit copy of ``dataset``."""
+    return Path(f"{dataset}.packed{n_blocks}b.bin")
+
+
+def _blocks_meta_path(dataset, n_blocks: int) -> Path:
+    return Path(f"{blocks_path(dataset, n_blocks)}.json")
+
+
+def pack_blocks(dataset, n_blocks: int, block_bytes: int = 2**30) -> Path:
+    """Write the 2-bit copy again, cut into ``n_blocks`` blocks of SNPs (:func:`block_edges`),
+    each block stored as its own contiguous samples x bytes region.
+
+    Training with ``--snp-blocks`` holds a share of the blocks per buffer; from this copy it
+    reads only those blocks, one contiguous span of rows per block, instead of whole rows
+    of which it keeps that share. Built from the row-wise copy (:func:`pack`), read in
+    order a block of rows at a time; each block's slice of those rows is one write.
+    """
+    dataset = Path(dataset)
+    if not is_packed(dataset):
+        raise ValueError(f"{dataset} has no up-to-date packed copy; run `dietnet pack-genotypes`")
+    reader = PackedReader.of(packed_path(dataset))
+    n, row_bytes = reader.n_rows, reader.row_bytes
+    n_snps = json.loads(_meta_path(dataset).read_text())["n_snps"]
+    edges = block_edges(n_snps, n_blocks)
+    byte_edges = np.minimum(-(-edges // 4), row_bytes)
+    widths = np.diff(byte_edges)
+    offsets = np.r_[0, np.cumsum(widths * n)[:-1]]
+    out = blocks_path(dataset, n_blocks)
+    tmp = out.with_name(out.name + ".partial")
+    with open(tmp, "wb") as f:
+        f.truncate(int(widths.sum()) * n)
+    fd = os.open(tmp, os.O_WRONLY)
+    try:
+        rows_per = max(1, block_bytes // max(row_bytes, 1))
+        for r0 in range(0, n, rows_per):
+            r1 = min(r0 + rows_per, n)
+            rows = reader.read(np.arange(r0, r1))
+            for b in range(n_blocks):
+                part = np.ascontiguousarray(rows[:, byte_edges[b] : byte_edges[b + 1]])
+                _pwrite_all(fd, part, int(offsets[b] + r0 * widths[b]))
+            os.fsync(fd)
+            if hasattr(os, "posix_fadvise"):
+                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+    finally:
+        os.close(fd)
+    os.replace(tmp, out)
+    meta = {"source": _source(dataset), "n_samples": int(n), "n_snps": int(n_snps),
+            "edges": edges.tolist(), "byte_edges": byte_edges.tolist(),
+            "offsets": [int(o) for o in offsets]}  # fmt: skip
+    _blocks_meta_path(dataset, n_blocks).write_text(json.dumps(meta))
+    return out
+
+
+def is_blocked(dataset, n_blocks: int) -> bool:
+    """Whether ``dataset`` has a blocked copy of ``n_blocks`` blocks built from it as it is."""
+    meta = _blocks_meta_path(dataset, n_blocks)
+    if not (blocks_path(dataset, n_blocks).exists() and meta.exists()):
+        return False
+    return json.loads(meta.read_text())["source"] == _source(dataset)
+
+
+class BlockedReader:
+    """Rows of a blocked 2-bit copy (:func:`pack_blocks`), only of the blocks asked for:
+    ``read(rows, blocks)`` is the packed rows' bytes of those blocks, side by side, as
+    slicing whole packed rows would give."""
+
+    def __init__(self, dataset, n_blocks: int):
+        if not is_blocked(dataset, n_blocks):
+            raise ValueError(f"{dataset} has no up-to-date copy in {n_blocks} blocks")
+        meta = json.loads(_blocks_meta_path(dataset, n_blocks).read_text())
+        self.edges = np.asarray(meta["edges"])
+        widths = np.diff(meta["byte_edges"])
+        path = blocks_path(dataset, n_blocks)
+        self.readers = [PackedReader(path, meta["n_samples"], int(w), int(o))
+                        for w, o in zip(widths, meta["offsets"])]  # fmt: skip
+
+    def block_of(self, ranges) -> np.ndarray:
+        """The block numbers of SNP ranges that are whole blocks."""
+        starts = np.asarray(ranges)[:, 0]
+        at = np.searchsorted(self.edges, starts)
+        if not np.array_equal(self.edges[at], starts) or not np.array_equal(
+            self.edges[at + 1], np.asarray(ranges)[:, 1]
+        ):
+            raise ValueError("SNP ranges are not this copy's blocks")
+        return at
+
+    def read(self, rows, blocks, max_gap: int = 0) -> np.ndarray:
+        return np.concatenate([self.readers[b].read(rows, max_gap) for b in blocks], axis=1)
+
+
 class CachedRows:
     """Some rows of a genotype source held in memory: ``cache[rows]`` for any of them.
 
@@ -209,13 +308,22 @@ class CachedRows:
     pages are then clean, cached while memory allows and dropped when it does not.
     """
 
-    def __init__(self, read, rows, directory=None, batch: int = 512):
+    def __init__(self, read, rows, directory=None, batch: int = 512, key: str | None = None):
         self.rows = np.unique(np.asarray(rows, dtype=np.int64))
-        self.path = None
+        self.path, self.reused = None, False
         if directory is None:
             self.data = np.asarray(read(self.rows))
             return
-        handle, path = tempfile.mkstemp(suffix=".npy", prefix="cached_rows_", dir=directory)
+        # With a key (what the rows are of, and which), the file is named by it and reused
+        # by later runs; it is put in place only once complete.
+        final = Path(directory) / f"cached_rows_{key}.npy" if key else None
+        if final is not None and final.exists():
+            self.path, self.reused = final, True
+            self.data = np.load(final, mmap_mode="r")
+            if len(self.data) != len(self.rows):
+                raise ValueError(f"{final}: {len(self.data)} rows cached, {len(self.rows)} asked")
+            return
+        handle, path = tempfile.mkstemp(suffix=".partial", prefix="cached_rows_", dir=directory)
         os.close(handle)
         self.path = Path(path)
         first = np.asarray(read(self.rows[:batch]))
@@ -232,6 +340,13 @@ class CachedRows:
                 os.fsync(fd)
         finally:
             os.close(fd)
+        if final is not None:
+            os.replace(self.path, final)
+            self.path = final
+        else:
+            renamed = self.path.with_suffix(".npy")
+            os.replace(self.path, renamed)
+            self.path = renamed
         self.data = np.load(self.path, mmap_mode="r")
 
     def __getitem__(self, rows) -> np.ndarray:

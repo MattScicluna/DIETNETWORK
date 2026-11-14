@@ -16,6 +16,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   live in a memory-mapped file in DIR (a node's local disk) instead of memory.
 - `dietnet train --eval-batch-size N`: the evaluation and recalibration batch size, for
   inputs too wide for the default.
+- `dietnet pack-genotypes --blocks K`: the 2-bit copy also cut into K SNP blocks;
+  `train --snp-blocks K` then reads only the blocks each buffer keeps.
+- `--eval-cache-dir` reuses a cache another run built for the same rows of the same
+  dataset.
+- `dietnet train --valid-subset N`: per-epoch validation on a fixed subset.
 
 ## [0.4.0] - 2026-11-08
 

@@ -229,3 +229,42 @@ def test_the_evaluation_batch_size_changes_no_prediction(tmp_path):
     (a, pa), (b, pb) = outputs(default), outputs(small)
     assert a.keys() == b.keys() and all(torch.equal(a[k], b[k]) for k in a)
     pd.testing.assert_frame_equal(pa, pb)
+
+
+def test_buffers_read_from_blocks_train_the_same_model(tmp_path):
+    """pack-genotypes --blocks: buffers read only their blocks, the same bytes, so the
+    same model bit for bit; a keyed evaluation cache is reused by the second run; and
+    --valid-subset validates on a fixed subset."""
+    import torch
+
+    data = DATASETS["synthetic"]
+    root = tmp_path / "bl"
+    train_pipeline(root, data, folds="0", flags=["--inputs=memmap", "--loader=upstream"])
+    dietnet("pack-genotypes", dataset=root / "dataset.h5")
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    common = dict(
+        dataset=root / "dataset.h5", partition=root / "partition.npz",
+        embedding=root / "embedding.npz", input_stats=root / "stats.npz",
+        config=root / "config.yaml", seeds=3, folds="0", eval_cache_dir=cache,
+    )  # fmt: skip
+    flags = ["--engine=dietnet", "--workers=1", "--inputs=packed", "--snp-sample=0.5",
+             "--chunk-rows=64", "--chunks-per-buffer=2", "--snp-blocks=8",
+             "--bn-recalibrate=50"]  # fmt: skip
+    dietnet("train", *flags, exp_dir=root / "rows", **common)
+    dietnet("pack-genotypes", "--blocks", "8", dataset=root / "dataset.h5")
+    dietnet("train", *flags, exp_dir=root / "blocks", **common)
+    (log,) = (root / "blocks" / "logs").glob("train_*.log")
+    text = log.read_text()
+    assert "read only their 8-block share" in text and text.count("(reused)") == 2
+
+    def weights(exp):
+        (model,) = (root / exp / "packages").glob("seed_*/fold_*/model.pt")
+        return torch.load(model, weights_only=False)["model_state_dict"]
+
+    a, b = weights("rows"), weights("blocks")
+    assert a.keys() == b.keys() and all(torch.equal(a[k], b[k]) for k in a)
+
+    dietnet("train", *flags, "--valid-subset=20", exp_dir=root / "subset", **common)
+    (log,) = (root / "subset" / "logs").glob("train_*.log")
+    assert "Epoch 1:" in log.read_text()

@@ -244,7 +244,14 @@ def adjust_phenotype(phenotypes, trait, covariates, out):
 
 @main.command("pack-genotypes")
 @_dataset
-def pack_genotypes(dataset_path):
+@click.option(
+    "--blocks",
+    type=click.IntRange(min=1),
+    help="Also write the copy cut into this many SNP blocks, for `train --snp-blocks` with "
+    "the same number: buffers then read only their blocks. Uses an up-to-date row-wise copy "
+    "if there is one.",
+)
+def pack_genotypes(dataset_path, blocks):
     """Write a 2-bit copy of the dataset's genotypes, for `train --inputs packed`.
 
     A quarter of the bytes, so training from disk reads 4x less. Written next to
@@ -252,8 +259,10 @@ def pack_genotypes(dataset_path):
     """
     from dietnet import genotypes
 
-    out = genotypes.pack(dataset_path)
-    click.echo(f"wrote {out}")
+    if not (blocks and genotypes.is_packed(dataset_path)):
+        click.echo(f"wrote {genotypes.pack(dataset_path)}")
+    if blocks:
+        click.echo(f"wrote {genotypes.pack_blocks(dataset_path, blocks)}")
 
 
 @main.command("compute-input-stats")
@@ -423,6 +432,14 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus, engine, inputs
     help="Engine 'dietnet': samples per evaluation and batch-norm recalibration batch. "
     "Default: 2048, fewer for very wide inputs, never below the training batch.",
 )
+@click.option(
+    "--valid-subset",
+    type=click.IntRange(min=0),
+    default=0,
+    show_default=True,
+    help="Engine 'dietnet': validate each epoch (and stop early) on this many validation "
+    "samples, a fixed random subset; the test set is evaluated whole (0: all).",
+)
 def train(
     dataset_path,
     partition_path,
@@ -449,6 +466,7 @@ def train(
     free_snp_lr,
     eval_cache_dir,
     eval_batch_size,
+    valid_subset,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -464,6 +482,7 @@ def train(
             chunks_per_buffer=chunks_per_buffer, snp_blocks=snp_blocks,
             free_snp_weights=free_snp_weights, free_snp_lr=free_snp_lr,
             eval_cache_dir=eval_cache_dir, eval_batch_size=eval_batch_size,
+            valid_subset=valid_subset,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

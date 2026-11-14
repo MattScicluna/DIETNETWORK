@@ -161,3 +161,48 @@ def test_an_explicit_mode_is_kept_and_an_unknown_one_refused(dataset):
     assert genotypes.choose(dataset, "memmap") == "memmap"
     with pytest.raises(ValueError, match="inputs mode"):
         genotypes.choose(dataset, "disk")
+
+
+@pytest.mark.parametrize("n_blocks", [1, 3, 8])
+def test_a_blocked_copy_gives_the_packed_bytes_of_its_blocks(dataset, n_blocks):
+    """pack_blocks: each block's bytes of any rows, side by side, are those of the
+    row-wise copy sliced at the block edges; the copy goes stale with the dataset."""
+    genotypes.pack(dataset)
+    genotypes.pack_blocks(dataset, n_blocks, block_bytes=1000)
+    assert genotypes.is_blocked(dataset, n_blocks)
+    mapped = np.load(genotypes.packed_path(dataset), mmap_mode="r")
+    reader = genotypes.BlockedReader(dataset, n_blocks)
+    n_snps = genotypes.PackedStore(dataset).n_snps
+    edges = genotypes.block_edges(n_snps, n_blocks)
+    ranges = np.stack([edges[:-1], edges[1:]], axis=1)
+    rows = np.array([0, 2, 3, 9, len(mapped) - 1])
+    for picked in ([0], list(range(n_blocks)), list(range(n_blocks))[::2]):
+        expected = np.concatenate(
+            [mapped[rows][:, a // 4 : -(-b // 4)] for a, b in ranges[picked]], axis=1
+        )
+        assert np.array_equal(reader.read(rows, picked, max_gap=4), expected)
+        assert np.array_equal(reader.block_of(ranges[picked]), picked)
+    with pytest.raises(ValueError, match="not this copy's blocks"):
+        reader.block_of([[0, 1]])
+    with h5py.File(dataset, "a") as f:
+        f.attrs["rebuilt"] = 1
+    assert not genotypes.is_blocked(dataset, n_blocks)
+    with pytest.raises(ValueError, match="no up-to-date copy"):
+        genotypes.BlockedReader(dataset, n_blocks)
+
+
+def test_a_keyed_cache_is_reused_without_reading(tmp_path):
+    """CachedRows with a key: the second run with that key maps the first run's file."""
+    source = np.arange(40, dtype=np.uint8).reshape(10, 4)
+    first = genotypes.CachedRows(lambda r: source[r], [7, 2, 5], tmp_path, batch=2, key="k1")
+    assert not first.reused and first.path == tmp_path / "cached_rows_k1.npy"
+
+    def unreadable(rows):
+        raise AssertionError("read again")
+
+    again = genotypes.CachedRows(unreadable, [2, 5, 7], tmp_path, key="k1")
+    assert again.reused and np.array_equal(again[[5, 7]], source[[5, 7]])
+    with pytest.raises(ValueError, match="2 asked"):
+        genotypes.CachedRows(unreadable, [2, 5], tmp_path, key="k1")
+    unkeyed = genotypes.CachedRows(lambda r: source[r], [1], tmp_path)
+    assert unkeyed.path.suffix == ".npy" and not list(tmp_path.glob("*.partial"))
