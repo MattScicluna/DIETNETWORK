@@ -87,3 +87,29 @@ def test_the_proximal_step_is_group_soft_thresholding():
     untouched = original.clone()
     hybrid.prox(untouched, 0.0)
     assert torch.equal(untouched, original)
+
+
+def test_frozen_fat_weights_give_the_same_outputs_and_are_undone():
+    """In evaluation, weights computed once give each batch exactly what the model's own
+    forward gives, with or without free weights; the model's forward is restored after."""
+    import pytest
+
+    torch.manual_seed(4)
+    net = Net().eval()
+    batches = [torch.randn(5, 40) for _ in range(3)]
+    for free in (False, True):
+        if free:
+            delta = hybrid.attach(net)
+            with torch.no_grad():
+                delta.normal_()
+        own = net.forward
+        expected = [net(x, "", 0, 0, "valid") for x in batches]
+        with hybrid.frozen_fat_weights(net):
+            got = [net(x, "", 0, b, "valid") for b, x in enumerate(batches)]
+        assert all(torch.equal(a, b) for a, b in zip(expected, got))
+        assert net.forward == own
+        assert torch.equal(net(batches[0], "", 0, 0, "valid"), expected[0])
+    net.train()
+    with pytest.raises(ValueError, match="evaluation mode"):
+        with hybrid.frozen_fat_weights(net):
+            pass

@@ -28,6 +28,7 @@ GPUs it runs N CPU processes (gloo), which is how the tests exercise it.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -161,6 +162,14 @@ class SnpSampled(nn.Module):
             x = x[:, cols]
         weights = hybrid.fat_weights(net, cols)  # with free per-SNP weights, if any
         return net.main_net(x * (n / len(cols)), weights, results, epoch, batch, step)
+
+
+def frozen(model):
+    """:func:`dietnet.hybrid.frozen_fat_weights` for the Diet Network; nothing to freeze
+    for the MLP, which has no auxiliary network."""
+    if hasattr(model, "aux_net"):
+        return hybrid.frozen_fat_weights(model)
+    return contextlib.nullcontext()
 
 
 class ChunkPlan:
@@ -522,7 +531,7 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
                 model, recalibrated_inputs(), lambda x: model(x, str(results), epoch, 0, "valid")
             )
         model.eval()
-        with torch.no_grad():
+        with torch.no_grad(), frozen(model):
             out = m.mainloop_utils.eval_step(
                 handler, device, valid_set, valid_loader, mus, sigmas, args.normalize,
                 str(results), epoch,
@@ -636,7 +645,7 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
             torch.cuda.empty_cache()
         model.eval()
         test_set, test_loader = eval_loader(test_rows, cached(test_rows))
-        with torch.no_grad():
+        with torch.no_grad(), frozen(model):
             test = m.mainloop_utils.eval_step(
                 handler, device, test_set, test_loader, mus, sigmas, args.normalize,
                 str(results), "test_step",
