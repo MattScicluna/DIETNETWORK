@@ -137,3 +137,10 @@ def test_a_buffer_smaller_than_a_batch_is_refused(prepared, tmp_path, single_ran
     argv = _argv(prepared, tmp_path, "--model", "Mlp", "--chunk-rows", "1")
     with pytest.raises(SystemExit, match="a buffer of 4 rows holds no batch of 32"):
         parallel.main(argv)
+
+
+def test_penalty_weights_without_free_weights_are_refused(prepared, tmp_path, single_rank):
+    """--snp-penalty-weights scales the free weights' penalty: without them, refused."""
+    argv = _argv(prepared, tmp_path, "--snp-penalty-weights", str(tmp_path / "w.npy"))
+    with pytest.raises(SystemExit, match="--snp-penalty-weights needs --free-snp-weights"):
+        parallel.main(argv)

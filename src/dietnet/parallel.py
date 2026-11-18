@@ -286,11 +286,18 @@ def _args(argv=None):
         "of this strength (dietnet.hybrid; 0: off)",
     )  # fmt: skip
     p.add_argument("--free-snp-lr", type=float, help="their Adam learning rate (default lr_main)")
+    p.add_argument(
+        "--snp-penalty-weights",
+        help="with --free-snp-weights: .npy of per-SNP multipliers of the penalty, in the "
+        "dataset's SNP order (dietnet.hybrid.load_penalty_weights)",
+    )
     return p.parse_args(argv)
 
 
 def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's order
     args = _args(argv)
+    if args.snp_penalty_weights and not args.free_snp_weights:
+        raise SystemExit("--snp-penalty-weights needs --free-snp-weights")
     cuda = torch.cuda.is_available()
     dist.init_process_group("nccl" if cuda else "gloo")
     rank, world = dist.get_rank(), dist.get_world_size()
@@ -333,6 +340,10 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
         if args.model != "Dietnet":
             raise SystemExit("--free-snp-weights applies to the Diet Network only")
         delta = hybrid.attach(model)  # all 0: the model computes what it did
+    penalty = args.free_snp_weights
+    if args.snp_penalty_weights:
+        weights = hybrid.load_penalty_weights(args.snp_penalty_weights, delta.shape[1])
+        penalty = args.free_snp_weights * torch.from_numpy(weights).to(device)
     trained = model
     if args.snp_sample < 1:
         if args.model != "Dietnet":
@@ -527,7 +538,7 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
                 optimizer.step()
             if delta_optimizer is not None:  # the group-lasso proximal step
                 step_size = delta_optimizer.param_groups[0]["lr"]
-                hybrid.prox(delta, step_size * args.free_snp_weights)
+                hybrid.prox(delta, step_size * penalty)
             totals[0] += loss.detach() * len(y)
             totals[1] += len(y)
             if args.task == "classification":

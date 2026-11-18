@@ -12,6 +12,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - The release workflow creates the GitHub release for each tag it publishes to
   PyPI, with the changelog's entry for the version as notes and the wheel and
   sdist attached.
+- `dietnet train --snp-penalty-weights WEIGHTS.npy`: with `--free-snp-weights`, per-SNP
+  multipliers of the group-lasso penalty (an adaptive group lasso), so that a prior on
+  which SNPs are causal sets how strongly each SNP's free weights are shrunk.
 
 ## [0.4.0] - 2026-11-08
 

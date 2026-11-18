@@ -9,6 +9,7 @@ model package with the fold's held-out predictions next to it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import socket
@@ -194,6 +195,7 @@ def train(
     snp_blocks: int = 0,
     free_snp_weights: float = 0.0,
     free_snp_lr: float | None = None,
+    snp_penalty_weights=None,
 ) -> list[package.Package]:
     """Train every (seed, fold); return their packages.
 
@@ -231,6 +233,9 @@ def train(
     fat-layer weights get a free term under a group-lasso penalty of that strength
     (:mod:`dietnet.hybrid`), learnt by its own Adam at ``free_snp_lr`` (default the
     config's ``lr_main``); packages carry it and ``predict`` applies it.
+    ``snp_penalty_weights`` (with ``free_snp_weights``): a .npy of per-SNP multipliers of that
+    penalty, in the dataset's SNP order (:func:`dietnet.hybrid.load_penalty_weights`), so that
+    SNPs more likely to matter, by a prior, are shrunk less.
     """
     engine = engine or ("dietnet" if gpus > 1 else "upstream")
     if engine not in ("upstream", "dietnet"):
@@ -253,6 +258,8 @@ def train(
         raise ValueError(f"free_snp_weights must be >= 0, not {free_snp_weights}")
     if free_snp_weights and (engine != "dietnet" or model != "Dietnet"):
         raise ValueError("--free-snp-weights needs engine 'dietnet' and the Diet Network")
+    if snp_penalty_weights is not None and not free_snp_weights:
+        raise ValueError("--snp-penalty-weights needs --free-snp-weights")
     if snp_blocks and (not chunk_rows or snp_sample >= 1):
         raise ValueError("--snp-blocks needs --chunk-rows and a --snp-sample below 1")
     if engine == "dietnet" and loader == "upstream":
@@ -265,6 +272,17 @@ def train(
     embedding = Path(embedding).resolve() if embedding else None
     input_stats = Path(input_stats).resolve()
     exp_dir = Path(exp_dir).resolve()
+    penalty_meta = None
+    if snp_penalty_weights is not None:
+        snp_penalty_weights = Path(snp_penalty_weights).resolve()
+        with h5py.File(dataset, "r") as f:
+            n_snps = f["inputs"].shape[1]
+        weights = hybrid.load_penalty_weights(snp_penalty_weights, n_snps)  # checked before any run
+        penalty_meta = {
+            "path": str(snp_penalty_weights),
+            "sha256": hashlib.sha256(snp_penalty_weights.read_bytes()).hexdigest(),
+            "mean": float(weights.mean()),
+        }
     base = yaml.safe_load(Path(config).read_text())
     check_inputs(embedding, input_stats, dataset, partition, folds)
     try:
@@ -319,6 +337,8 @@ def train(
                 ]
                 if free_snp_lr:
                     args += ["--free-snp-lr", free_snp_lr]  # fmt: skip
+                if snp_penalty_weights is not None:
+                    args += ["--snp-penalty-weights", snp_penalty_weights]  # fmt: skip
                 _run_parallel(args, gpus, log)
             else:
                 upstream.run("train.py", args, log=log, env=env)
@@ -350,7 +370,9 @@ def train(
                     ),  # fmt: skip
                     **(
                         {hybrid.PARAMETER: {"lambda": free_snp_weights,
-                                            "lr": free_snp_lr or cfg["lr_main"]}}
+                                            "lr": free_snp_lr or cfg["lr_main"],
+                                            **({"penalty_weights": penalty_meta}
+                                               if penalty_meta else {})}}
                         if free_snp_weights else {}
                     ),  # fmt: skip
                 },

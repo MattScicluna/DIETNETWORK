@@ -181,3 +181,11 @@ watch for a best epoch that comes early. Because Adam moves each entry by about 
 rate whatever the gradient, LAMBDA is relative to the learning rate, and useful values are
 of order 0.1 to 10 rather than the small values usual for a lasso. Choose it on validation.
 Packages carry `delta` (package format 3), and `predict` applies it.
+
+`--snp-penalty-weights WEIGHTS.npy` gives each SNP its own share of the penalty, LAMBDA
+times its weight, from a vector in the dataset's SNP order. A weight of 1 leaves a SNP's
+penalty as it is, below 1 lets the SNP depart from the auxiliary network more easily, 0
+leaves it unpenalized, and above 1 holds it closer. This is the adaptive group lasso: a
+prior on which SNPs are causal, from functional annotations for instance, can then decide
+which SNPs the free weights may pick, as the annotations decide the auxiliary network's
+weights. Packages record the file's path and SHA-256.
