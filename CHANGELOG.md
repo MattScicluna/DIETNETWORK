@@ -12,9 +12,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - The release workflow creates the GitHub release for each tag it publishes to
   PyPI, with the changelog's entry for the version as notes and the wheel and
   sdist attached.
+- `dietnet create-dataset --packed-only`: the genotypes only as the 2-bit packed copy,
+  written straight from the PLINK file, without the int8 copy in the HDF5 file (a
+  quarter of the disk for biobank-scale SNP sets). Steps that need the int8 genotypes
+  refuse such a dataset.
 - `dietnet train --snp-penalty-weights WEIGHTS.npy`: with `--free-snp-weights`, per-SNP
   multipliers of the group-lasso penalty (an adaptive group lasso), so that a prior on
   which SNPs are causal sets how strongly each SNP's free weights are shrunk.
+- `dietnet train --eval-cache-dir DIR`: with `--chunk-rows`, the cached evaluation rows
+  live in a memory-mapped file in DIR (a node's local disk) instead of memory.
+- `dietnet train --eval-batch-size N`: the evaluation and recalibration batch size, for
+  inputs too wide for the default.
+- `dietnet pack-genotypes --blocks K`: the 2-bit copy also cut into K SNP blocks;
+  `train --snp-blocks K` then reads only the blocks each buffer keeps.
+- `--eval-cache-dir` reuses a cache another run built for the same rows of the same
+  dataset.
+- `dietnet train --valid-subset N`: per-epoch validation on a fixed subset.
 
 ## [0.4.0] - 2026-11-08
 

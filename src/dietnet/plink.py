@@ -161,3 +161,35 @@ class Bed:
                 dosages = BYTE_TO_DOSAGES[chunk].reshape(len(chunk), -1)[:, : s1 - s0]
                 out[:, order[c0 : c0 + len(chunk)]] = dosages.T
             yield s0, out
+
+    def snp_stripes(
+        self, load_bytes: int = LOAD_BYTES, block_bytes: int = BLOCK_BYTES
+    ) -> Iterator[tuple[int, int, np.ndarray]]:
+        """(first sample, first SNP, samples x SNPs int8 dosages): the whole matrix, in
+        blocks of samples within stripes of consecutive SNPs.
+
+        For a .bed larger than ``load_bytes``, where :meth:`sample_blocks` would re-read
+        a memory map once per block of samples: each stripe (as many SNPs as fit
+        ``load_bytes``, a multiple of 4 but the last, so that each starts on a byte of a
+        2-bit sample-major copy) is read into memory once, sequentially, so the file is
+        read once whatever its size.
+        """
+        path = f"{self.prefix}.bed"
+        width = max(4, load_bytes // self.bytes_per_snp // 4 * 4)
+        for j0 in range(0, self.n_snps, width):
+            j1 = min(j0 + width, self.n_snps)
+            raw = _read_uncached(
+                path, offset=3 + j0 * self.bytes_per_snp, size=(j1 - j0) * self.bytes_per_snp
+            ).reshape(j1 - j0, self.bytes_per_snp)
+            per_block = max(4, block_bytes // (j1 - j0) // 4 * 4)
+            for s0 in range(0, self.n_samples, per_block):
+                s1 = min(s0 + per_block, self.n_samples)
+                b0, b1 = s0 // 4, (s1 + 3) // 4
+                out = np.empty((s1 - s0, j1 - j0), dtype=np.int8)
+                for c0 in range(0, j1 - j0, SNP_CHUNK):
+                    chunk = raw[c0 : c0 + SNP_CHUNK, b0:b1]
+                    dosages = BYTE_TO_DOSAGES[chunk].reshape(len(chunk), -1)[:, : s1 - s0]
+                    out[:, c0 : c0 + len(chunk)] = dosages.T
+                yield s0, j0, out
+            # Free this stripe before reading the next: chunk is a view that keeps it alive.
+            del raw, chunk

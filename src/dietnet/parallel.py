@@ -28,6 +28,9 @@ GPUs it runs N CPU processes (gloo), which is how the tests exercise it.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
+import json
 import os
 import time
 from pathlib import Path
@@ -161,6 +164,14 @@ class SnpSampled(nn.Module):
         return net.main_net(x * (n / len(cols)), weights, results, epoch, batch, step)
 
 
+def frozen(model):
+    """:func:`dietnet.hybrid.frozen_fat_weights` for the Diet Network; nothing to freeze
+    for the MLP, which has no auxiliary network."""
+    if hasattr(model, "aux_net"):
+        return hybrid.frozen_fat_weights(model)
+    return contextlib.nullcontext()
+
+
 class ChunkPlan:
     """Which rows and SNPs each in-memory buffer of an epoch holds.
 
@@ -187,8 +198,7 @@ class ChunkPlan:
         self.n_chunks = max(chunks_per_buffer * world, len(self.rows) // chunk_rows)
         self.buffer_rows = chunks_per_buffer * (len(self.rows) // self.n_chunks)
         self.epoch = 0
-        edges = np.linspace(0, n_snps, snp_blocks + 1).astype(np.int64) // 4 * 4
-        edges[-1] = n_snps
+        edges = genotypes.block_edges(n_snps, snp_blocks) if snp_blocks else None
         self.blocks = np.stack([edges[:-1], edges[1:]], axis=1) if snp_blocks else None
 
     def set_epoch(self, epoch: int) -> None:
@@ -225,11 +235,19 @@ class ChunkBuffers(torch.utils.data.Dataset):
     memory, so disk access stays sequential; packed genotypes stay packed, for the GPU
     to decode, as whole bytes of each kept block."""
 
-    def __init__(self, store, labels, packed):
+    def __init__(self, store, labels, packed, blocked=None):
         self.store, self.labels, self.packed = store, labels, packed
+        self.blocked = blocked  # a BlockedReader: read only the kept blocks
 
     def __getitem__(self, item):
         rows, ranges = item
+        if self.blocked is not None:
+            x = self.blocked.read(rows, self.blocked.block_of(ranges), max_gap=TRAIN_GAP)
+            return (
+                torch.from_numpy(x),
+                torch.from_numpy(np.asarray(self.labels[rows])),
+                torch.from_numpy(plan_columns(ranges)),
+            )
         if self.packed:  # sorted rows: a few large reads, through gaps of up to TRAIN_GAP rows
             x = self.store.reader.read(rows, max_gap=TRAIN_GAP)
         else:
@@ -291,6 +309,21 @@ def _args(argv=None):
         help="with --free-snp-weights: .npy of per-SNP multipliers of the penalty, in the "
         "dataset's SNP order (dietnet.hybrid.load_penalty_weights)",
     )
+    p.add_argument(
+        "--eval-cache-dir",
+        help="with --chunk-rows and packed inputs: hold the cached evaluation rows in a file "
+        "in this directory (a node's local disk), not in memory",
+    )  # fmt: skip
+    p.add_argument(
+        "--valid-subset", type=int, default=0,
+        help="validate each epoch on this many of the validation samples, a fixed random "
+        "subset (0: all)",
+    )  # fmt: skip
+    p.add_argument(
+        "--eval-batch-size", type=int,
+        help="samples per evaluation and batch-norm recalibration batch (default: "
+        "eval_batch_size(); fewer when whole rows of millions of SNPs do not fit the GPU)",
+    )  # fmt: skip
     return p.parse_args(argv)
 
 
@@ -361,6 +394,12 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
     # Data.
     fold_rows = np.load(args.partition, allow_pickle=True)["folds_indexes"][fold]
     train_rows, valid_rows, test_rows = (np.asarray(r) for r in fold_rows)
+    if args.valid_subset and args.valid_subset < len(valid_rows):
+        # A fixed share of the validation samples for each epoch's validation and early
+        # stopping; the test set is evaluated whole.
+        valid_rows = np.sort(
+            np.random.default_rng([seed, 1]).choice(valid_rows, args.valid_subset, replace=False)
+        )
     stats = np.load(args.input_features_stats, allow_pickle=True)
     mus = torch.from_numpy(stats["means_by_fold"][fold]).float().to(device)
     sigmas = None
@@ -389,7 +428,12 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
                 f"a buffer of {sampler.buffer_rows} rows holds no batch of {per_rank}: "
                 "raise --chunk-rows or --chunks-per-buffer"
             )
-        buffers = ChunkBuffers(store, labels, packed)
+        blocked = None
+        if packed and args.snp_blocks and genotypes.is_blocked(args.dataset, args.snp_blocks):
+            blocked = genotypes.BlockedReader(args.dataset, args.snp_blocks)
+            say(f"dietnet: training buffers read only their {args.snp_blocks}-block share "
+                f"from {genotypes.blocks_path(args.dataset, args.snp_blocks)}")  # fmt: skip
+        buffers = ChunkBuffers(store, labels, packed, blocked)
         options = dict(
             batch_size=None, sampler=sampler, collate_fn=_as_is, num_workers=args.workers
         )
@@ -414,7 +458,7 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
 
     # Evaluation has no dropout, so its batch size changes no prediction, only how
     # many batches upstream's eval_step does its per-batch bookkeeping for.
-    eval_batch = eval_batch_size(batch_size, n_snps)
+    eval_batch = args.eval_batch_size or eval_batch_size(batch_size, n_snps)
 
     def decoded(batches):
         """Batches with packed genotypes decoded on the GPU: upstream's eval_step
@@ -440,8 +484,17 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
         if not (args.chunk_rows and packed):
             return None
         started = time.time()
-        cache = genotypes.CachedRows(lambda r: store.reader.read(r, max_gap=EVAL_GAP), rows)
-        say(f"dietnet: {len(cache.rows)} evaluation rows cached in memory "
+        key = None
+        if args.eval_cache_dir:
+            ident = json.dumps(genotypes._source(args.dataset), sort_keys=True).encode()
+            key = hashlib.sha256(ident + np.unique(rows).astype(np.int64).tobytes()).hexdigest()
+        cache = genotypes.CachedRows(
+            lambda r: store.reader.read(r, max_gap=EVAL_GAP), rows, args.eval_cache_dir,
+            key=key[:24] if key else None,
+        )  # fmt: skip
+        where = f"in {cache.path}" if cache.path else "in memory"
+        where += " (reused)" if cache.reused else ""
+        say(f"dietnet: {len(cache.rows)} evaluation rows cached {where} "
             f"({cache.data.nbytes / 2**30:.1f} GiB, {time.time() - started:.0f} s)")  # fmt: skip
         return cache
 
@@ -489,7 +542,7 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
                 model, recalibrated_inputs(), lambda x: model(x, str(results), epoch, 0, "valid")
             )
         model.eval()
-        with torch.no_grad():
+        with torch.no_grad(), frozen(model):
             out = m.mainloop_utils.eval_step(
                 handler, device, valid_set, valid_loader, mus, sigmas, args.normalize,
                 str(results), epoch,
@@ -587,18 +640,29 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
     say(f"Executed training in {time.time() - started} seconds")
 
     if lead:
-        checkpoint = torch.load(best_path, map_location=device, weights_only=False)
+        # The test pass needs only the model: free what training held on the GPU (the
+        # optimisers' state and the last gradients, ~11 GB for 9.1M SNPs' free weights) and
+        # load the checkpoint to the CPU, so that only the model's own parameters are on
+        # the GPU, not a second copy of them.
+        for optimizer in optimizers:
+            optimizer.zero_grad(set_to_none=True)
+            optimizer.state.clear()
+        checkpoint = torch.load(best_path, map_location="cpu", weights_only=False)
         say(f"Loading best model from epoch {checkpoint['epoch']}")
         model.load_state_dict(checkpoint["model_state_dict"])
+        epoch_best = checkpoint["epoch"]
+        del checkpoint
+        if cuda:
+            torch.cuda.empty_cache()
         model.eval()
         test_set, test_loader = eval_loader(test_rows, cached(test_rows))
-        with torch.no_grad():
+        with torch.no_grad(), frozen(model):
             test = m.mainloop_utils.eval_step(
                 handler, device, test_set, test_loader, mus, sigmas, args.normalize,
                 str(results), "test_step",
             )  # fmt: skip
         task.print_test_results(test)
-        task.save_predictions(test, str(results / f"test_results_epoch{checkpoint['epoch']}"))
+        task.save_predictions(test, str(results / f"test_results_epoch{epoch_best}"))
     dist.barrier()
     dist.destroy_process_group()
 

@@ -37,6 +37,7 @@ Build upstream's HDF5 dataset from PLINK, without the text round-trip
 | `--labels PATH` | *existing* TSV: sample id, class label | |
 | `--regression-labels PATH` | *existing* TSV: sample id, value | |
 | `--out PATH` | output `.h5` | required |
+| `--packed-only` | write the genotypes only as the 2-bit copy that `pack-genotypes` makes, not as int8 in the `.h5`: a quarter of the disk and no int8 copy to write, for datasets too large to hold twice. The `.h5` keeps the labels, SNP table and the shape of `inputs`. Steps that read the int8 genotypes refuse it (`pack-genotypes`, `generate-embedding`, upstream's statistics engine, and the `ram` and `memmap` genotype stores); dietnet's statistics engine, `build-embedding` and training from the packed store read it | off |
 
 ## `dietnet partition`
 
@@ -120,6 +121,7 @@ time. Rerun it after the dataset changes; a stale copy is refused.
 | option | | default |
 |---|---|---|
 | `--dataset PATH` | *existing* dataset | required |
+| `--blocks K` | also write the copy cut into K blocks of SNPs, each stored as its own contiguous region (`<dataset>.packed<K>b.bin`), for `train --snp-blocks K`: each training buffer then reads only the blocks it keeps, not whole rows. Built from an up-to-date row-wise copy when there is one | |
 
 ## `dietnet compute-input-stats`
 
@@ -164,6 +166,9 @@ Train each (seed, fold) with upstream `train.py`; package the results under
 | `--free-snp-weights` | engine `dietnet`, Diet Network only: each SNP's fat-layer weights become the auxiliary network's plus a free term, trained under a group-lasso penalty of this strength (one group per SNP, a proximal step after each update), so the model can weigh SNPs jointly, as a penalised regression does. Packages carry the free weights and `predict` applies them | 0 (off) |
 | `--free-snp-lr` | with `--free-snp-weights`: their Adam learning rate | the config's `lr_main` |
 | `--snp-penalty-weights` | with `--free-snp-weights`: a `.npy` vector of per-SNP multipliers of the penalty, in the dataset's SNP order (1: unchanged, below 1: shrink the SNP less, 0: not at all), for example from a prior on which SNPs are causal. Packages record its path and checksum | none (every SNP 1) |
+| `--eval-cache-dir DIR` | with `--chunk-rows` on packed genotypes: the validation and test rows, read once and reused every epoch, are kept in a memory-mapped file in DIR (the node's local disk, say) rather than in memory, where at millions of SNPs they would not fit (about 190 GB each at 9.1M SNPs and 85,000 samples) | in memory |
+| `--eval-batch-size N` | engine `dietnet`: samples per evaluation and batch-norm recalibration batch. Predictions do not depend on it (no dropout, batch norm in evaluation mode); recalibration averages per-batch statistics, so it can move them slightly. Lower it when whole rows do not fit the GPU (9.1M SNPs: 4.7 GiB per float copy of a 138-sample batch) | 2048, fewer for wide inputs, never below the training batch |
+| `--valid-subset N` | engine `dietnet`: validate each epoch, and stop early, on N validation samples, a fixed random subset; the test set is still evaluated whole | 0 (all) |
 | `--snp-blocks` | with `--chunk-rows` and `--snp-sample`: cut the SNPs into this many contiguous blocks and keep a `--snp-sample` share of the blocks per buffer, not random SNPs per batch | 0 (off) |
 
 ## `dietnet match`

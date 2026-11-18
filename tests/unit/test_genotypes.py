@@ -125,6 +125,14 @@ def test_reads_through_gaps_and_cached_rows_give_the_same_bytes(dataset):
     with pytest.raises(KeyError):
         cache[absent]
 
+    # In a file instead of memory, filled a few rows at a time: the same rows.
+    on_disk = genotypes.CachedRows(
+        lambda r: reader.read(r, max_gap=4), rows[::-1], directory=dataset.parent, batch=3
+    )
+    assert on_disk.path.parent == dataset.parent and isinstance(on_disk.data, np.memmap)
+    np.testing.assert_array_equal(on_disk.data, cache.data)
+    np.testing.assert_array_equal(on_disk[some], mapped[some])
+
 
 def test_auto_prefers_an_up_to_date_pack(dataset):
     assert genotypes.choose(dataset, "auto") == "ram"
@@ -153,3 +161,120 @@ def test_an_explicit_mode_is_kept_and_an_unknown_one_refused(dataset):
     assert genotypes.choose(dataset, "memmap") == "memmap"
     with pytest.raises(ValueError, match="inputs mode"):
         genotypes.choose(dataset, "disk")
+
+
+@pytest.fixture
+def packed_only(tmp_path, kgp_mini):
+    return ds.build(
+        kgp_mini.plink_prefix, tmp_path / "p.h5", class_labels=kgp_mini.labels, packed_only=True
+    )
+
+
+def test_a_packed_only_dataset_is_the_pack_of_the_full_one(dataset, packed_only):
+    """create-dataset --packed-only: the same file minus the int8 values, and an up-to-date
+    2-bit copy with exactly the full dataset's pack."""
+    genotypes.pack(dataset)
+    assert genotypes.is_packed(packed_only)
+    assert np.array_equal(
+        np.load(genotypes.packed_path(packed_only)), np.load(genotypes.packed_path(dataset))
+    )
+    with h5py.File(dataset, "r") as full, h5py.File(packed_only, "r") as f:
+        assert f["inputs"].shape == full["inputs"].shape
+        assert f["inputs"].id.get_storage_size() == 0  # nothing stored
+        assert not f.attrs["inputs_stored"] and full.attrs["inputs_stored"]
+        for key in ("snp_names", "samples", "class_labels", "snps/pos"):
+            assert np.array_equal(f[key][()], full[key][()]), key
+    assert genotypes.inputs_stored(dataset) and not genotypes.inputs_stored(packed_only)
+    rows = np.array([3, 0, 7])
+    assert np.array_equal(
+        genotypes.open_store(packed_only, "packed")[rows],
+        genotypes.open_store(dataset, "ram")[rows],
+    )
+
+
+@pytest.mark.parametrize("load_bytes", [1, 7 * 1000, 10**9])
+def test_snp_stripes_give_the_whole_matrix_and_the_same_pack(
+    tmp_path, kgp_mini, dataset, load_bytes
+):
+    """Stripes of SNPs (one per 4 SNPs at the smallest, several of uneven width, or the
+    whole file) cover the matrix exactly, and a packed-only build from them is the full
+    dataset's pack."""
+    from dietnet.plink import Bed
+
+    bed = Bed.open(kgp_mini.plink_prefix)
+    whole = np.full((bed.n_samples, bed.n_snps), 9, dtype=np.int8)
+    for start, snp, block in bed.snp_stripes(load_bytes, block_bytes=4 * 1000):
+        assert snp % 4 == 0 and start % 4 == 0
+        assert (whole[start : start + len(block), snp : snp + block.shape[1]] == 9).all()
+        whole[start : start + len(block), snp : snp + block.shape[1]] = block
+    with h5py.File(dataset, "r") as f:
+        assert np.array_equal(whole, f["inputs"][()])
+
+    out = ds.build(kgp_mini.plink_prefix, tmp_path / "s.h5", class_labels=kgp_mini.labels,
+                   packed_only=True, load_bytes=load_bytes, block_bytes=4 * 1000)  # fmt: skip
+    genotypes.pack(dataset)
+    assert np.array_equal(
+        np.load(genotypes.packed_path(out)), np.load(genotypes.packed_path(dataset))
+    )
+    assert not list(tmp_path.glob("*.stripe*"))  # the per-stripe files are removed
+
+
+def test_a_packed_only_dataset_is_read_only_through_its_pack(packed_only):
+    """auto picks the pack; anything that would read the absent int8 values is refused,
+    including auto once the pack is stale, and re-packing."""
+    assert genotypes.choose(packed_only, "auto") == "packed"
+    assert genotypes.choose(packed_only, "packed") == "packed"
+    for mode in ("ram", "memmap"):
+        with pytest.raises(ValueError, match=f"--inputs {mode} reads the int8 genotypes"):
+            genotypes.choose(packed_only, mode)
+    with pytest.raises(ValueError, match="pack-genotypes reads the int8 genotypes"):
+        genotypes.pack(packed_only)
+    with h5py.File(packed_only, "a") as f:
+        f.attrs["rebuilt"] = 1
+    with pytest.raises(ValueError, match="only in its packed copy"):
+        genotypes.choose(packed_only, "auto")
+
+
+@pytest.mark.parametrize("n_blocks", [1, 3, 8])
+def test_a_blocked_copy_gives_the_packed_bytes_of_its_blocks(dataset, n_blocks):
+    """pack_blocks: each block's bytes of any rows, side by side, are those of the
+    row-wise copy sliced at the block edges; the copy goes stale with the dataset."""
+    genotypes.pack(dataset)
+    genotypes.pack_blocks(dataset, n_blocks, block_bytes=1000)
+    assert genotypes.is_blocked(dataset, n_blocks)
+    mapped = np.load(genotypes.packed_path(dataset), mmap_mode="r")
+    reader = genotypes.BlockedReader(dataset, n_blocks)
+    n_snps = genotypes.PackedStore(dataset).n_snps
+    edges = genotypes.block_edges(n_snps, n_blocks)
+    ranges = np.stack([edges[:-1], edges[1:]], axis=1)
+    rows = np.array([0, 2, 3, 9, len(mapped) - 1])
+    for picked in ([0], list(range(n_blocks)), list(range(n_blocks))[::2]):
+        expected = np.concatenate(
+            [mapped[rows][:, a // 4 : -(-b // 4)] for a, b in ranges[picked]], axis=1
+        )
+        assert np.array_equal(reader.read(rows, picked, max_gap=4), expected)
+        assert np.array_equal(reader.block_of(ranges[picked]), picked)
+    with pytest.raises(ValueError, match="not this copy's blocks"):
+        reader.block_of([[0, 1]])
+    with h5py.File(dataset, "a") as f:
+        f.attrs["rebuilt"] = 1
+    assert not genotypes.is_blocked(dataset, n_blocks)
+    with pytest.raises(ValueError, match="no up-to-date copy"):
+        genotypes.BlockedReader(dataset, n_blocks)
+
+
+def test_a_keyed_cache_is_reused_without_reading(tmp_path):
+    """CachedRows with a key: the second run with that key maps the first run's file."""
+    source = np.arange(40, dtype=np.uint8).reshape(10, 4)
+    first = genotypes.CachedRows(lambda r: source[r], [7, 2, 5], tmp_path, batch=2, key="k1")
+    assert not first.reused and first.path == tmp_path / "cached_rows_k1.npy"
+
+    def unreadable(rows):
+        raise AssertionError("read again")
+
+    again = genotypes.CachedRows(unreadable, [2, 5, 7], tmp_path, key="k1")
+    assert again.reused and np.array_equal(again[[5, 7]], source[[5, 7]])
+    with pytest.raises(ValueError, match="2 asked"):
+        genotypes.CachedRows(unreadable, [2, 5], tmp_path, key="k1")
+    unkeyed = genotypes.CachedRows(lambda r: source[r], [1], tmp_path)
+    assert unkeyed.path.suffix == ".npy" and not list(tmp_path.glob("*.partial"))

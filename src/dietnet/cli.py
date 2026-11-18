@@ -52,14 +52,24 @@ def main():
 @click.option("--labels", type=click.Path(exists=True), help="TSV: sample id, class label.")
 @click.option("--regression-labels", type=click.Path(exists=True), help="TSV: sample id, value.")
 @click.option("--out", required=True, type=click.Path(path_type=Path), help="Output .h5.")
-def create_dataset(plink_prefix, labels, regression_labels, out):
+@click.option(
+    "--packed-only",
+    is_flag=True,
+    help="Write the genotypes only as the 2-bit copy (as pack-genotypes makes), not as int8 "
+    "in the .h5: a quarter of the disk, for datasets too large to hold twice. Steps that read "
+    "the int8 genotypes (upstream's embedding and statistics scripts) then refuse it.",
+)
+def create_dataset(plink_prefix, labels, regression_labels, out, packed_only):
     """Build upstream's HDF5 dataset from PLINK, without the text round-trip."""
     from dietnet import dataset
 
     if not labels and not regression_labels:
         raise click.UsageError("give --labels, --regression-labels or both")
-    dataset.build(plink_prefix, out, class_labels=labels, regression_labels=regression_labels)
-    click.echo(f"wrote {out}")
+    dataset.build(
+        plink_prefix, out, class_labels=labels, regression_labels=regression_labels,
+        packed_only=packed_only,
+    )  # fmt: skip
+    click.echo(f"wrote {out}" + (" and its packed copy" if packed_only else ""))
 
 
 @main.command()
@@ -90,7 +100,12 @@ def partition(dataset_path, out, nb_folds, seed, train_valid_ratio, balanced):
 
 
 def _per_fold_step(script, dataset_path, partition_path, out, ncpus):
-    from dietnet import upstream
+    from dietnet import genotypes, upstream
+
+    try:
+        genotypes.require_inputs(dataset_path, f"upstream's {script}")
+    except ValueError as error:
+        raise click.ClickException(str(error)) from None
 
     out = _npz(out)
     upstream.run(script, [
@@ -244,7 +259,14 @@ def adjust_phenotype(phenotypes, trait, covariates, out):
 
 @main.command("pack-genotypes")
 @_dataset
-def pack_genotypes(dataset_path):
+@click.option(
+    "--blocks",
+    type=click.IntRange(min=1),
+    help="Also write the copy cut into this many SNP blocks, for `train --snp-blocks` with "
+    "the same number: buffers then read only their blocks. Uses an up-to-date row-wise copy "
+    "if there is one.",
+)
+def pack_genotypes(dataset_path, blocks):
     """Write a 2-bit copy of the dataset's genotypes, for `train --inputs packed`.
 
     A quarter of the bytes, so training from disk reads 4x less. Written next to
@@ -252,8 +274,13 @@ def pack_genotypes(dataset_path):
     """
     from dietnet import genotypes
 
-    out = genotypes.pack(dataset_path)
-    click.echo(f"wrote {out}")
+    try:
+        if not (blocks and genotypes.is_packed(dataset_path)):
+            click.echo(f"wrote {genotypes.pack(dataset_path)}")
+        if blocks:
+            click.echo(f"wrote {genotypes.pack_blocks(dataset_path, blocks)}")
+    except ValueError as error:
+        raise click.ClickException(str(error)) from None
 
 
 @main.command("compute-input-stats")
@@ -418,6 +445,26 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus, engine, inputs
     "dataset's SNP order (below 1: shrink a SNP less, 0: not at all), e.g. from a prior on "
     "which SNPs are causal.",
 )
+@click.option(
+    "--eval-cache-dir",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="With --chunk-rows on packed genotypes: keep the cached validation and test rows in "
+    "a file in this directory (e.g. the node's local disk), not in memory.",
+)
+@click.option(
+    "--eval-batch-size",
+    type=click.IntRange(min=1),
+    help="Engine 'dietnet': samples per evaluation and batch-norm recalibration batch. "
+    "Default: 2048, fewer for very wide inputs, never below the training batch.",
+)
+@click.option(
+    "--valid-subset",
+    type=click.IntRange(min=0),
+    default=0,
+    show_default=True,
+    help="Engine 'dietnet': validate each epoch (and stop early) on this many validation "
+    "samples, a fixed random subset; the test set is evaluated whole (0: all).",
+)
 def train(
     dataset_path,
     partition_path,
@@ -443,6 +490,9 @@ def train(
     free_snp_weights,
     free_snp_lr,
     snp_penalty_weights,
+    eval_cache_dir,
+    eval_batch_size,
+    valid_subset,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -458,6 +508,8 @@ def train(
             chunks_per_buffer=chunks_per_buffer, snp_blocks=snp_blocks,
             free_snp_weights=free_snp_weights, free_snp_lr=free_snp_lr,
             snp_penalty_weights=snp_penalty_weights,
+            eval_cache_dir=eval_cache_dir, eval_batch_size=eval_batch_size,
+            valid_subset=valid_subset,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

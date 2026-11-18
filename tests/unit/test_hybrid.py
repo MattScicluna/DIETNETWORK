@@ -127,3 +127,29 @@ def test_penalty_weights_are_checked(tmp_path):
     np.save(path := tmp_path / "matrix.npy", np.ones((3, 1)))
     with pytest.raises(ValueError, match="expected"):
         hybrid.load_penalty_weights(path, 3)
+
+
+def test_frozen_fat_weights_give_the_same_outputs_and_are_undone():
+    """In evaluation, weights computed once give each batch exactly what the model's own
+    forward gives, with or without free weights; the model's forward is restored after."""
+    import pytest
+
+    torch.manual_seed(4)
+    net = Net().eval()
+    batches = [torch.randn(5, 40) for _ in range(3)]
+    for free in (False, True):
+        if free:
+            delta = hybrid.attach(net)
+            with torch.no_grad():
+                delta.normal_()
+        own = net.forward
+        expected = [net(x, "", 0, 0, "valid") for x in batches]
+        with hybrid.frozen_fat_weights(net):
+            got = [net(x, "", 0, b, "valid") for b, x in enumerate(batches)]
+        assert all(torch.equal(a, b) for a, b in zip(expected, got))
+        assert net.forward == own
+        assert torch.equal(net(batches[0], "", 0, 0, "valid"), expected[0])
+    net.train()
+    with pytest.raises(ValueError, match="evaluation mode"):
+        with hybrid.frozen_fat_weights(net):
+            pass
