@@ -213,7 +213,7 @@ def test_a_class_too_small_for_every_fold_is_refused(tmp_path, synthetic, name):
     labels = pd.read_csv(synthetic.labels, sep="\t")
     labels.iloc[0, 1] = name
     labels.to_csv(tmp_path / "labels.tsv", sep="\t", index=False)
-    dietnet("create-dataset", plink=synthetic.plink_prefix, labels=tmp_path / "labels.tsv",
+    dietnet("create-dataset", "--int8", plink=synthetic.plink_prefix, labels=tmp_path / "labels.tsv",
             out=tmp_path / "d.h5")  # fmt: skip
     dietnet("partition", dataset=tmp_path / "d.h5", out=tmp_path / "p.npz")
 
@@ -240,7 +240,11 @@ def test_train_and_predict_with_a_built_embedding(tmp_path, synthetic):
         )
     )
     dietnet(
-        "create-dataset", plink=synthetic.plink_prefix, labels=synthetic.labels, out=root / "d.h5"
+        "create-dataset",
+        "--int8",
+        plink=synthetic.plink_prefix,
+        labels=synthetic.labels,
+        out=root / "d.h5",
     )
     common = dict(dataset=root / "d.h5", partition=root / "p.npz")
     dietnet("partition", dataset=root / "d.h5", out=root / "p.npz")
@@ -273,7 +277,11 @@ def test_the_mlp_baseline_trains_and_predicts_without_an_embedding(tmp_path, syn
     root.mkdir()
     (root / "config.yaml").write_text(yaml.safe_dump(CONFIG))
     dietnet(
-        "create-dataset", plink=synthetic.plink_prefix, labels=synthetic.labels, out=root / "d.h5"
+        "create-dataset",
+        "--int8",
+        plink=synthetic.plink_prefix,
+        labels=synthetic.labels,
+        out=root / "d.h5",
     )
     common = dict(dataset=root / "d.h5", partition=root / "p.npz")
     dietnet("partition", dataset=root / "d.h5", out=root / "p.npz")

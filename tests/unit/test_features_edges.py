@@ -159,7 +159,7 @@ def test_standardize_refuses_a_constant_column():
 @pytest.fixture
 def small(tmp_path, synthetic):
     """A dataset and a two-fold partition file, without running upstream."""
-    dataset = ds.build(synthetic.plink_prefix, tmp_path / "d.h5")
+    dataset = ds.build(synthetic.plink_prefix, tmp_path / "d.h5", int8=True)
     partition = tmp_path / "p.npz"
     np.savez(partition, folds_indexes=np.zeros((2, 1)))
     return dataset, partition

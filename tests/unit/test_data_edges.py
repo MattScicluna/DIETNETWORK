@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from dietnet import _io
 from dietnet import dataset as ds
 from dietnet import genotypes, phenotype, plink
 
@@ -42,7 +43,7 @@ def test_labels_keep_ids_and_extra_columns_are_ignored(tmp_path):
 def test_a_regression_only_dataset_has_no_class_labels(tmp_path, synthetic):
     """With only regression labels the file holds them as float64 and no classes."""
     trait = synthetic.labels.with_name("synthetic_trait.tsv")
-    out = ds.build(synthetic.plink_prefix, tmp_path / "r.h5", regression_labels=trait)
+    out = ds.build(synthetic.plink_prefix, tmp_path / "r.h5", int8=True, regression_labels=trait)
 
     with h5py.File(out) as f:
         assert "class_labels" not in f and "class_label_names" not in f
@@ -60,7 +61,7 @@ def test_a_sample_without_a_label_is_refused(tmp_path, synthetic):
     path = tmp_path / "labels.tsv"
     table.iloc[2:].to_csv(path, sep="\t", index=False)
     with pytest.raises(ValueError, match="2 samples in the PLINK files have no label"):
-        ds.build(synthetic.plink_prefix, tmp_path / "x.h5", class_labels=path)
+        ds.build(synthetic.plink_prefix, tmp_path / "x.h5", int8=True, class_labels=path)
 
 
 def write_names(path, names):
@@ -141,7 +142,7 @@ def test_a_short_file_raises_eof(tmp_path):
     path = tmp_path / "f.bin"
     path.write_bytes(bytes(range(10)))
     with pytest.raises(EOFError, match="expected 20 bytes after offset 3, got 7"):
-        plink._read_uncached(path, offset=3, size=20, chunk=4)
+        _io.read_uncached(path, offset=3, size=20, chunk=4)
 
 
 def test_pages_are_dropped_where_posix_fadvise_exists(tmp_path, monkeypatch):
@@ -154,7 +155,7 @@ def test_pages_are_dropped_where_posix_fadvise_exists(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(os, "POSIX_FADV_DONTNEED", 4, raising=False)
 
-    out = plink._read_uncached(path, offset=2, size=7, chunk=3)
+    out = _io.read_uncached(path, offset=2, size=7, chunk=3)
 
     assert out.tolist() == list(range(2, 9))
     assert calls == [(2, 3, 4), (5, 3, 4), (8, 1, 4)]
@@ -165,40 +166,27 @@ def test_pages_are_dropped_where_posix_fadvise_exists(tmp_path, monkeypatch):
 
 @pytest.fixture
 def dataset(tmp_path, synthetic):
-    return ds.build(synthetic.plink_prefix, tmp_path / "d.h5")
+    return ds.build(synthetic.plink_prefix, tmp_path / "d.h5", int8=True)
 
 
-def test_an_unsupported_npy_version_is_refused(tmp_path):
-    """A version 3.0 .npy header is not read, rather than misread."""
-    path = tmp_path / "x.npy"
-    with open(path, "wb") as f:
-        np.lib.format.write_array(f, np.zeros((2, 3), dtype=np.uint8), version=(3, 0))
-    with pytest.raises(ValueError, match=r"unsupported .npy format version \(3, 0\)"):
-        genotypes.PackedReader.of(path)
+def test_a_truncated_pack_raises_eof(dataset):
+    """A row the sidecar promises but the file lacks raises EOFError naming the row."""
+    path = genotypes.packed_path(dataset)
+    reader = genotypes.PackedFile(dataset)
+    path.write_bytes(path.read_bytes()[: reader.offsets[1] - 1])  # the first block, short a byte
+    with pytest.raises(EOFError, match=f"short read at row {reader.n_rows - 1}"):
+        reader.read([reader.n_rows - 1])
 
 
-def test_a_truncated_pack_raises_eof(tmp_path):
-    """A row the header promises but the file lacks raises EOFError naming the row."""
-    path = tmp_path / "x.npy"
-    np.save(path, np.arange(6, dtype=np.uint8).reshape(2, 3))
-    reader = genotypes.PackedReader.of(path)
-    assert reader.read([1]).tolist() == [[3, 4, 5]]
-
-    longer = genotypes.PackedReader(path, n_rows=4, row_bytes=3, offset=reader.offset)
-    with pytest.raises(EOFError, match="short read at row 3"):
-        longer.read([3])
-
-
-def test_a_packed_store_reuses_its_map_and_pickles_without_it(dataset):
-    """The memory map is opened once, and left out when the store is pickled."""
-    genotypes.pack(dataset)
+def test_a_packed_store_pickles_without_its_open_file(dataset):
+    """A loader worker opens the file itself: the store pickles without the handle."""
     store = genotypes.PackedStore(dataset)
-    first = store.packed
-    assert store.packed is first
+    first = store[[0, 1]]
+    assert store.reader._file is not None
 
     copy = pickle.loads(pickle.dumps(store))
-    assert copy._packed is None
-    np.testing.assert_array_equal(copy[[0, 5, 2]], store[[0, 5, 2]])
+    assert copy.reader._file is None
+    np.testing.assert_array_equal(copy[[0, 1]], first)
 
 
 def test_a_memmap_store_has_a_length_and_pickles_as_its_path(dataset):

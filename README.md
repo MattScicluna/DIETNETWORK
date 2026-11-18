@@ -91,9 +91,10 @@ on covariates (sex, age) and standardises it; train with `--task regression`,
 the auxiliary network fed `genotype_freq` (frequencies pooled over all
 samples) by `build-embedding`, and `dietnet check` reports r, R² and RMSE.
 
-For a biobank-sized dataset, `dietnet pack-genotypes --dataset dataset.h5` once,
-then `train --inputs packed` reads a 2-bit copy a batch at a time instead of
-loading every genotype into RAM (see the docs' Scaling page).
+For a biobank-sized dataset, `train --inputs packed` reads the 2-bit copy that
+`create-dataset` writes a batch at a time instead of loading every genotype into
+RAM (see the docs' Scaling page); `dietnet pack-genotypes` rewrites it for a dataset built
+with int8 genotypes.
 
 - `labels.tsv`: a header row, then `sample id<TAB>label`. Every sample in the
   .fam needs a label.

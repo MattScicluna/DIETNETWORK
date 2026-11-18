@@ -47,8 +47,8 @@ def test_a_buffer_decodes_to_the_kept_columns_of_the_store():
     packed = genotypes.encode(x)
 
     class Reader:
-        def read(self, rows, max_gap=0):
-            return packed[rows]
+        def read(self, rows, max_gap=0, ranges=None):
+            return np.concatenate([packed[rows][:, a // 4 : -(-b // 4)] for a, b in ranges], 1)
 
     class Store:
         def __init__(self):

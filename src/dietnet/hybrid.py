@@ -55,10 +55,13 @@ def forward(self, x_batch, results_fullpath, epoch, batch, step, save_layers=Fal
 @contextlib.contextmanager
 def frozen_fat_weights(model):
     """Within the block, ``model`` (upstream's ``DietNetwork``, with or without free weights,
-    in evaluation mode) computes its fat-layer weights once and reuses them for every
+    in evaluation mode; for any other model, nothing changes) computes its fat-layer weights once and reuses them for every
     batch. They do not depend on the batch, but its forward recomputes them for each: at
     9.1M SNPs the auxiliary network's pass over every SNP, hundreds of times per
     validation. The same numbers, so the same outputs."""
+    if not hasattr(model, "aux_net"):  # the MLP: no fat-layer weights to compute
+        yield
+        return
     if model.training:
         raise ValueError("frozen fat-layer weights need the model in evaluation mode")
     with torch.no_grad():

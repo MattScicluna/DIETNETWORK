@@ -97,7 +97,9 @@ def test_missing_snps_are_handled_as_upstream_handles_them(
     assert ours.scale == pytest.approx(500 / 350)
 
     # Upstream's route: the cohort as its own dataset, matched by upstream's code.
-    cohort_h5 = ds.build(cohort, tmp_path / "partial.hdf5", class_labels=synthetic.labels)
+    cohort_h5 = ds.build(
+        cohort, tmp_path / "partial.hdf5", int8=True, class_labels=synthetic.labels
+    )
     theirs = upstream_independent_test(
         upstream_checkout, packages[0], cohort_h5, tmp_path, matched=False
     )

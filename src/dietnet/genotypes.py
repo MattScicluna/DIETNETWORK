@@ -12,16 +12,18 @@ A *store* is anything that gives those rows by sample index -- ``store[i]`` or
 - ``memmap``: a memory map of the dataset file (:func:`dietnet.dataset.memmap_inputs`).
   Rows are read when a batch asks for them; the OS keeps what it can in its
   page cache, which every process on a node shares.
-- ``packed``: a memory map of a 2-bit copy (:func:`pack`), a quarter of the
-  bytes, decoded per batch. Training from local disk is limited by how many
-  bytes it reads, so this is the fastest store when the data does not fit in
-  memory.
+- ``packed``: a 2-bit copy (:class:`PackedFile`), a quarter of the bytes, decoded per
+  batch. Training from disk is limited by how many bytes it reads, so this is the
+  fastest store when the data does not fit in memory. The copy is laid out in blocks of
+  SNPs, each block a contiguous samples x bytes region: whole rows read every block,
+  and training that keeps a share of the SNPs per buffer reads only its blocks.
 
 All give the same rows, so the model trained from any of them is the same.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -30,6 +32,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from dietnet._io import sync_and_drop, write_at
 from dietnet.dataset import memmap_inputs
 
 MODES = ("ram", "memmap", "packed")
@@ -37,6 +40,10 @@ MODES = ("ram", "memmap", "packed")
 # "auto" leaves inputs smaller than this in RAM (the threshold the 2022 fork used
 # for its PLINK genotype cache); a copy in RAM then costs little and is fastest.
 AUTO_MEMMAP_ABOVE_BYTES = 2 * 2**30
+
+# SNP blocks of the packed copy: training's --snp-blocks with the same number reads whole
+# blocks only (any other number is read through the blocks that cover its ranges).
+PACKED_BLOCKS = 64
 
 # 2-bit codes: dosage 0, 1, 2 as themselves, missing (-1) as 3. Four genotypes per
 # byte, the first in the lowest bits; rows padded to whole bytes.
@@ -47,8 +54,8 @@ DECODE_TABLE[DECODE_TABLE == 3] = -1
 
 
 def packed_path(dataset) -> Path:
-    """Where :func:`pack` writes the 2-bit copy of ``dataset``."""
-    return Path(f"{dataset}.packed.npy")
+    """Where the 2-bit copy of ``dataset`` is (:class:`PackedWriter`)."""
+    return Path(f"{dataset}.packed.bin")
 
 
 def _meta_path(dataset) -> Path:
@@ -85,118 +92,86 @@ def decode(packed: np.ndarray, n_snps: int) -> np.ndarray:
     return rows if rows.shape[1] == n_snps else np.ascontiguousarray(rows[:, :n_snps])
 
 
-def pack(dataset, block: int = 4096) -> Path:
-    """Write the 2-bit copy of ``dataset``'s inputs next to it; return its path.
+def block_edges(n_snps: int, n_blocks: int) -> np.ndarray:
+    """SNP edges of ``n_blocks`` contiguous blocks (``n_blocks + 1`` values): multiples of 4
+    but the last, so that every block is whole bytes of a 2-bit row."""
+    edges = np.linspace(0, n_snps, n_blocks + 1).astype(np.int64) // 4 * 4
+    edges[-1] = n_snps
+    return edges
 
-    Reads the dataset ``block`` samples at a time, so memory stays small. The
-    sidecar ``.packed.json`` records the dataset it came from.
+
+def packed_stripes(n_snps: int, max_snps: int) -> list[tuple[int, int]]:
+    """Consecutive runs of whole blocks of the packed copy, each of at most ``max_snps``
+    SNPs (or one block, if a block alone is more): the pieces a .bed is read in to write
+    the copy (:meth:`dietnet.plink.Bed.snp_stripes`)."""
+    edges = block_edges(n_snps, PACKED_BLOCKS)
+    runs, first = [], 0
+    for b in range(1, PACKED_BLOCKS + 1):
+        if b == PACKED_BLOCKS or int(edges[b + 1]) - int(edges[first]) > max_snps:
+            if edges[b] > edges[first]:
+                runs.append((int(edges[first]), int(edges[b])))
+            first = b
+    return runs
+
+
+class PackedWriter:
+    """Writes the 2-bit copy of a dataset being built (``out``), in bounded memory.
+
+    ``write(start, snp, rows)`` takes int8 rows from sample ``start``, SNPs from ``snp``
+    to the end of a block (a piece covers whole blocks); each block's bytes of those rows
+    are one write at their place in the block's region, so the file fills sequentially
+    within every region and nothing is read back. ``finish()``, once the dataset file is
+    in place, moves the copy in and records what it was built from.
     """
+
+    def __init__(self, out, n_samples: int, n_snps: int):
+        self.out, self.n_samples, self.n_snps = Path(out), n_samples, n_snps
+        self.edges = block_edges(n_snps, PACKED_BLOCKS)
+        self.byte_edges = -(-self.edges // 4)
+        self.widths = np.diff(self.byte_edges)
+        self.offsets = np.r_[0, np.cumsum(self.widths * n_samples)[:-1]]
+        self.tmp = packed_path(self.out).with_name(packed_path(self.out).name + ".partial")
+        with open(self.tmp, "wb") as f:
+            f.truncate(int(self.widths.sum()) * n_samples)
+        self._fd = os.open(self.tmp, os.O_WRONLY)
+
+    def write(self, start: int, snp: int, rows: np.ndarray) -> None:
+        packed = encode(rows)
+        lo = int(self.byte_edges[np.searchsorted(self.edges, snp)])
+        for b in range(PACKED_BLOCKS):
+            b0, b1 = int(self.byte_edges[b]), int(self.byte_edges[b + 1])
+            if b1 <= lo or b0 >= lo + packed.shape[1] or b1 == b0:
+                continue
+            piece = np.ascontiguousarray(packed[:, b0 - lo : b1 - lo])
+            write_at(self._fd, piece, int(self.offsets[b] + start * self.widths[b]))
+        sync_and_drop(self._fd)
+
+    def finish(self) -> Path:
+        os.close(self._fd)
+        os.replace(self.tmp, packed_path(self.out))
+        meta = {"source": _source(self.out), "edges": self.edges.tolist(),
+                "byte_edges": self.byte_edges.tolist(),
+                "offsets": [int(o) for o in self.offsets]}  # fmt: skip
+        _meta_path(self.out).write_text(json.dumps(meta))
+        return packed_path(self.out)
+
+
+def pack(dataset, block: int = 4096) -> Path:
+    """Write the 2-bit copy of a dataset that has int8 ``inputs``, ``block`` samples at a
+    time; return its path. (``create-dataset`` writes it directly from PLINK.)"""
     dataset = Path(dataset)
     require_inputs(dataset, "pack-genotypes")
-    source = _source(dataset)
-    n, m = source["n_samples"], source["n_snps"]
-    out = packed_path(dataset)
-    tmp = out.with_name(out.name + ".partial")
-    packed = np.lib.format.open_memmap(tmp, mode="w+", dtype=np.uint8, shape=(n, -(-m // 4)))
     with h5py.File(dataset, "r") as f:
-        for start in range(0, n, block):
-            packed[start : start + block] = encode(f["inputs"][start : start + block])
-    packed.flush()
-    del packed
-    return finish_pack(dataset, tmp, source)
-
-
-def _sync_and_drop(fd: int) -> None:
-    """Write ``fd``'s dirty pages out and drop its cached pages: on a cluster both count
-    against the job's memory limit (Linux; elsewhere only synced)."""
-    os.fsync(fd)
-    if hasattr(os, "posix_fadvise"):
-        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
-
-
-def _pwrite_all(fd: int, data, offset: int) -> None:
-    view = memoryview(data).cast("B")
-    while len(view):
-        n = os.pwrite(fd, view, offset)
-        view, offset = view[n:], offset + n
-
-
-def _pread_all(fd: int, size: int, offset: int) -> np.ndarray:
-    out = np.empty(size, dtype=np.uint8)
-    view, done = memoryview(out), 0
-    while done < size:
-        n = os.preadv(fd, [view[done:]], offset + done)
-        if not n:
-            raise EOFError(f"expected {size} bytes at offset {offset}, got {done}")
-        done += n
-    if hasattr(os, "posix_fadvise"):
-        os.posix_fadvise(fd, offset, size, os.POSIX_FADV_DONTNEED)
-    return out
-
-
-def pack_bed(bed, path, load_bytes: int, block_bytes: int) -> None:
-    """Write the 2-bit copy of a PLINK fileset's genotypes (samples x SNPs) to ``path``,
-    from :meth:`dietnet.plink.Bed.snp_stripes`, in bounded memory and sequential I/O only.
-
-    Writing each stripe's bytes into every row of the final file would be strided writes
-    that start mid-page, which a shared filesystem serves with a read per row. Instead:
-    each stripe goes to its own file, sample-major and appended in order; then the final
-    rows are assembled a block at a time from the matching range of every stripe file and
-    written contiguously. Takes the final file's size again in temporary space, removed at
-    the end.
-    """
-    path = Path(path)
-    parts, fd = [], None  # (file, bytes per row) per stripe
-    ins, out = [], None
-    try:
-        for start, _, block in bed.snp_stripes(load_bytes, block_bytes):
-            if start == 0:  # a new stripe
-                if fd is not None:
-                    _sync_and_drop(fd)
-                    os.close(fd)
-                part = path.with_name(f"{path.name}.stripe{len(parts)}")
-                fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666)
-                parts.append((part, -(-block.shape[1] // 4)))
-            _pwrite_all(fd, encode(block), os.lseek(fd, 0, os.SEEK_END))
-            _sync_and_drop(fd)
-        if fd is not None:
-            _sync_and_drop(fd)
-            os.close(fd)
-            fd = None
-
-        n, width = bed.n_samples, sum(w for _, w in parts)
-        header = np.lib.format.open_memmap(path, mode="w+", dtype=np.uint8, shape=(n, width))
-        offset = header.offset
-        del header
-        out = os.open(path, os.O_WRONLY)
-        ins = [os.open(part, os.O_RDONLY) for part, _ in parts]
-        rows = max(1, block_bytes // max(width, 1))
-        for r0 in range(0, n, rows):
-            r1 = min(r0 + rows, n)
-            pieces = [_pread_all(f, (r1 - r0) * w, r0 * w).reshape(r1 - r0, w)
-                      for f, (_, w) in zip(ins, parts)]  # fmt: skip
-            _pwrite_all(out, np.concatenate(pieces, axis=1), offset + r0 * width)
-            _sync_and_drop(out)
-    finally:
-        for f in [fd, out, *ins]:
-            if f is not None:
-                os.close(f)
-        for part, _ in parts:
-            part.unlink(missing_ok=True)
-
-
-def finish_pack(dataset, written: Path, source: dict | None = None) -> Path:
-    """Put a fully written 2-bit copy of ``dataset`` in place and record what it was built
-    from (``source``, by default the dataset as it is now)."""
-    out = packed_path(dataset)
-    os.replace(written, out)
-    _meta_path(dataset).write_text(json.dumps(source or _source(dataset)))
-    return out
+        inputs = f["inputs"]
+        writer = PackedWriter(dataset, *inputs.shape)
+        for start in range(0, inputs.shape[0], block):
+            writer.write(start, 0, inputs[start : start + block])
+    return writer.finish()
 
 
 def inputs_stored(dataset) -> bool:
-    """Whether ``dataset`` stores its genotypes as int8 ``inputs``: not when built with
-    ``create-dataset --packed-only``, which keeps them only in the 2-bit copy."""
+    """Whether ``dataset`` stores its genotypes as int8 ``inputs`` (``create-dataset
+    --int8``); otherwise they are only in the 2-bit copy."""
     with h5py.File(dataset, "r") as f:
         return bool(f.attrs.get("inputs_stored", True))
 
@@ -206,7 +181,7 @@ def require_inputs(dataset, what: str) -> None:
     if not inputs_stored(dataset):
         raise ValueError(
             f"{what} reads the int8 genotypes, but {dataset} has them only in its packed "
-            "copy (create-dataset --packed-only): read them with --inputs packed"
+            "copy: read them with --inputs packed, or build it with create-dataset --int8"
         )
 
 
@@ -215,34 +190,55 @@ def is_packed(dataset) -> bool:
     meta = _meta_path(dataset)
     if not (packed_path(dataset).exists() and meta.exists()):
         return False
-    return json.loads(meta.read_text()) == _source(dataset)
+    return json.loads(meta.read_text()).get("source") == _source(dataset)
 
 
-class PackedReader:
-    """Rows of a 2-bit copy read with plain file reads: ``reader[rows]`` is
-    ``packed[rows]``, one read per run of consecutive rows.
+def _read_rows(f, offset: int, row_bytes: int, rows: np.ndarray, max_gap: int) -> np.ndarray:
+    """Rows ``rows`` (ascending runs) of a samples x ``row_bytes`` region at ``offset``.
+    Rows within ``max_gap`` of each other are read as one span and the rows between
+    discarded: a few large reads instead of many small ones, which is what a parallel file
+    system serves fast."""
+    out = np.empty((len(rows), row_bytes), dtype=np.uint8)
+    if not len(rows) or not row_bytes:
+        return out
+    step = np.diff(rows)
+    breaks = np.flatnonzero((step < 1) | (step > max_gap + 1)) + 1
+    for start, stop in zip(np.r_[0, breaks], np.r_[breaks, len(rows)]):
+        first, last = int(rows[start]), int(rows[stop - 1])
+        span = np.empty((last - first + 1, row_bytes), dtype=np.uint8)
+        f.seek(offset + first * row_bytes)
+        view, done = memoryview(span).cast("B"), 0
+        while done < len(view):
+            n = f.readinto(view[done:])
+            if not n:
+                raise EOFError(f"{f.name}: short read at row {first}")
+            done += n
+        out[start:stop] = span[rows[start:stop] - first]
+    return out
 
-    Indexing the memory map instead turns each 322 KB row (1.29M SNPs) into ~80
-    page faults of 4 KB, each a round trip: on Lustre, validation's ~105k scattered
-    rows went at ~3 MB/s. Opened lazily, once per process (loader workers fork).
+
+class PackedFile:
+    """Rows of a dataset's 2-bit copy, read with plain file reads: ``read(rows)`` is their
+    bytes; ``read(rows, ranges=...)`` only those of the SNP ranges (starts multiples of 4),
+    side by side, from the blocks that cover them.
+
+    Indexing a memory map instead turns each row into page faults of 4 KB, each a round
+    trip: on Lustre, validation's ~105k scattered rows went at ~3 MB/s. The file is opened
+    lazily, once per process (loader workers fork).
     """
 
-    def __init__(self, path, n_rows, row_bytes, offset):
-        self.path, self.n_rows, self.row_bytes, self.offset = Path(path), n_rows, row_bytes, offset
+    def __init__(self, dataset):
+        if not is_packed(dataset):
+            raise ValueError(
+                f"{dataset} has no up-to-date packed copy; run `dietnet pack-genotypes`"
+            )
+        meta = json.loads(_meta_path(dataset).read_text())
+        self.path = packed_path(dataset)
+        self.n_rows, self.n_snps = meta["source"]["n_samples"], meta["source"]["n_snps"]
+        self.byte_edges = np.asarray(meta["byte_edges"])
+        self.offsets = np.asarray(meta["offsets"])
+        self.row_bytes = int(self.byte_edges[-1])
         self._file, self._pid = None, None
-
-    @classmethod
-    def of(cls, path) -> PackedReader:
-        with open(path, "rb") as f:
-            version = np.lib.format.read_magic(f)  # public readers: numpy versions differ
-            read = {
-                (1, 0): np.lib.format.read_array_header_1_0,
-                (2, 0): np.lib.format.read_array_header_2_0,
-            }.get(version)
-            if read is None:
-                raise ValueError(f"{path}: unsupported .npy format version {version}")
-            shape, _, _ = read(f)
-            return cls(path, shape[0], shape[1], f.tell())
 
     def __getstate__(self):
         return {**self.__dict__, "_file": None, "_pid": None}
@@ -255,195 +251,70 @@ class PackedReader:
     def __getitem__(self, rows) -> np.ndarray:
         return self.read(rows)
 
-    def _read_into(self, f, view, first_row):
-        f.seek(self.offset + int(first_row) * self.row_bytes)
-        done = 0
-        while done < len(view):
-            n = f.readinto(view[done:])
-            if not n:
-                raise EOFError(f"{self.path}: short read at row {first_row}")
-            done += n
-
-    def read(self, rows, max_gap: int = 0) -> np.ndarray:
-        """``packed[rows]``. Rows within ``max_gap`` of each other (in the given order,
-        ascending) are read as one span and the rows between discarded: a few large
-        reads instead of many small ones, which is what a parallel file system serves
-        fast, for at most ``max_gap`` rows of extra bytes per gap."""
+    def read(self, rows, max_gap: int = 0, ranges=None) -> np.ndarray:
         scalar = np.ndim(rows) == 0
         rows = np.atleast_1d(np.asarray(rows, dtype=np.int64))
         if len(rows) and (rows.min() < 0 or rows.max() >= self.n_rows):
             raise IndexError(f"rows out of range 0..{self.n_rows - 1}")
-        out = np.empty((len(rows), self.row_bytes), dtype=np.uint8)
-        if not len(rows):
-            return out
-        f = self._handle()
-        step = np.diff(rows)
-        breaks = np.flatnonzero((step < 1) | (step > max_gap + 1)) + 1
-        for start, stop in zip(np.r_[0, breaks], np.r_[breaks, len(rows)]):
-            first, last = int(rows[start]), int(rows[stop - 1])
-            if last - first + 1 == stop - start:  # consecutive: straight into out
-                self._read_into(f, memoryview(out[start:stop]).cast("B"), first)
-                continue
-            span = np.empty((last - first + 1, self.row_bytes), dtype=np.uint8)
-            self._read_into(f, memoryview(span).cast("B"), first)
-            out[start:stop] = span[rows[start:stop] - first]
+        spans = [(0, self.row_bytes)] if ranges is None else [
+            (int(a) // 4, -(-int(b) // 4)) for a, b in ranges
+        ]  # fmt: skip
+        if ranges is not None and any(int(a) % 4 for a, _ in ranges):
+            raise ValueError("SNP ranges must start on a byte: a multiple of 4")
+        be, f, parts = self.byte_edges, self._handle(), []
+        for lo, hi in spans:
+            for b in np.flatnonzero((be[:-1] < hi) & (be[1:] > lo) & (be[1:] > be[:-1])):
+                block = _read_rows(f, int(self.offsets[b]), int(be[b + 1] - be[b]), rows, max_gap)
+                parts.append(block[:, max(lo, be[b]) - be[b] : min(hi, be[b + 1]) - be[b]])
+        out = np.concatenate(parts, axis=1) if parts else np.empty((len(rows), 0), np.uint8)
         return out[0] if scalar else out
 
 
-def block_edges(n_snps: int, n_blocks: int) -> np.ndarray:
-    """SNP edges of ``n_blocks`` contiguous blocks (``n_blocks + 1`` values): multiples of 4
-    but the last, so that every block is whole bytes of a 2-bit row."""
-    edges = np.linspace(0, n_snps, n_blocks + 1).astype(np.int64) // 4 * 4
-    edges[-1] = n_snps
-    return edges
-
-
-def blocks_path(dataset, n_blocks: int) -> Path:
-    """Where :func:`pack_blocks` writes the blocked 2-bit copy of ``dataset``."""
-    return Path(f"{dataset}.packed{n_blocks}b.bin")
-
-
-def _blocks_meta_path(dataset, n_blocks: int) -> Path:
-    return Path(f"{blocks_path(dataset, n_blocks)}.json")
-
-
-def pack_blocks(dataset, n_blocks: int, block_bytes: int = 2**30) -> Path:
-    """Write the 2-bit copy again, cut into ``n_blocks`` blocks of SNPs (:func:`block_edges`),
-    each block stored as its own contiguous samples x bytes region.
-
-    Training with ``--snp-blocks`` holds a share of the blocks per buffer; from this copy it
-    reads only those blocks, one contiguous span of rows per block, instead of whole rows
-    of which it keeps that share. Built from the row-wise copy (:func:`pack`), read in
-    order a block of rows at a time; each block's slice of those rows is one write.
-    """
-    dataset = Path(dataset)
-    if not is_packed(dataset):
-        raise ValueError(f"{dataset} has no up-to-date packed copy; run `dietnet pack-genotypes`")
-    reader = PackedReader.of(packed_path(dataset))
-    n, row_bytes = reader.n_rows, reader.row_bytes
-    n_snps = json.loads(_meta_path(dataset).read_text())["n_snps"]
-    edges = block_edges(n_snps, n_blocks)
-    byte_edges = np.minimum(-(-edges // 4), row_bytes)
-    widths = np.diff(byte_edges)
-    offsets = np.r_[0, np.cumsum(widths * n)[:-1]]
-    out = blocks_path(dataset, n_blocks)
-    tmp = out.with_name(out.name + ".partial")
-    with open(tmp, "wb") as f:
-        f.truncate(int(widths.sum()) * n)
-    fd = os.open(tmp, os.O_WRONLY)
-    try:
-        rows_per = max(1, block_bytes // max(row_bytes, 1))
-        for r0 in range(0, n, rows_per):
-            r1 = min(r0 + rows_per, n)
-            rows = reader.read(np.arange(r0, r1))
-            for b in range(n_blocks):
-                part = np.ascontiguousarray(rows[:, byte_edges[b] : byte_edges[b + 1]])
-                _pwrite_all(fd, part, int(offsets[b] + r0 * widths[b]))
-            os.fsync(fd)
-            if hasattr(os, "posix_fadvise"):
-                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
-    finally:
-        os.close(fd)
-    os.replace(tmp, out)
-    meta = {"source": _source(dataset), "n_samples": int(n), "n_snps": int(n_snps),
-            "edges": edges.tolist(), "byte_edges": byte_edges.tolist(),
-            "offsets": [int(o) for o in offsets]}  # fmt: skip
-    _blocks_meta_path(dataset, n_blocks).write_text(json.dumps(meta))
-    return out
-
-
-def is_blocked(dataset, n_blocks: int) -> bool:
-    """Whether ``dataset`` has a blocked copy of ``n_blocks`` blocks built from it as it is."""
-    meta = _blocks_meta_path(dataset, n_blocks)
-    if not (blocks_path(dataset, n_blocks).exists() and meta.exists()):
-        return False
-    return json.loads(meta.read_text())["source"] == _source(dataset)
-
-
-class BlockedReader:
-    """Rows of a blocked 2-bit copy (:func:`pack_blocks`), only of the blocks asked for:
-    ``read(rows, blocks)`` is the packed rows' bytes of those blocks, side by side, as
-    slicing whole packed rows would give."""
-
-    def __init__(self, dataset, n_blocks: int):
-        if not is_blocked(dataset, n_blocks):
-            raise ValueError(f"{dataset} has no up-to-date copy in {n_blocks} blocks")
-        meta = json.loads(_blocks_meta_path(dataset, n_blocks).read_text())
-        self.edges = np.asarray(meta["edges"])
-        widths = np.diff(meta["byte_edges"])
-        path = blocks_path(dataset, n_blocks)
-        self.readers = [PackedReader(path, meta["n_samples"], int(w), int(o))
-                        for w, o in zip(widths, meta["offsets"])]  # fmt: skip
-
-    def block_of(self, ranges) -> np.ndarray:
-        """The block numbers of SNP ranges that are whole blocks."""
-        starts = np.asarray(ranges)[:, 0]
-        at = np.searchsorted(self.edges, starts)
-        if not np.array_equal(self.edges[at], starts) or not np.array_equal(
-            self.edges[at + 1], np.asarray(ranges)[:, 1]
-        ):
-            raise ValueError("SNP ranges are not this copy's blocks")
-        return at
-
-    def read(self, rows, blocks, max_gap: int = 0) -> np.ndarray:
-        return np.concatenate([self.readers[b].read(rows, max_gap) for b in blocks], axis=1)
-
-
 class CachedRows:
-    """Some rows of a genotype source held in memory: ``cache[rows]`` for any of them.
+    """The rows every epoch reads again (validation, the batch-norm recalibration subset,
+    the test set), read once into a file in ``directory`` and memory-mapped: one pass over
+    the genotype file, then pages the OS keeps in memory while it can.
 
-    For the rows every epoch reads again (validation, the BN recalibration subset,
-    the test set): one pass over the file, then no disk at all. ``read`` is the
-    source's reader, called once with the sorted rows (e.g. ``PackedReader.read``
-    with a ``max_gap``, so the pass is a few large reads).
-
-    With ``directory``, the rows are held in a file there instead, memory-mapped: a node's
-    local disk, when they would not fit in the job's memory (at 9.1M SNPs, validation and
-    test are ~190 GB each, packed). They are read ``batch`` rows at a time and written
-    sequentially, each batch synced, so memory stays bounded while the file fills; its
-    pages are then clean, cached while memory allows and dropped when it does not.
+    The file is named by ``ident`` (what the rows are of: :func:`dataset_ident`) and the
+    rows themselves, so a later run asking for the same rows of the same data maps it
+    instead of reading them again; it is put in place only once complete. ``read`` is
+    called ``batch`` sorted rows at a time (e.g. ``PackedFile.read`` with a ``max_gap``)
+    and each batch is written and synced, so memory stays bounded while the file fills.
     """
 
-    def __init__(self, read, rows, directory=None, batch: int = 512, key: str | None = None):
+    def __init__(self, read, rows, directory, ident: str, batch: int = 512):
         self.rows = np.unique(np.asarray(rows, dtype=np.int64))
-        self.path, self.reused = None, False
-        if directory is None:
-            self.data = np.asarray(read(self.rows))
-            return
-        # With a key (what the rows are of, and which), the file is named by it and reused
-        # by later runs; it is put in place only once complete.
-        final = Path(directory) / f"cached_rows_{key}.npy" if key else None
-        if final is not None and final.exists():
-            self.path, self.reused = final, True
-            self.data = np.load(final, mmap_mode="r")
-            if len(self.data) != len(self.rows):
-                raise ValueError(f"{final}: {len(self.data)} rows cached, {len(self.rows)} asked")
-            return
-        handle, path = tempfile.mkstemp(suffix=".partial", prefix="cached_rows_", dir=directory)
+        key = hashlib.sha256(ident.encode() + self.rows.tobytes()).hexdigest()[:24]
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        self.path = directory / f"cached_rows_{key}.npy"
+        self.reused = self.path.exists()
+        if not self.reused:
+            self._write(read, batch)
+        self.data = np.load(self.path, mmap_mode="r")
+        if len(self.data) != len(self.rows):
+            raise ValueError(f"{self.path}: {len(self.data)} rows cached, {len(self.rows)} asked")
+
+    def _write(self, read, batch: int) -> None:
+        handle, tmp = tempfile.mkstemp(
+            suffix=".partial", prefix="cached_rows_", dir=self.path.parent
+        )
         os.close(handle)
-        self.path = Path(path)
         first = np.asarray(read(self.rows[:batch]))
         header = np.lib.format.open_memmap(
-            self.path, mode="w+", dtype=first.dtype, shape=(len(self.rows), *first.shape[1:])
+            tmp, mode="w+", dtype=first.dtype, shape=(len(self.rows), *first.shape[1:])
         )
         offset, row_bytes = header.offset, first[0].nbytes if len(first) else 0
         del header
-        fd = os.open(self.path, os.O_WRONLY)
+        fd = os.open(tmp, os.O_WRONLY)
         try:
             for start in range(0, len(self.rows), batch):
                 block = first if start == 0 else np.asarray(read(self.rows[start : start + batch]))
-                _pwrite_all(fd, np.ascontiguousarray(block), offset + start * row_bytes)
+                write_at(fd, np.ascontiguousarray(block), offset + start * row_bytes)
                 os.fsync(fd)
         finally:
             os.close(fd)
-        if final is not None:
-            os.replace(self.path, final)
-            self.path = final
-        else:
-            renamed = self.path.with_suffix(".npy")
-            os.replace(self.path, renamed)
-            self.path = renamed
-        self.data = np.load(self.path, mmap_mode="r")
+        os.replace(tmp, self.path)
 
     def __getitem__(self, rows) -> np.ndarray:
         rows = np.asarray(rows, dtype=np.int64)
@@ -455,50 +326,32 @@ class CachedRows:
         return self.data[at]
 
 
-class PackedStore:
-    """int8 rows decoded from the 2-bit copy, read with file reads (:class:`PackedReader`).
+def dataset_ident(dataset) -> str:
+    """What identifies a dataset's genotypes for caching: its shape, size and mtime."""
+    return json.dumps(_source(dataset), sort_keys=True)
 
-    ``store[i]`` is one row, ``store[indices]`` a block of rows, as for a numpy
-    array; :meth:`packed_rows` gives the undecoded bytes, for decoding on a GPU.
+
+class PackedStore:
+    """int8 rows decoded from the 2-bit copy (:class:`PackedFile`).
+
+    ``store[i]`` is one row, ``store[indices]`` a block of rows, as for a numpy array;
+    ``reader`` gives the undecoded bytes, for decoding on a GPU.
     """
 
     def __init__(self, dataset):
-        if not is_packed(dataset):
-            raise ValueError(
-                f"{dataset} has no up-to-date packed copy; run `dietnet pack-genotypes`"
-            )
         self.dataset = Path(dataset)
-        self.n_snps = json.loads(_meta_path(dataset).read_text())["n_snps"]
-        self._packed, self._reader = None, None
-        self.shape = (len(self.packed), self.n_snps)
+        self.reader = PackedFile(dataset)
+        self.n_snps = self.reader.n_snps
+        self.shape = (self.reader.n_rows, self.n_snps)
         self.dtype = np.dtype(np.int8)
-
-    @property
-    def packed(self) -> np.ndarray:
-        if self._packed is None:  # opened where it is used: a loader worker maps its own
-            self._packed = np.load(packed_path(self.dataset), mmap_mode="r")
-        return self._packed
-
-    def __getstate__(self):
-        return {**self.__dict__, "_packed": None}
 
     def __len__(self) -> int:
         return self.shape[0]
 
-    @property
-    def reader(self) -> PackedReader:
-        """The undecoded rows, read with file reads rather than through the memory map."""
-        if getattr(self, "_reader", None) is None:
-            self._reader = PackedReader.of(packed_path(self.dataset))
-        return self._reader
-
-    def packed_rows(self, rows) -> np.ndarray:
-        return self.reader[rows]
-
     def __getitem__(self, rows) -> np.ndarray:
         if np.ndim(rows) == 0:
             return decode(self.reader[int(rows)][None], self.n_snps)[0]
-        return decode(self.packed_rows(rows), self.n_snps)
+        return decode(self.reader[rows], self.n_snps)
 
 
 class MemmapStore:

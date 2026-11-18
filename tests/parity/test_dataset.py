@@ -25,6 +25,7 @@ def built(tmp_path, dataset, request):
     return ds.build(
         dataset.plink_prefix,
         tmp_path / "d.h5",
+        int8=True,
         class_labels=dataset.labels,
         block_bytes=request.param,
         **extra,
@@ -69,4 +70,9 @@ def test_samples_without_labels_are_an_error(tmp_path, synthetic):
     labels.to_csv(tmp_path / "partial.tsv", sep="\t", index=False)
 
     with pytest.raises(ValueError, match="no label"):
-        ds.build(synthetic.plink_prefix, tmp_path / "d.h5", class_labels=tmp_path / "partial.tsv")
+        ds.build(
+            synthetic.plink_prefix,
+            tmp_path / "d.h5",
+            int8=True,
+            class_labels=tmp_path / "partial.tsv",
+        )

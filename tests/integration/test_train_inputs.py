@@ -108,7 +108,7 @@ def test_the_launcher_swaps_the_copy_for_the_store(tmp_path, monkeypatch):
     from dietnet import genotypes, upstream
 
     data = DATASETS["synthetic"]
-    dataset = ds.build(data.plink_prefix, tmp_path / "d.h5", class_labels=data.labels)
+    dataset = ds.build(data.plink_prefix, tmp_path / "d.h5", int8=True, class_labels=data.labels)
     monkeypatch.syspath_prepend(str(upstream.script("train.py").parent))
     import helpers.dataset_utils as du
 

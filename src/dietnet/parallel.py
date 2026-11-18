@@ -28,9 +28,6 @@ GPUs it runs N CPU processes (gloo), which is how the tests exercise it.
 from __future__ import annotations
 
 import argparse
-import contextlib
-import hashlib
-import json
 import os
 import time
 from pathlib import Path
@@ -164,12 +161,18 @@ class SnpSampled(nn.Module):
         return net.main_net(x * (n / len(cols)), weights, results, epoch, batch, step)
 
 
-def frozen(model):
-    """:func:`dietnet.hybrid.frozen_fat_weights` for the Diet Network; nothing to freeze
-    for the MLP, which has no auxiliary network."""
-    if hasattr(model, "aux_net"):
-        return hybrid.frozen_fat_weights(model)
-    return contextlib.nullcontext()
+def halving_on_oom(run, batch: int, say=print):
+    """``(run(batch), batch)``, with ``batch`` halved and ``run`` called again for as long
+    as it runs out of GPU memory."""
+    while True:
+        try:
+            return run(batch), batch
+        except torch.OutOfMemoryError:
+            if batch == 1:
+                raise
+            batch = max(1, batch // 2)
+            torch.cuda.empty_cache()
+            say(f"dietnet: out of GPU memory in evaluation; batches of {batch} now")
 
 
 class ChunkPlan:
@@ -198,8 +201,10 @@ class ChunkPlan:
         self.n_chunks = max(chunks_per_buffer * world, len(self.rows) // chunk_rows)
         self.buffer_rows = chunks_per_buffer * (len(self.rows) // self.n_chunks)
         self.epoch = 0
-        edges = genotypes.block_edges(n_snps, snp_blocks) if snp_blocks else None
-        self.blocks = np.stack([edges[:-1], edges[1:]], axis=1) if snp_blocks else None
+        self.blocks = None
+        if snp_blocks:
+            edges = genotypes.block_edges(n_snps, snp_blocks)
+            self.blocks = np.stack([edges[:-1], edges[1:]], axis=1)
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
@@ -231,31 +236,22 @@ def plan_columns(ranges: np.ndarray) -> np.ndarray:
 
 class ChunkBuffers(torch.utils.data.Dataset):
     """One item is one buffer of a :class:`ChunkPlan`: (genotypes of the kept columns,
-    labels, SNP indices). Whole rows are read in file order and the columns cut in
-    memory, so disk access stays sequential; packed genotypes stay packed, for the GPU
-    to decode, as whole bytes of each kept block."""
+    labels, SNP indices). Rows are read in file order, so disk access stays sequential;
+    packed genotypes are read only for the kept ranges (whole blocks of the packed copy,
+    :class:`dietnet.genotypes.PackedFile`) and stay packed, for the GPU to decode."""
 
-    def __init__(self, store, labels, packed, blocked=None):
+    def __init__(self, store, labels, packed):
         self.store, self.labels, self.packed = store, labels, packed
-        self.blocked = blocked  # a BlockedReader: read only the kept blocks
 
     def __getitem__(self, item):
         rows, ranges = item
-        if self.blocked is not None:
-            x = self.blocked.read(rows, self.blocked.block_of(ranges), max_gap=TRAIN_GAP)
-            return (
-                torch.from_numpy(x),
-                torch.from_numpy(np.asarray(self.labels[rows])),
-                torch.from_numpy(plan_columns(ranges)),
-            )
         if self.packed:  # sorted rows: a few large reads, through gaps of up to TRAIN_GAP rows
-            x = self.store.reader.read(rows, max_gap=TRAIN_GAP)
+            x = self.store.reader.read(rows, max_gap=TRAIN_GAP, ranges=ranges)
         else:
             x = np.asarray(genotypes.read_rows(self.store, rows))
-        unit = 4 if self.packed else 1
-        kept = [x[:, a // unit : -(-b // unit)] for a, b in ranges]
+            x = np.concatenate([x[:, a:b] for a, b in ranges], axis=1)
         return (
-            torch.from_numpy(np.concatenate(kept, axis=1)),
+            torch.from_numpy(x),
             torch.from_numpy(np.asarray(self.labels[rows])),
             torch.from_numpy(plan_columns(ranges)),
         )
@@ -310,19 +306,9 @@ def _args(argv=None):
         "dataset's SNP order (dietnet.hybrid.load_penalty_weights)",
     )
     p.add_argument(
-        "--eval-cache-dir",
-        help="with --chunk-rows and packed inputs: hold the cached evaluation rows in a file "
-        "in this directory (a node's local disk), not in memory",
-    )  # fmt: skip
-    p.add_argument(
         "--valid-subset", type=int, default=0,
         help="validate each epoch on this many of the validation samples, a fixed random "
         "subset (0: all)",
-    )  # fmt: skip
-    p.add_argument(
-        "--eval-batch-size", type=int,
-        help="samples per evaluation and batch-norm recalibration batch (default: "
-        "eval_batch_size(); fewer when whole rows of millions of SNPs do not fit the GPU)",
     )  # fmt: skip
     return p.parse_args(argv)
 
@@ -428,12 +414,7 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
                 f"a buffer of {sampler.buffer_rows} rows holds no batch of {per_rank}: "
                 "raise --chunk-rows or --chunks-per-buffer"
             )
-        blocked = None
-        if packed and args.snp_blocks and genotypes.is_blocked(args.dataset, args.snp_blocks):
-            blocked = genotypes.BlockedReader(args.dataset, args.snp_blocks)
-            say(f"dietnet: training buffers read only their {args.snp_blocks}-block share "
-                f"from {genotypes.blocks_path(args.dataset, args.snp_blocks)}")  # fmt: skip
-        buffers = ChunkBuffers(store, labels, packed, blocked)
+        buffers = ChunkBuffers(store, labels, packed)
         options = dict(
             batch_size=None, sampler=sampler, collate_fn=_as_is, num_workers=args.workers
         )
@@ -457,8 +438,10 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
                 yield x[picked], y[picked], cols
 
     # Evaluation has no dropout, so its batch size changes no prediction, only how
-    # many batches upstream's eval_step does its per-batch bookkeeping for.
-    eval_batch = args.eval_batch_size or eval_batch_size(batch_size, n_snps)
+    # many batches upstream's eval_step does its per-batch bookkeeping for (and the
+    # batches batch-norm recalibration averages over). Halved if a pass runs out of GPU
+    # memory (evaluated, below), which whole rows of millions of SNPs can.
+    eval_batch = eval_batch_size(batch_size, n_snps)
 
     def decoded(batches):
         """Batches with packed genotypes decoded on the GPU: upstream's eval_step
@@ -479,30 +462,43 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
 
     def cached(rows):
         """With chunked reads, rows that every epoch reads again are read once, in a few
-        large reads, and kept in memory (packed: ~34 GB for validation and the BN
-        recalibration subset at 1.29M SNPs)."""
+        large reads, into a file next to the dataset that later runs on the same rows reuse
+        (packed: ~34 GB for validation and the BN recalibration subset at 1.29M SNPs,
+        ~220 GB at 9.1M)."""
         if not (args.chunk_rows and packed):
             return None
         started = time.time()
-        key = None
-        if args.eval_cache_dir:
-            ident = json.dumps(genotypes._source(args.dataset), sort_keys=True).encode()
-            key = hashlib.sha256(ident + np.unique(rows).astype(np.int64).tobytes()).hexdigest()
         cache = genotypes.CachedRows(
-            lambda r: store.reader.read(r, max_gap=EVAL_GAP), rows, args.eval_cache_dir,
-            key=key[:24] if key else None,
+            lambda r: store.reader.read(r, max_gap=EVAL_GAP), rows,
+            f"{args.dataset}.eval_cache", genotypes.dataset_ident(args.dataset),
         )  # fmt: skip
-        where = f"in {cache.path}" if cache.path else "in memory"
-        where += " (reused)" if cache.reused else ""
-        say(f"dietnet: {len(cache.rows)} evaluation rows cached {where} "
-            f"({cache.data.nbytes / 2**30:.1f} GiB, {time.time() - started:.0f} s)")  # fmt: skip
+        say(f"dietnet: {len(cache.rows)} evaluation rows cached in {cache.path}"
+            f"{' (reused)' if cache.reused else ''} ({cache.data.nbytes / 2**30:.1f} GiB, "
+            f"{time.time() - started:.0f} s)")  # fmt: skip
         return cache
 
-    def eval_loader(rows, source=None):
-        split = Split(store, labels, rows, packed=packed, source=source)
-        sampler = BatchSampler(SequentialSampler(split), eval_batch, False)
-        loader = _loader(split, sampler, args.workers)
-        return split, (_Decoded(loader) if packed else loader)
+    loaders = {}  # built once per split and evaluation batch size: workers stay up
+
+    def eval_loader(name, rows, source=None):
+        if (name, eval_batch) not in loaders:
+            if any(batch != eval_batch for _, batch in loaders):
+                loaders.clear()  # the batch was halved: the old loaders' workers go
+            split = Split(store, labels, rows, packed=packed, source=source)
+            sampler = BatchSampler(SequentialSampler(split), eval_batch, False)
+            loader = _loader(split, sampler, args.workers)
+            loaders[name, eval_batch] = split, (_Decoded(loader) if packed else loader)
+        return loaders[name, eval_batch]
+
+    def evaluated(run):
+        """``run()``, an evaluation pass, at a smaller batch if it runs out of GPU memory."""
+
+        def at(batch):
+            nonlocal eval_batch
+            eval_batch = batch  # eval_loader builds its loaders at this batch size
+            return run()
+
+        result, _ = halving_on_oom(at, eval_batch, say)
+        return result
 
     pick = None
     if args.bn_recalibrate:
@@ -510,17 +506,14 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
         pick = np.random.default_rng(seed).choice(
             train_rows, min(args.bn_recalibrate, len(train_rows)), replace=False
         )
-    evaluated = cached(valid_rows if pick is None else np.concatenate([valid_rows, pick]))
-    valid_set, valid_loader = eval_loader(valid_rows, evaluated)
-    recalibration = None
+    valid_cache = cached(valid_rows if pick is None else np.concatenate([valid_rows, pick]))
     if args.bn_recalibrate:
-        _, recalibration = eval_loader(np.sort(pick), evaluated)
         say(f"dietnet: batch-norm statistics recomputed on {len(pick)} training samples, "
             "without dropout, before each validation")  # fmt: skip
 
     def recalibrated_inputs():
         """The recalibration subset, preprocessed as training batches are."""
-        for x, _, _ in recalibration:
+        for x, _, _ in eval_loader("recalibration", np.sort(pick), valid_cache)[1]:
             x = x.to(device, non_blocking=True).float()
             _fill_missing(x, mus)
             if args.normalize:
@@ -537,17 +530,21 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
         f"{args.workers} loader workers")  # fmt: skip
 
     def validate(epoch):
-        if recalibration is not None:
-            recalibrate_batchnorm(
-                model, recalibrated_inputs(), lambda x: model(x, str(results), epoch, 0, "valid")
-            )
-        model.eval()
-        with torch.no_grad(), frozen(model):
-            out = m.mainloop_utils.eval_step(
-                handler, device, valid_set, valid_loader, mus, sigmas, args.normalize,
-                str(results), epoch,
-            )  # fmt: skip
-        return out
+        def run():
+            if pick is not None:
+                recalibrate_batchnorm(
+                    model, recalibrated_inputs(),
+                    lambda x: model(x, str(results), epoch, 0, "valid"),
+                )  # fmt: skip
+            model.eval()
+            valid_set, valid_loader = eval_loader("valid", valid_rows, valid_cache)
+            with torch.no_grad(), hybrid.frozen_fat_weights(model):
+                return m.mainloop_utils.eval_step(
+                    handler, device, valid_set, valid_loader, mus, sigmas, args.normalize,
+                    str(results), epoch,
+                )  # fmt: skip
+
+        return evaluated(run)
 
     if lead:
         baseline = validate("baseline")
@@ -655,12 +652,17 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
         if cuda:
             torch.cuda.empty_cache()
         model.eval()
-        test_set, test_loader = eval_loader(test_rows, cached(test_rows))
-        with torch.no_grad(), frozen(model):
-            test = m.mainloop_utils.eval_step(
-                handler, device, test_set, test_loader, mus, sigmas, args.normalize,
-                str(results), "test_step",
-            )  # fmt: skip
+        test_cache = cached(test_rows)
+
+        def run_test():
+            test_set, test_loader = eval_loader("test", test_rows, test_cache)
+            with torch.no_grad(), hybrid.frozen_fat_weights(model):
+                return m.mainloop_utils.eval_step(
+                    handler, device, test_set, test_loader, mus, sigmas, args.normalize,
+                    str(results), "test_step",
+                )  # fmt: skip
+
+        test = evaluated(run_test)
         task.print_test_results(test)
         task.save_predictions(test, str(results / f"test_results_epoch{epoch_best}"))
     dist.barrier()

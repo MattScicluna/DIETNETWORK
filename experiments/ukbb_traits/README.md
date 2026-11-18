@@ -56,7 +56,7 @@ Measured on Mila at full shape (424,768 x 485,516, simulated with
 
 | step | wall time | peak memory | requested |
 |---|---|---|---|
-| create-dataset + pack-genotypes | 30 min | 53 GB | 80 GB, 3 h |
+| create-dataset (int8 and the packed copy) | 30 min | 53 GB | 80 GB, 3 h |
 | partition | 15 s | 0.5 GB | 16 GB, 1 h |
 | statistics, per fold | 11 min – 1 h 55 | 124 GB | 200 GB, 4 h |
 | embeddings (freq, ag, freq_ag, freq_random, freq_shuffled) | 7–45 min | 19–117 GB | 180 GB, 3 h |

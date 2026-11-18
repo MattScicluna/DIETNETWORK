@@ -8,6 +8,7 @@ stand in for two GPUs.
 """
 
 import re
+from pathlib import Path
 
 import pytest
 from support import DATASETS, dietnet, train_pipeline
@@ -89,49 +90,47 @@ def test_chunked_reads_train_a_model_as_good(tmp_path, processes):
     assert accuracy >= 0.9, report
 
 
-def test_chunked_reads_from_a_packed_copy_cache_the_evaluation_rows(tmp_path):
-    """The packed store with --chunk-rows: training buffers read through gaps, and the
-    validation, recalibration and test rows are read once into memory."""
+def test_chunked_packed_runs_cache_the_evaluation_rows_once(tmp_path):
+    """The packed store with --chunk-rows: buffers read only their SNP blocks; the
+    validation (with recalibration) and test rows are read once into files next to the
+    dataset, which a second run reuses, training the same model bit for bit; and a
+    validation subset trains too."""
+    import torch
+
     data = DATASETS["synthetic"]
     root = tmp_path / "pk"
     train_pipeline(root, data, folds="0", flags=["--inputs=memmap", "--loader=upstream"])
-    dietnet("pack-genotypes", dataset=root / "dataset.h5")
-    dietnet(
-        "train", "--engine=dietnet", "--workers=1", "--inputs=packed", "--snp-sample=0.5",
-        "--chunk-rows=64", "--chunks-per-buffer=2", "--snp-blocks=8", "--bn-recalibrate=50",
+    common = dict(
         dataset=root / "dataset.h5", partition=root / "partition.npz",
         embedding=root / "embedding.npz", input_stats=root / "stats.npz",
-        config=root / "config.yaml", exp_dir=root / "exp_packed", seeds=3, folds="0",
+        config=root / "config.yaml", seeds=3, folds="0",
     )  # fmt: skip
-    (log,) = (root / "exp_packed" / "logs").glob("train_*.log")
-    assert log.read_text().count("evaluation rows cached in memory") == 2  # valid + test
-    report = dietnet("check", packages=root / "exp_packed" / "packages")
+    flags = ["--engine=dietnet", "--workers=1", "--inputs=packed", "--snp-sample=0.5",
+             "--chunk-rows=64", "--chunks-per-buffer=2", "--snp-blocks=8",
+             "--bn-recalibrate=50"]  # fmt: skip
+    cache = Path(f"{(root / 'dataset.h5').resolve()}.eval_cache")
+    logs = {}
+    for run in ("first", "second"):
+        dietnet("train", *flags, exp_dir=root / run, **common)
+        (log,) = (root / run / "logs").glob("train_*.log")
+        logs[run] = log.read_text()
+    assert logs["first"].count(f"evaluation rows cached in {cache}") == 2  # valid + test
+    assert "(reused)" not in logs["first"] and logs["second"].count("(reused)") == 2
+    assert len(list(cache.glob("cached_rows_*.npy"))) == 2
+    report = dietnet("check", packages=root / "first" / "packages")
     accuracy = float(re.search(r"(\d\.\d+)", report.splitlines()[-1]).group(1))
     assert accuracy >= 0.9, report
 
-    # The cached rows in files on disk: the same model, bit for bit.
-    import torch
-
-    cache = tmp_path / "cache"
-    cache.mkdir()
-    dietnet(
-        "train", "--engine=dietnet", "--workers=1", "--inputs=packed", "--snp-sample=0.5",
-        "--chunk-rows=64", "--chunks-per-buffer=2", "--snp-blocks=8", "--bn-recalibrate=50",
-        dataset=root / "dataset.h5", partition=root / "partition.npz",
-        embedding=root / "embedding.npz", input_stats=root / "stats.npz",
-        config=root / "config.yaml", exp_dir=root / "exp_disk", seeds=3, folds="0",
-        eval_cache_dir=cache,
-    )  # fmt: skip
-    (log,) = (root / "exp_disk" / "logs").glob("train_*.log")
-    assert log.read_text().count(f"evaluation rows cached in {cache}") == 2
-    assert len(list(cache.glob("cached_rows_*.npy"))) == 2
-
-    def weights(exp):
-        (model,) = (root / exp / "packages").glob("seed_*/fold_*/model.pt")
+    def weights(run):
+        (model,) = (root / run / "packages").glob("seed_*/fold_*/model.pt")
         return torch.load(model, weights_only=False)["model_state_dict"]
 
-    a, b = weights("exp_packed"), weights("exp_disk")
+    a, b = weights("first"), weights("second")
     assert a.keys() == b.keys() and all(torch.equal(a[k], b[k]) for k in a)
+
+    dietnet("train", *flags, "--valid-subset=20", exp_dir=root / "subset", **common)
+    (log,) = (root / "subset" / "logs").glob("train_*.log")
+    assert "Epoch 1:" in log.read_text()
 
 
 def test_free_snp_weights_kept_at_zero_train_the_plain_model(tmp_path):
@@ -234,65 +233,3 @@ def test_recalibrated_batchnorm_trains_a_model_as_good(tmp_path):
     report = dietnet("check", packages=packages)
     accuracy = float(re.search(r"(\d\.\d+)", report.splitlines()[-1]).group(1))
     assert accuracy >= 0.9, report
-
-
-def test_the_evaluation_batch_size_changes_no_prediction(tmp_path):
-    """--eval-batch-size: training is untouched and held-out predictions are the same
-    (no dropout, batch norm in evaluation mode, no recalibration here)."""
-    import pandas as pd
-    import torch
-
-    data = DATASETS["synthetic"]
-    flags = ["--engine=dietnet", "--workers=0", "--inputs=memmap"]
-    default = train_pipeline(tmp_path / "default", data, folds="0", flags=flags)
-    small = train_pipeline(
-        tmp_path / "small", data, folds="0", flags=[*flags, "--eval-batch-size=7"]
-    )
-
-    def outputs(packages):
-        (fold,) = packages.glob("seed_*/fold_*")
-        state = torch.load(fold / "model.pt", weights_only=False)["model_state_dict"]
-        return state, pd.read_csv(fold / "test_predictions.tsv", sep="\t")
-
-    (a, pa), (b, pb) = outputs(default), outputs(small)
-    assert a.keys() == b.keys() and all(torch.equal(a[k], b[k]) for k in a)
-    pd.testing.assert_frame_equal(pa, pb)
-
-
-def test_buffers_read_from_blocks_train_the_same_model(tmp_path):
-    """pack-genotypes --blocks: buffers read only their blocks, the same bytes, so the
-    same model bit for bit; a keyed evaluation cache is reused by the second run; and
-    --valid-subset validates on a fixed subset."""
-    import torch
-
-    data = DATASETS["synthetic"]
-    root = tmp_path / "bl"
-    train_pipeline(root, data, folds="0", flags=["--inputs=memmap", "--loader=upstream"])
-    dietnet("pack-genotypes", dataset=root / "dataset.h5")
-    cache = tmp_path / "cache"
-    cache.mkdir()
-    common = dict(
-        dataset=root / "dataset.h5", partition=root / "partition.npz",
-        embedding=root / "embedding.npz", input_stats=root / "stats.npz",
-        config=root / "config.yaml", seeds=3, folds="0", eval_cache_dir=cache,
-    )  # fmt: skip
-    flags = ["--engine=dietnet", "--workers=1", "--inputs=packed", "--snp-sample=0.5",
-             "--chunk-rows=64", "--chunks-per-buffer=2", "--snp-blocks=8",
-             "--bn-recalibrate=50"]  # fmt: skip
-    dietnet("train", *flags, exp_dir=root / "rows", **common)
-    dietnet("pack-genotypes", "--blocks", "8", dataset=root / "dataset.h5")
-    dietnet("train", *flags, exp_dir=root / "blocks", **common)
-    (log,) = (root / "blocks" / "logs").glob("train_*.log")
-    text = log.read_text()
-    assert "read only their 8-block share" in text and text.count("(reused)") == 2
-
-    def weights(exp):
-        (model,) = (root / exp / "packages").glob("seed_*/fold_*/model.pt")
-        return torch.load(model, weights_only=False)["model_state_dict"]
-
-    a, b = weights("rows"), weights("blocks")
-    assert a.keys() == b.keys() and all(torch.equal(a[k], b[k]) for k in a)
-
-    dietnet("train", *flags, "--valid-subset=20", exp_dir=root / "subset", **common)
-    (log,) = (root / "subset" / "logs").glob("train_*.log")
-    assert "Epoch 1:" in log.read_text()

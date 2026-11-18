@@ -53,23 +53,23 @@ def main():
 @click.option("--regression-labels", type=click.Path(exists=True), help="TSV: sample id, value.")
 @click.option("--out", required=True, type=click.Path(path_type=Path), help="Output .h5.")
 @click.option(
-    "--packed-only",
+    "--int8",
     is_flag=True,
-    help="Write the genotypes only as the 2-bit copy (as pack-genotypes makes), not as int8 "
-    "in the .h5: a quarter of the disk, for datasets too large to hold twice. Steps that read "
-    "the int8 genotypes (upstream's embedding and statistics scripts) then refuse it.",
+    help="Also store the genotypes as int8 in the .h5 (four times the disk), for the steps "
+    "that run upstream's scripts on them: generate-embedding and compute-input-stats "
+    "--engine upstream.",
 )
-def create_dataset(plink_prefix, labels, regression_labels, out, packed_only):
-    """Build upstream's HDF5 dataset from PLINK, without the text round-trip."""
+def create_dataset(plink_prefix, labels, regression_labels, out, int8):
+    """Build upstream's HDF5 dataset and its 2-bit genotype copy from PLINK."""
     from dietnet import dataset
 
     if not labels and not regression_labels:
         raise click.UsageError("give --labels, --regression-labels or both")
     dataset.build(
         plink_prefix, out, class_labels=labels, regression_labels=regression_labels,
-        packed_only=packed_only,
+        int8=int8,
     )  # fmt: skip
-    click.echo(f"wrote {out}" + (" and its packed copy" if packed_only else ""))
+    click.echo(f"wrote {out} and its packed copy")
 
 
 @main.command()
@@ -259,26 +259,16 @@ def adjust_phenotype(phenotypes, trait, covariates, out):
 
 @main.command("pack-genotypes")
 @_dataset
-@click.option(
-    "--blocks",
-    type=click.IntRange(min=1),
-    help="Also write the copy cut into this many SNP blocks, for `train --snp-blocks` with "
-    "the same number: buffers then read only their blocks. Uses an up-to-date row-wise copy "
-    "if there is one.",
-)
-def pack_genotypes(dataset_path, blocks):
-    """Write a 2-bit copy of the dataset's genotypes, for `train --inputs packed`.
+def pack_genotypes(dataset_path):
+    """(Re)write the 2-bit copy of a dataset's int8 genotypes.
 
-    A quarter of the bytes, so training from disk reads 4x less. Written next to
-    the dataset (<dataset>.packed.npy); rerun after the dataset changes.
+    create-dataset writes it; this is for a dataset built with --int8 that changed since, or
+    built by an earlier version (<dataset>.packed.bin, in blocks of SNPs).
     """
     from dietnet import genotypes
 
     try:
-        if not (blocks and genotypes.is_packed(dataset_path)):
-            click.echo(f"wrote {genotypes.pack(dataset_path)}")
-        if blocks:
-            click.echo(f"wrote {genotypes.pack_blocks(dataset_path, blocks)}")
+        click.echo(f"wrote {genotypes.pack(dataset_path)}")
     except ValueError as error:
         raise click.ClickException(str(error)) from None
 
@@ -446,18 +436,6 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus, engine, inputs
     "which SNPs are causal.",
 )
 @click.option(
-    "--eval-cache-dir",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="With --chunk-rows on packed genotypes: keep the cached validation and test rows in "
-    "a file in this directory (e.g. the node's local disk), not in memory.",
-)
-@click.option(
-    "--eval-batch-size",
-    type=click.IntRange(min=1),
-    help="Engine 'dietnet': samples per evaluation and batch-norm recalibration batch. "
-    "Default: 2048, fewer for very wide inputs, never below the training batch.",
-)
-@click.option(
     "--valid-subset",
     type=click.IntRange(min=0),
     default=0,
@@ -490,8 +468,6 @@ def train(
     free_snp_weights,
     free_snp_lr,
     snp_penalty_weights,
-    eval_cache_dir,
-    eval_batch_size,
     valid_subset,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
@@ -508,7 +484,6 @@ def train(
             chunks_per_buffer=chunks_per_buffer, snp_blocks=snp_blocks,
             free_snp_weights=free_snp_weights, free_snp_lr=free_snp_lr,
             snp_penalty_weights=snp_penalty_weights,
-            eval_cache_dir=eval_cache_dir, eval_batch_size=eval_batch_size,
             valid_subset=valid_subset,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
