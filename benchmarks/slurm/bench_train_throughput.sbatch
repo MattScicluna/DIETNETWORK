@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Training throughput by loader, workers, missing-value fill and batch size
 # (benchmarks/bench_train_throughput.py), with the dataset -- and its packed copy,
-# if `dietnet pack-genotypes` made one -- staged to local disk.
+# (create-dataset writes it) -- staged to local disk.
 #
 #   BENCH_DIR=/path/bench DIETNET_VENV=/path/.venv REPO=/path/repo \
 #   [BATCH_SIZES="512 2048 8192"] [WORKERS="4 8"] \

@@ -48,7 +48,9 @@ class FakeAPI:
 
 @pytest.fixture
 def dataset(tmp_path, kgp_mini):
-    return ds.build(kgp_mini.plink_prefix, tmp_path / "d.h5", class_labels=kgp_mini.labels)
+    return ds.build(
+        kgp_mini.plink_prefix, tmp_path / "d.h5", int8=True, class_labels=kgp_mini.labels
+    )
 
 
 def test_variants_come_from_chr_pos_ref_alt_ids(dataset):

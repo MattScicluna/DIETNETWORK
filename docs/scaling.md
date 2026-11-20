@@ -160,7 +160,6 @@ before using it for the ensemble.
 
 ```bash
 dietnet create-dataset --plink cohort --labels labels.tsv --out dataset.h5   # CPU job
-dietnet pack-genotypes --dataset dataset.h5                                # CPU job, ~30 min for UKBB
 # then, per (seed, fold), one GPU job (8 CPUs, 32 GB):
 cp --preserve=timestamps dataset.h5 dataset.h5.packed.* "$SLURM_TMPDIR/"
 dietnet train --dataset "$SLURM_TMPDIR/dataset.h5" ... --engine dietnet --inputs packed \

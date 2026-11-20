@@ -52,14 +52,24 @@ def main():
 @click.option("--labels", type=click.Path(exists=True), help="TSV: sample id, class label.")
 @click.option("--regression-labels", type=click.Path(exists=True), help="TSV: sample id, value.")
 @click.option("--out", required=True, type=click.Path(path_type=Path), help="Output .h5.")
-def create_dataset(plink_prefix, labels, regression_labels, out):
-    """Build upstream's HDF5 dataset from PLINK, without the text round-trip."""
+@click.option(
+    "--int8",
+    is_flag=True,
+    help="Also store the genotypes as int8 in the .h5 (four times the disk), for the steps "
+    "that run upstream's scripts on them: generate-embedding and compute-input-stats "
+    "--engine upstream.",
+)
+def create_dataset(plink_prefix, labels, regression_labels, out, int8):
+    """Build upstream's HDF5 dataset and its 2-bit genotype copy from PLINK."""
     from dietnet import dataset
 
     if not labels and not regression_labels:
         raise click.UsageError("give --labels, --regression-labels or both")
-    dataset.build(plink_prefix, out, class_labels=labels, regression_labels=regression_labels)
-    click.echo(f"wrote {out}")
+    dataset.build(
+        plink_prefix, out, class_labels=labels, regression_labels=regression_labels,
+        int8=int8,
+    )  # fmt: skip
+    click.echo(f"wrote {out} and its packed copy")
 
 
 @main.command()
@@ -90,7 +100,12 @@ def partition(dataset_path, out, nb_folds, seed, train_valid_ratio, balanced):
 
 
 def _per_fold_step(script, dataset_path, partition_path, out, ncpus):
-    from dietnet import upstream
+    from dietnet import genotypes, upstream
+
+    try:
+        genotypes.require_inputs(dataset_path, f"upstream's {script}")
+    except ValueError as error:
+        raise click.ClickException(str(error)) from None
 
     out = _npz(out)
     upstream.run(script, [
@@ -245,15 +260,17 @@ def adjust_phenotype(phenotypes, trait, covariates, out):
 @main.command("pack-genotypes")
 @_dataset
 def pack_genotypes(dataset_path):
-    """Write a 2-bit copy of the dataset's genotypes, for `train --inputs packed`.
+    """(Re)write the 2-bit copy of a dataset's int8 genotypes.
 
-    A quarter of the bytes, so training from disk reads 4x less. Written next to
-    the dataset (<dataset>.packed.npy); rerun after the dataset changes.
+    create-dataset writes it; this is for a dataset built with --int8 that changed since, or
+    built by an earlier version (<dataset>.packed.bin, in blocks of SNPs).
     """
     from dietnet import genotypes
 
-    out = genotypes.pack(dataset_path)
-    click.echo(f"wrote {out}")
+    try:
+        click.echo(f"wrote {genotypes.pack(dataset_path)}")
+    except ValueError as error:
+        raise click.ClickException(str(error)) from None
 
 
 @main.command("compute-input-stats")
@@ -418,6 +435,14 @@ def compute_input_stats(dataset_path, partition_path, out, ncpus, engine, inputs
     "dataset's SNP order (below 1: shrink a SNP less, 0: not at all), e.g. from a prior on "
     "which SNPs are causal.",
 )
+@click.option(
+    "--valid-subset",
+    type=click.IntRange(min=0),
+    default=0,
+    show_default=True,
+    help="Engine 'dietnet': validate each epoch (and stop early) on this many validation "
+    "samples, a fixed random subset; the test set is evaluated whole (0: all).",
+)
 def train(
     dataset_path,
     partition_path,
@@ -443,6 +468,7 @@ def train(
     free_snp_weights,
     free_snp_lr,
     snp_penalty_weights,
+    valid_subset,
 ):
     """Train each (seed, fold) with upstream train.py; package the results."""
     from dietnet import training
@@ -458,6 +484,7 @@ def train(
             chunks_per_buffer=chunks_per_buffer, snp_blocks=snp_blocks,
             free_snp_weights=free_snp_weights, free_snp_lr=free_snp_lr,
             snp_penalty_weights=snp_penalty_weights,
+            valid_subset=valid_subset,
         )  # fmt: skip
     except (training.InputError, ValueError) as error:
         raise click.ClickException(str(error)) from None

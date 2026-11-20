@@ -31,7 +31,9 @@ def write_cohort(prefix, dosages, bim, fam_src):
 @pytest.fixture
 def model(tmp_path, kgp_mini):
     """The model's view: SNP table and genotypes of the training data."""
-    path = ds.build(kgp_mini.plink_prefix, tmp_path / "train.h5", class_labels=kgp_mini.labels)
+    path = ds.build(
+        kgp_mini.plink_prefix, tmp_path / "train.h5", int8=True, class_labels=kgp_mini.labels
+    )
     with h5py.File(path) as f:
         genotypes = np.array(f["inputs"])
     return ds.snp_table(path), genotypes
@@ -142,11 +144,11 @@ def test_bed_reader_matches_pyplink(kgp_mini, block_bytes, load_bytes):
 
 def test_bed_is_read_whole_in_chunks(kgp_mini):
     """The page-cache-dropping reader returns the file's bytes, whatever the chunk size."""
-    from dietnet.plink import _read_uncached
+    from dietnet._io import read_uncached
 
     path = f"{kgp_mini.plink_prefix}.bed"
     expected = np.fromfile(path, dtype=np.uint8, offset=3)
-    got = _read_uncached(path, offset=3, size=len(expected), chunk=4099)
+    got = read_uncached(path, offset=3, size=len(expected), chunk=4099)
     np.testing.assert_array_equal(got, expected)
 
 

@@ -12,5 +12,4 @@ source "$HERE/common.sh"
 name="${LABEL_SETS[$SLURM_ARRAY_TASK_ID]%%=*}"
 mkdir -p data
 "$DIETNET" create-dataset --plink cohort --labels inputs/classes.tsv \
-    --regression-labels "inputs/labels/$name.tsv" --out "data/$name.h5"
-"$DIETNET" pack-genotypes --dataset "data/$name.h5"
+    --regression-labels "inputs/labels/$name.tsv" --out "data/$name.h5" --int8

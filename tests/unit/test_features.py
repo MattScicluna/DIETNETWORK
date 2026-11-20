@@ -17,7 +17,7 @@ COMPLEMENT = str.maketrans("ACGT", "TGCA")
 @pytest.fixture
 def prepared(tmp_path, kgp_mini):
     """kgp_mini as a dataset, partitioned the way the pipeline does it."""
-    h5 = ds.build(kgp_mini.plink_prefix, tmp_path / "d.h5", class_labels=kgp_mini.labels)
+    h5 = ds.build(kgp_mini.plink_prefix, tmp_path / "d.h5", int8=True, class_labels=kgp_mini.labels)
     dietnet("partition", dataset=h5, out=tmp_path / "p.npz")
     return h5, tmp_path / "p.npz"
 

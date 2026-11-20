@@ -27,10 +27,8 @@ echo "$label / $spec / $config: seed $seed, fold $fold on $(hostname)"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
 # Training reads only labels and metadata from the .h5, and genotypes from the
-# 2-bit copy: stage the copy and link the .h5, so the sidecar's check (the .h5's
-# size and mtime) sees the file the copy was made from; the copy's own mtime is
-# not checked. Not cp -p: Narval's node disk refuses Lustre's permissions, and
-# cp then fails.
+# 2-bit copy: stage both (the .h5 is small without int8 genotypes). Timestamps only,
+# not cp -p: Narval's node disk refuses Lustre's permissions, and cp then fails.
 #
 # STAGE=0 skips the copy and trains on the dataset where it is (Lustre). For
 # --chunk-rows, whose reads are large and sequential: on 1.29M SNPs (137 GB), two or
@@ -40,14 +38,16 @@ if [ "${STAGE:-1}" = 0 ]; then
     local_data="$EXP_DIR/data/$label.h5"
 else
     local_data="$SLURM_TMPDIR/$label.h5"
-    ln -s "$EXP_DIR/data/$label.h5" "$local_data"
-    time cp "data/$label.h5.packed.npy" "data/$label.h5.packed.json" "$SLURM_TMPDIR/"
+    # Copied, not linked: training resolves the dataset's path, and a link leads it back to
+    # Lustre's copies. Times kept: the packed copy's check compares the .h5's size and mtime.
+    time cp --preserve=timestamps "data/$label.h5" "data/$label.h5.packed.bin" \
+        "data/$label.h5.packed.json" "$SLURM_TMPDIR/"
     # Read the copy once, in order, so it is in the page cache before training: batches
     # read random rows, and from a cold node disk the first epoch on 1.29M SNPs (137 GB)
     # took 96 min, the third 39 s. Needs --mem above the copy's size. Not for
     # --chunk-rows, which reads in file order and does not rely on the cache.
     if [[ "${TRAIN_FLAGS:-}" != *--chunk-rows* ]]; then
-        time cat "$SLURM_TMPDIR/$label.h5.packed.npy" > /dev/null
+        time cat "$SLURM_TMPDIR/$label.h5.packed.bin" > /dev/null
     fi
 fi
 

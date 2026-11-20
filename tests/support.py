@@ -79,7 +79,7 @@ def train_pipeline(root: Path, data: Dataset, folds="0,1", task="classification"
     labels = {"labels": data.labels}
     if task == "regression":
         labels["regression_labels"] = data.labels.with_name("synthetic_trait.tsv")
-    dietnet("create-dataset", plink=data.plink_prefix, out=root / "dataset.h5", **labels)
+    dietnet("create-dataset", "--int8", plink=data.plink_prefix, out=root / "dataset.h5", **labels)
     common = dict(dataset=root / "dataset.h5", partition=root / "partition.npz")
     dietnet("partition", dataset=root / "dataset.h5", out=root / "partition.npz")
     dietnet("generate-embedding", **common, out=root / "embedding.npz")

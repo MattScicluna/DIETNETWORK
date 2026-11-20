@@ -170,6 +170,12 @@ def _held_out_predictions(results_dir: Path, train_dataset: Path, task: str) -> 
     return table
 
 
+def _flags(**options) -> list:
+    """``--name value`` for each option given (not None): the engine's command line, its
+    defaults left to it."""
+    return [x for k, v in options.items() if v is not None for x in (f"--{k.replace('_', '-')}", v)]
+
+
 def train(
     *,
     dataset,
@@ -196,6 +202,7 @@ def train(
     free_snp_weights: float = 0.0,
     free_snp_lr: float | None = None,
     snp_penalty_weights=None,
+    valid_subset: int = 0,
 ) -> list[package.Package]:
     """Train every (seed, fold); return their packages.
 
@@ -260,6 +267,8 @@ def train(
         raise ValueError("--free-snp-weights needs engine 'dietnet' and the Diet Network")
     if snp_penalty_weights is not None and not free_snp_weights:
         raise ValueError("--snp-penalty-weights needs --free-snp-weights")
+    if valid_subset and (engine != "dietnet" or valid_subset < 0):
+        raise ValueError("--valid-subset needs engine 'dietnet' and a positive size")
     if snp_blocks and (not chunk_rows or snp_sample >= 1):
         raise ValueError("--snp-blocks needs --chunk-rows and a --snp-sample below 1")
     if engine == "dietnet" and loader == "upstream":
@@ -317,28 +326,14 @@ def train(
                 args.append("--normalize")
             log = exp_dir / "logs" / f"train_seed{seed}_fold{fold}.log"
             if engine == "dietnet":
-                args += [
-                    "--inputs",
-                    env[_launch.INPUTS_ENV],
-                    "--workers",
-                    workers,
-                    "--bn-recalibrate",
-                    bn_recalibrate,
-                    "--snp-sample",
-                    snp_sample,
-                    "--chunk-rows",
-                    chunk_rows,
-                    "--chunks-per-buffer",
-                    chunks_per_buffer,
-                    "--snp-blocks",
-                    snp_blocks,
-                    "--free-snp-weights",
-                    free_snp_weights,
-                ]
-                if free_snp_lr:
-                    args += ["--free-snp-lr", free_snp_lr]  # fmt: skip
-                if snp_penalty_weights is not None:
-                    args += ["--snp-penalty-weights", snp_penalty_weights]  # fmt: skip
+                args += _flags(
+                    inputs=env[_launch.INPUTS_ENV], workers=workers,
+                    bn_recalibrate=bn_recalibrate, snp_sample=snp_sample,
+                    chunk_rows=chunk_rows, chunks_per_buffer=chunks_per_buffer,
+                    snp_blocks=snp_blocks, free_snp_weights=free_snp_weights,
+                    free_snp_lr=free_snp_lr or None, snp_penalty_weights=snp_penalty_weights,
+                    valid_subset=valid_subset or None,
+                )  # fmt: skip
                 _run_parallel(args, gpus, log)
             else:
                 upstream.run("train.py", args, log=log, env=env)

@@ -41,6 +41,33 @@ def test_create_dataset_needs_labels(tmp_path):
     assert not (tmp_path / "d.h5").exists()
 
 
+def test_a_dataset_without_int8_refuses_the_int8_readers(trained_root, tmp_path):
+    """create-dataset writes the pack only; pack-genotypes and upstream's per-fold
+    scripts, which read the int8 genotypes, refuse the dataset, saying why; dietnet's
+    statistics read the pack and match those of the int8 dataset."""
+    data = DATASETS["synthetic"]
+    out = tmp_path / "p.h5"
+    result = run("create-dataset", "--plink", data.plink_prefix, "--labels", data.labels,
+                 "--out", out)  # fmt: skip
+    assert result.exit_code == 0, result.output
+    assert "and its packed copy" in result.output
+    assert run("pack-genotypes", "--dataset", out).exit_code == 1
+    for command in ("generate-embedding", "compute-input-stats"):
+        result = run(command, "--dataset", out, "--partition", trained_root / "partition.npz",
+                     "--out", tmp_path / f"{command}.npz")  # fmt: skip
+        assert result.exit_code == 1
+        assert "has them only in its packed copy" in result.output
+    stats = {}
+    for name, dataset in (("packed", out), ("full", trained_root / "dataset.h5")):
+        result = run("compute-input-stats", "--engine", "dietnet", "--dataset", dataset,
+                     "--partition", trained_root / "partition.npz",
+                     "--out", tmp_path / f"{name}.npz")  # fmt: skip
+        assert result.exit_code == 0, result.output
+        stats[name] = np.load(tmp_path / f"{name}.npz")
+    for key in stats["full"].files:
+        np.testing.assert_array_equal(stats["packed"][key], stats["full"][key])
+
+
 def test_partition_unbalanced_adds_the_npz_suffix(trained_root, tmp_path):
     """--unbalanced leaves out --balance-class; the output name gains .npz."""
     result = run("partition", "--dataset", trained_root / "dataset.h5",

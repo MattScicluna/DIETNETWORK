@@ -84,7 +84,7 @@ class Batched(Dataset):
                 self.x = genotypes.PackedStore(self.dataset)
         rows = np.sort(self.batches[k])
         if self.kind == "packed-gpu":
-            x = self.x.packed_rows(rows)
+            x = self.x.reader.read(rows)
         else:
             x = np.asarray(self.x[rows])
         return torch.from_numpy(x), torch.from_numpy(self.labels[rows])

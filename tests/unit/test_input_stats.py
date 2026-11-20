@@ -12,7 +12,7 @@ from dietnet import genotypes, input_stats
 @pytest.fixture
 def prepared(tmp_path, kgp_mini):
     """kgp_mini as a dataset with some genotypes set missing, and a partition."""
-    h5 = ds.build(kgp_mini.plink_prefix, tmp_path / "d.h5", class_labels=kgp_mini.labels)
+    h5 = ds.build(kgp_mini.plink_prefix, tmp_path / "d.h5", int8=True, class_labels=kgp_mini.labels)
     with h5py.File(h5, "r+") as f:
         x = np.array(f["inputs"])
         rng = np.random.default_rng(0)

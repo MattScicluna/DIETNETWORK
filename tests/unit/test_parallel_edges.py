@@ -22,7 +22,13 @@ def prepared(tmp_path_factory):
     of the statistics without standard deviations and a one-epoch config."""
     root = tmp_path_factory.mktemp("parallel_edges")
     data = DATASETS["synthetic"]
-    dietnet("create-dataset", plink=data.plink_prefix, out=root / "dataset.h5", labels=data.labels)
+    dietnet(
+        "create-dataset",
+        "--int8",
+        plink=data.plink_prefix,
+        out=root / "dataset.h5",
+        labels=data.labels,
+    )
     common = dict(dataset=root / "dataset.h5", partition=root / "partition.npz")
     dietnet("partition", dataset=root / "dataset.h5", out=root / "partition.npz")
     dietnet("compute-input-stats", **common, out=root / "stats.npz")
@@ -144,3 +150,25 @@ def test_penalty_weights_without_free_weights_are_refused(prepared, tmp_path, si
     argv = _argv(prepared, tmp_path, "--snp-penalty-weights", str(tmp_path / "w.npy"))
     with pytest.raises(SystemExit, match="--snp-penalty-weights needs --free-snp-weights"):
         parallel.main(argv)
+
+
+def test_an_evaluation_out_of_gpu_memory_is_run_again_at_half_the_batch():
+    """halving_on_oom: the batch halves until the pass fits; at 1 the error is raised."""
+    from dietnet.parallel import halving_on_oom
+
+    tried, said = [], []
+
+    def run(batch):
+        tried.append(batch)
+        if batch > 30:
+            raise torch.OutOfMemoryError("too big")
+        return f"ran at {batch}"
+
+    assert halving_on_oom(run, 138, said.append) == ("ran at 17", 17)
+    assert tried == [138, 69, 34, 17] and len(said) == 3
+
+    def never(batch):
+        raise torch.OutOfMemoryError("never fits")
+
+    with pytest.raises(torch.OutOfMemoryError):
+        halving_on_oom(never, 4, said.append)

@@ -15,6 +15,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `dietnet train --snp-penalty-weights WEIGHTS.npy`: with `--free-snp-weights`, per-SNP
   multipliers of the group-lasso penalty (an adaptive group lasso), so that a prior on
   which SNPs are causal sets how strongly each SNP's free weights are shrunk.
+- `dietnet train --valid-subset N`: per-epoch validation and early stopping on a fixed
+  random subset of the validation samples; the test set is evaluated whole.
+
+### Changed
+
+- `dietnet create-dataset` writes the 2-bit genotype copy itself, reading the .bed once in
+  bounded memory, and stores the genotypes only there: the int8 `inputs` (four times the
+  disk) only with `--int8`, for upstream's own scripts (`generate-embedding`,
+  `compute-input-stats --engine upstream`). `pack-genotypes` remains for datasets with
+  int8 genotypes.
+- The 2-bit copy is laid out in 64 blocks of SNPs (`<dataset>.packed.bin`); with
+  `--snp-blocks 64`, training buffers read only the blocks they keep. Copies made by
+  0.4 (`.packed.npy`) are not read: rerun `pack-genotypes`.
+- With `--chunk-rows`, the validation, recalibration and test rows are cached in files next
+  to the dataset (`<dataset>.eval_cache/`), memory-mapped, and reused by later runs on the
+  same rows, instead of held in memory.
+- Evaluation passes that run out of GPU memory are run again with half the batch.
+- In evaluation the Diet Network's fat-layer weights are computed once per pass, not once
+  per batch; and the GPU memory training held is freed before the test pass. Same
+  predictions.
 
 ## [0.4.0] - 2026-11-08
 

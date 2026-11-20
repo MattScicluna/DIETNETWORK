@@ -22,6 +22,7 @@ replaces that instance's ``forward`` with :func:`forward`, which upstream's own
 
 from __future__ import annotations
 
+import contextlib
 import types
 
 import numpy as np
@@ -49,6 +50,36 @@ def forward(self, x_batch, results_fullpath, epoch, batch, step, save_layers=Fal
     return self.main_net(
         x_batch, self.fatLayer_weights, results_fullpath, epoch, batch, step, save_layers
     )
+
+
+@contextlib.contextmanager
+def frozen_fat_weights(model):
+    """Within the block, ``model`` (upstream's ``DietNetwork``, with or without free weights,
+    in evaluation mode; for any other model, nothing changes) computes its fat-layer weights once and reuses them for every
+    batch. They do not depend on the batch, but its forward recomputes them for each: at
+    9.1M SNPs the auxiliary network's pass over every SNP, hundreds of times per
+    validation. The same numbers, so the same outputs."""
+    if not hasattr(model, "aux_net"):  # the MLP: no fat-layer weights to compute
+        yield
+        return
+    if model.training:
+        raise ValueError("frozen fat-layer weights need the model in evaluation mode")
+    with torch.no_grad():
+        weights = fat_weights(model)
+    own = model.__dict__.get("forward")  # attach() sets one; upstream's is the class's
+
+    def forward(self, x_batch, results_fullpath, epoch, batch, step, save_layers=False):
+        self.fatLayer_weights = weights
+        return self.main_net(x_batch, weights, results_fullpath, epoch, batch, step, save_layers)
+
+    model.forward = types.MethodType(forward, model)
+    try:
+        yield
+    finally:
+        if own is None:
+            del model.forward
+        else:
+            model.forward = own
 
 
 def attach(model) -> nn.Parameter:
