@@ -86,7 +86,9 @@ nav:
   - Install: install.md
   - Quickstart: quickstart.md
   - Training: training.md
-  - Tutorial: tutorial.ipynb
+  - Tutorials:
+      - 1000 Genomes: tutorial.ipynb
+      - "UK Biobank: height and BMI": uk-biobank.md
   - SNP features: features.md
   - Formats: formats.md
   - Parity with upstream: parity.md

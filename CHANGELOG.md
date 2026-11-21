@@ -7,8 +7,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-21
+
+Per-SNP penalty weights, a single packed genotype format, evaluation at biobank scale, and a
+tutorial on UK Biobank height and BMI.
+
 ### Added
 
+- Docs: the tutorial *UK Biobank: height and BMI*, with the penalized Diet Network's results
+  on 1.29M imputed HapMap3+ SNPs against lassosum2 and LDpred2-auto, and the commands that
+  reproduce them.
 - The release workflow creates the GitHub release for each tag it publishes to
   PyPI, with the changelog's entry for the version as notes and the wheel and
   sdist attached.
