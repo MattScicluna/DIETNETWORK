@@ -53,6 +53,8 @@ loosen. See [parity with upstream](parity.md).
 - [Training](training.md): your own models, from PLINK files and labels
 - [Tutorial](tutorial.ipynb): the whole pipeline on the bundled 1KGP fixture,
   in under a minute
+- [UK Biobank: height and BMI](uk-biobank.md): the penalized Diet Network on
+  1.29M imputed SNPs, against lassosum2 and LDpred2-auto
 - [SNP features](features.md): other inputs for the auxiliary network,
   including AlphaGenome
 - [Formats](formats.md): every file the pipeline reads and writes

@@ -5,6 +5,10 @@ whether AlphaGenome variant effects help the auxiliary network. Every step is a
 SLURM job that takes its paths from the environment; no cluster path is in the
 repository, and cohort data and everything derived from it stay on the cluster.
 
+The best model, the penalized Diet Network on 1.29M imputed HapMap3+ SNPs, its
+results and the commands that reproduce it are in the docs' tutorial
+[UK Biobank: height and BMI](../../docs/uk-biobank.md).
+
 ## Design
 
 - **Samples:** genotyped, Pan-UKB ancestry `EUR`, and none of height (50), BMI
