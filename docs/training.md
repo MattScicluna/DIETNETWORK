@@ -71,7 +71,7 @@ It also stores each SNP's chromosome, position and alleles, which are needed lat
 The genotypes are always written to a packed 2-bit file next to the dataset.
 With `--int8`, they are also written inside `dataset.h5`, which takes four times the disk space of the packed file.
 By default, `generate-embedding` and `compute-input-stats` read the genotypes from `dataset.h5`, so without `--int8` they stop with an error.
-If that copy is too large, use `compute-input-stats --engine dietnet` and the `genotype_freq` block of [`build-embedding`](features.md) (with `classes:` for frequencies per class), which read the packed file.
+The [command line reference](cli.md#dietnet-create-dataset) describes how to avoid this copy when the cohort is large.
 
 ### `partition`
 
@@ -131,6 +131,7 @@ dietnet check --packages exp/packages
 It prints the accuracy of each package on its own test fold, and then the mean and standard deviation over packages.
 With `--predictions` and `--labels` instead, it scores the output of `predict` against known labels.
 In both cases, `--min-accuracy` makes it exit with status 1 below a threshold, so it can be used in a script.
+For regression, it reports Pearson's r, R² and the RMSE instead of the accuracy, and `--min-accuracy` does not apply.
 
 ## The MLP baseline
 
@@ -165,7 +166,7 @@ z_{ik} = b_k + \sum_j x_{ij} \left( W_{jk} + \delta_{jk} \right), \qquad W_{jk} 
 where \(x_{ij}\) is the standardized genotype of individual \(i\) at SNP \(j\) and \(b_k\) is a bias.
 The weights \(W_{jk}\) are not learned directly.
 They are computed by the auxiliary network \(f\) from the features \(e_j\) of SNP \(j\), such as its genotype frequencies in each population.
-In the standard Diet Network, \(\delta_{jk} = 0\).
+In the published ancestry models, \(\delta_{jk} = 0\).
 
 Computing the weights this way keeps the number of parameters small: the published model has about 23 million weights \(W_{jk}\) (229,986 SNPs and 100 hidden units) and a dataset of 2,322 individuals.
 However, two SNPs with similar features get similar weights, even when one of them is associated with the trait only because it is in linkage disequilibrium with the other.
@@ -180,21 +181,25 @@ L + \lambda \sum_j v_j \lVert \delta_j \rVert_2,
 
 where \(L\) is the prediction loss and \(\delta_j\) is the vector of the values \(\delta_{jk}\) of SNP \(j\) over all hidden units \(k\).
 The option's value is \(\lambda\), and \(v_j\) is 1 unless it is [set for each SNP](#a-different-penalty-for-each-snp).
-The group lasso sets all the values in \(\delta_j\) to zero together, and the weights of that SNP are then exactly those of the standard Diet Network.
+The group lasso can set all the values in \(\delta_j\) to zero together, and the weights of that SNP are then exactly those of the standard Diet Network.
 
 ```bash
 dietnet train --engine dietnet --free-snp-weights 1 ...      # lambda = 1
 ```
 
-This needs `--engine dietnet`, since the default engine does not have \(\delta\).
+The flag `--engine dietnet` selects the training loop of this package instead of the published one, which does not have \(\delta\).
+It trains the same network and is [faster](scaling.md#training-on-a-biobank), but the results are not bit-identical.
 Packages store \(\delta\) (package format 3), and `predict` uses it.
 
 ### Choosing lambda
 
-When \(\lambda\) is large, \(\delta_j = 0\) for most SNPs and the model is close to the standard Diet Network.
-When \(\lambda\) is small, \(\delta_j \neq 0\) for most SNPs.
-The weights of all SNPs are then fitted jointly, as in penalized regression, with \(W_{jk}\) acting as a prior.
-When \(\lambda\) is too small, the model overfits, and a best epoch that comes early is a sign of this.
+We used \(\lambda = 0\) for the ancestry predictions, which is the default and leaves \(\delta\) out of the model, and \(\lambda = 0.3\) for [height and BMI](uk-biobank.md).
+
+When \(\lambda > 0\), the penalty applies only to \(\delta\), and not to the weights \(W_{jk}\) that the auxiliary network computes.
+A large \(\lambda\) keeps \(\delta_j = 0\) for most SNPs, so that only \(W_{jk}\) remains and the model is close to the one with \(\lambda = 0\).
+With a small \(\lambda\), \(\delta_j \neq 0\) for most SNPs.
+The weights of all SNPs are then fitted jointly, as in penalized regression, but they are pulled toward \(W_{jk}\) instead of toward zero.
+If \(\lambda\) is too small, the model overfits, and a best epoch that comes early is a sign of this.
 
 Useful values are of order 0.1 to 10, and they do not depend on the learning rate \(\eta\) (`--free-snp-lr`, by default the config's `lr_main`).
 At each step, Adam moves \(\delta_j\) by at most about \(\eta \sqrt{K}\), where \(K\) is the number of hidden units, and the penalty then pulls it back toward zero by \(\eta \lambda v_j\).

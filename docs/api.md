@@ -1,8 +1,7 @@
 # Python API
 
-Every command is a thin layer over these modules, and they can be used directly,
-from a notebook or another pipeline. For example, the published models on a
-cohort, without the command line:
+Here we describe the Python functions behind the commands, for use in a notebook or another pipeline.
+For example, the published models can be applied to a cohort as follows:
 
 ```python
 from dietnet import package, predict
@@ -16,9 +15,29 @@ result.scores       # models x samples x classes
 result.alignment    # the matching counts
 ```
 
-Upstream's own code is reached through `dietnet.upstream`: `run` executes one of
-its scripts in a subprocess and `modules` imports its modules in this process.
-The modules below call it; they never reimplement what it does.
+## Commands and functions
+
+Most commands call one function, with the same inputs:
+
+| command | function |
+|---|---|
+| `dietnet create-dataset` | [`dataset.build`][dietnet.dataset.build] |
+| `dietnet pack-genotypes` | [`genotypes.pack`][dietnet.genotypes.pack] |
+| `dietnet adjust-phenotype` | [`phenotype.adjust`][dietnet.phenotype.adjust] |
+| `dietnet partition` | none |
+| `dietnet generate-embedding` | none |
+| `dietnet build-embedding` | [`features.build`][dietnet.features.build] |
+| `dietnet alphagenome` | [`alphagenome.score`][dietnet.alphagenome.score] |
+| `dietnet compute-input-stats` | [`input_stats.write`][dietnet.input_stats.write], with `--engine dietnet` only |
+| `dietnet train` | [`training.train`][dietnet.training.train] |
+| `dietnet match` | [`predict.matched_dataset`][dietnet.predict.matched_dataset] |
+| `dietnet predict` | [`predict.matched_dataset`][dietnet.predict.matched_dataset], then [`predict.predict`][dietnet.predict.predict] |
+| `dietnet check` | none |
+| `dietnet published` | [`published.fetch`][dietnet.published.fetch], then [`published.import_training_release`][dietnet.published.import_training_release] |
+| `dietnet info` | [`upstream.verify`][dietnet.upstream.verify], for the check of the published code |
+
+`partition`, `generate-embedding` and the default engine of `compute-input-stats` run scripts of the published code in a subprocess, which [`upstream.run`][dietnet.upstream.run] does from Python.
+`check` computes its scores in the command itself, from the files that `train` and `predict` write.
 
 ## Prediction
 
@@ -36,6 +55,16 @@ The modules below call it; they never reimplement what it does.
 
 ::: dietnet.dataset
 
+::: dietnet.genotypes.pack
+
+## Phenotypes
+
+::: dietnet.phenotype
+
+## Input statistics
+
+::: dietnet.input_stats
+
 ## Training
 
 ::: dietnet.training
@@ -49,3 +78,7 @@ The modules below call it; they never reimplement what it does.
 ## The published models
 
 ::: dietnet.published
+
+## The published code
+
+::: dietnet.upstream
