@@ -1,89 +1,76 @@
 # Quickstart
 
-Predict the ancestry of your cohort with the 15 published models.
+Here we describe how to predict the ancestry of the individuals in your cohort with the 15 published models.
+You need the cohort's genotypes as PLINK files (`mycohort.bed`, `mycohort.bim` and `mycohort.fam`), with positions on GRCh38.
 
-## 1. Fetch the published models
+## 1. Download the models
 
 ```bash
 dietnet published --dest models/
 ```
 
-This downloads `Dietnet_training.tar.gz` from Zenodo record 21133813
-(concept [doi:10.5281/zenodo.16943452](https://doi.org/10.5281/zenodo.16943452)),
-checks it against the checksum Zenodo publishes, unpacks it under
-`models/download/` and turns it into 15 [model packages](formats.md#model-packages)
-under `models/packages/seed_{78,79,80}/fold_{0..4}/`. If the release is already
-unpacked somewhere, `--release path/to/Dietnet_training` skips the download.
+The models are downloaded from [Zenodo](https://doi.org/10.5281/zenodo.16943452), checked against its checksum, and saved as [model packages](formats.md#model-packages) in `models/packages`.
+There is one model for each of three seeds and five folds.
 
 ## 2. Predict
 
 ```bash
-dietnet predict --model models/packages --plink mycohort --out predictions.tsv \
-                --work-dir "$SCRATCH/dietnet"
+dietnet predict --model models/packages --plink mycohort --out predictions.tsv
 ```
 
-`mycohort.bed/.bim/.fam` can hold any SNP set. `predict`:
+The models were trained on 229,986 SNPs, and your cohort does not need to contain all of them.
+`predict` first finds these SNPs in the cohort by chromosome, position and alleles.
+If the cohort counts the other allele of a SNP, its genotypes are flipped: without this, the model would read the two homozygous genotypes the wrong way around.
+Alleles given on the other strand are recognized, except for A/T and C/G SNPs, where the strand cannot be told from the alleles.
+A SNP that is absent, or whose alleles do not match, is treated as missing.
+To compensate for the missing SNPs, the standardized genotypes of the SNPs that were found are multiplied by the total number of SNPs divided by the number found.
 
-1. **matches** the cohort to the models' SNPs by position and allele
-   ([how](formats.md#the-matched-cohort)): copied where the alleles agree,
-   flipped (2 − dosage) where they are swapped, either on the other strand
-   except for A/T and C/G SNPs, and missing otherwise. The matched copy is an
-   HDF5 file in `--work-dir` (next to `--out` if not given), named after the
-   cohort and a fingerprint of the model SNPs and the cohort's `.bim`/`.fam`,
-   so a second run on the same inputs reuses it;
-2. **scores** every sample with every model, using upstream's model class and
-   its `indep_test_step` (imputation with the training means,
-   standardisation, the D/(D−|C|) missing-SNP scale, softmax);
-3. **combines** the models into one call per sample.
+`predict` prints how many SNPs were found.
+The paper advises against relying on predictions from fewer than 1,000, and `predict` warns you when this happens.
+A very low number can also mean that the cohort is not on GRCh38, and if no SNP is found, `predict` stops with an error.
 
-It reports how many of the models' 229,986 SNPs were found. The paper advises
-against relying on predictions from fewer than 1,000, and `predict` warns below
-that.
+`predict` also saves the cohort's genotypes at the models' SNPs, in a file ending in `.matched.h5` next to `predictions.tsv`, so that a second run is faster.
+Treat this file as you would the cohort itself.
 
-`predictions.tsv` has one row per sample:
+## 3. Read the predictions
 
-| column | |
+`predictions.tsv` has one row per individual:
+
+| column | meaning |
 |---|---|
-| `sample` | the `.fam` IID |
-| `prediction` | the population with the highest mean probability across models |
-| `probability` | that mean probability |
-| `model_agreement` | the fraction of models whose own top population it is |
+| `sample` | the individual's id in the `.fam` (IID) |
+| `prediction` | the population with the highest probability, averaged over the models |
+| `probability` | that average probability |
+| `model_agreement` | the fraction of models whose own most likely population is `prediction` |
 
-`model_agreement` can be 0: with many classes the mean probability can favour a
-population no single model ranked first.
+The models can disagree, and `model_agreement` shows by how much.
+It can even be 0, when the population with the highest average is not the first choice of any single model.
 
-## Options worth knowing
+To keep the probabilities of every population from every model, add `--scores scores.npz` ([format](formats.md#per-model-scores)).
+The [command line reference](cli.md#dietnet-predict) lists the other options.
 
-- `--scores scores.npz` also saves every model's probabilities
-  ([format](formats.md#per-model-scores)).
-- `--seeds 78,79 --folds 0` uses a subset of the models. Values are
-  comma-separated, or the flag is repeated (`--seeds 78 --seeds 79`).
-- `--device cpu` or `cuda`; the default is CUDA when available.
-- `--batch-size` (default 1024) is the number of samples read and scored at a
-  time.
+## Check against known labels
 
-## On a cluster
-
-Matching is CPU and I/O; inference wants a GPU. Split them into two jobs with
-the same `--work-dir`:
+If you know the population of some individuals, you can measure the accuracy of the predictions:
 
 ```bash
-dietnet match   --model models/packages --plink mycohort --work-dir "$SCRATCH/dietnet"   # CPU job
-dietnet predict --model models/packages --plink mycohort --work-dir "$SCRATCH/dietnet" \
-                --out predictions.tsv --device cuda                                      # GPU job
+dietnet check --predictions predictions.tsv --labels labels.tsv
 ```
 
-`predict` finds the matched copy and goes straight to inference. For UK Biobank
-(486,748 samples), matching onto the published models took 4.5 minutes on 8
-CPUs, and the 15 models about 12 minutes on one A100. See [scaling](scaling.md)
-for the SLURM jobs.
+`labels.tsv` has a header row and then `sample id<TAB>label`, with the population names used by the models.
+The accuracy is printed for each population and overall, over the individuals that are in both files.
 
-## Checking against known labels
+## Large cohorts
+
+Finding the models' SNPs is limited by the CPU and the disk, while the predictions are faster on a GPU.
+On a cluster, run them as two jobs, so that the GPU does not wait:
 
 ```bash
-dietnet check --predictions predictions.tsv --labels labels.tsv --min-accuracy 0.9
+dietnet match   --model models/packages --plink mycohort --work-dir work   # CPU job
+dietnet predict --model models/packages --plink mycohort --work-dir work \
+                --out predictions.tsv                                      # GPU job
 ```
 
-prints accuracy per class and overall, over the samples in both files, and
-exits with status 1 below `--min-accuracy`. `labels.tsv` has a header row, then
-`sample id<TAB>label`.
+`match` saves the genotypes of the models' SNPs in `work`, and `predict` reuses them.
+For UK Biobank (486,748 individuals), `match` took 4.5 minutes on 8 CPUs and `predict` about 12 minutes on one A100.
+See [scaling](scaling.md) for the SLURM jobs.
