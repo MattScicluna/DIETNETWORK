@@ -50,9 +50,9 @@ They tell the auxiliary network whether an allele becomes more or less common as
 
 **Keep more SNPs at each step.** The published models use an input dropout of 0.995, which keeps about 0.5% of the SNPs of each sample at each step.
 This suits ancestry, where a few hundred SNPs are informative, but the effects on height and BMI are spread over many SNPs.
-We kept half of them, with `input_dropout: 0.5`.
-To avoid reading the SNPs that are dropped, we divided the SNPs into 64 blocks of neighbors and kept a random half of the blocks for all the samples that are read together (`--snp-sample 0.5 --snp-blocks 64`).
-This already reaches the dropout of 0.5, so no other input dropout is applied.
+We did not use input dropout for these models.
+Instead, we divided the SNPs into 64 blocks of neighbors and kept a random half of the blocks (`--snp-sample 0.5 --snp-blocks 64`).
+The same blocks are used for all the samples that are read together, so the other half does not have to be read, whereas input dropout drops different SNPs for each sample.
 Prediction uses all the SNPs.
 
 **Compare with a polygenic score on the same folds.** An r of 0.39 for height means little on its own.

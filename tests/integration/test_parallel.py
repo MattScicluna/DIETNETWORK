@@ -11,10 +11,7 @@ import re
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
 from support import DATASETS, dietnet, train_pipeline
-
-from dietnet.cli import main
 
 pytestmark = pytest.mark.integration
 
@@ -62,7 +59,7 @@ def test_the_dietnet_engine_trains_a_model_as_good_as_train_py(tmp_path, inputs,
 
 
 def test_snp_sampling_trains_a_model_as_good(tmp_path):
-    """--snp-sample 0.5, which is the config's input dropout: the same quality, and the
+    """--snp-sample 0.5 in place of per-sample input dropout: the same quality, and the
     package records how it was trained."""
     import json
 
@@ -75,36 +72,6 @@ def test_snp_sampling_trains_a_model_as_good(tmp_path):
     assert accuracy >= 0.9, report
     (meta,) = packages.glob("seed_*/fold_*/metadata.json")
     assert json.loads(meta.read_text())["snp_sample"] == 0.5
-
-
-def test_dropout_on_the_sampled_snps_trains_a_model_as_good(tmp_path):
-    """A sample larger than the dropout keeps: the rest is dropped sample by sample."""
-    data = DATASETS["synthetic"]
-    flags = [
-        "--engine=dietnet", "--workers=1", "--inputs=memmap", "--snp-sample=0.75",
-        "--chunk-rows=64", "--chunks-per-buffer=2", "--snp-blocks=8",
-    ]  # fmt: skip
-    packages = train_pipeline(tmp_path / "ds", data, folds="0", flags=flags)
-    (log,) = (tmp_path / "ds" / "exp" / "logs").glob("train_*.log")
-    assert "SNP sample 0.75, input dropout 0.3333 on it (overall 0.5)" in log.read_text()
-    report = dietnet("check", packages=packages)
-    accuracy = float(re.search(r"(\d\.\d+)", report.splitlines()[-1]).group(1))
-    assert accuracy >= 0.9, report
-
-
-def test_a_sample_below_the_dropout_is_refused_before_training(tmp_path):
-    data = DATASETS["synthetic"]
-    root = tmp_path / "low"
-    train_pipeline(root, data, folds="0", flags=["--inputs=memmap", "--loader=upstream"])
-    result = CliRunner().invoke(main, [
-        "train", "--dataset", str(root / "dataset.h5"), "--partition", str(root / "partition.npz"),
-        "--embedding", str(root / "embedding.npz"), "--input-stats", str(root / "stats.npz"),
-        "--config", str(root / "config.yaml"), "--exp-dir", str(root / "low_exp"),
-        "--seeds", "3", "--folds", "0", "--engine", "dietnet", "--snp-sample", "0.25",
-    ])  # fmt: skip
-    assert result.exit_code == 1
-    assert "fewer than the 0.5 that input_dropout 0.5 keeps" in result.output
-    assert not (root / "low_exp" / "logs").exists()
 
 
 @pytest.mark.parametrize("processes", [1, 2])

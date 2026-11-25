@@ -1,20 +1,12 @@
 """--snp-sample: a Diet Network trained on a shared random share of the SNPs per batch."""
 
 import numpy as np
-import pytest
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 from dietnet import genotypes
-from dietnet.parallel import (
-    ChunkBuffers,
-    ChunkPlan,
-    SnpSampled,
-    dropout_on_sample,
-    eval_batch_size,
-    plan_columns,
-)
+from dietnet.parallel import ChunkBuffers, ChunkPlan, SnpSampled, eval_batch_size, plan_columns
 
 
 def test_a_chunk_plan_covers_the_rows_and_shares_a_block_choice_per_buffer():
@@ -167,51 +159,3 @@ def test_gradients_reach_the_sampled_snps_auxiliary_rows_only():
     cols = torch.randperm(50)[:15]
     touched = net.embedding.grad.abs().sum(1) > 0
     assert set(touched.nonzero().flatten().tolist()) <= set(cols.tolist())
-
-
-@pytest.mark.parametrize(
-    "input_dropout, snp_sample, blocks, expected",
-    [
-        (0.5, 0.5, 64, 0.0),  # the sample alone gives the rate
-        (0.995, 0.5, 64, 0.99),
-        (0.5, 0.75, 64, 1 / 3),
-        (0.995, 0.005, 0, 0.0),  # 1 - 0.995 is not exactly 0.005
-        (0.995, 0.005, 64, 1 - 0.005 * 64),  # rounded up to one block of 64
-        (0.0, 0.999, 64, 0.0),  # rounded up to every block
-    ],
-)
-def test_the_dropout_on_the_sample_makes_up_the_overall_rate(
-    input_dropout, snp_sample, blocks, expected
-):
-    rate = dropout_on_sample(input_dropout, snp_sample, 1_000_000, blocks)
-    assert rate == pytest.approx(expected, abs=1e-6)
-
-
-def test_a_sample_smaller_than_the_dropout_keeps_is_refused():
-    with pytest.raises(ValueError, match="keeps 0.25 of the SNPs, fewer than the 0.5"):
-        dropout_on_sample(0.5, 0.25, 1000)
-
-
-def test_dropout_applies_to_the_sample_by_sample_and_keeps_the_scale():
-    """Each sample of a batch loses different SNPs of the shared sample; the share of SNPs a
-    sample keeps and the expected input are those of plain input dropout."""
-    torch.manual_seed(7)
-    n_snps, batch, p, s = 4000, 64, 0.9, 0.5
-    net = Net(n_snps)
-    seen = []
-
-    class Record(nn.Module):
-        def forward(self, x):
-            seen.append(x.detach())
-            return x
-
-    rate = dropout_on_sample(p, s, n_snps)
-    net.main_net.input_dropout = nn.Sequential(nn.Dropout(rate), Record())
-    net.train()
-    SnpSampled(net, s)(torch.ones(batch, n_snps), "", 0, 0, "train")
-    (x,) = seen
-    assert x.shape == (batch, n_snps // 2)
-    kept = x != 0
-    assert kept.float().mean().item() * s == pytest.approx(1 - p, abs=0.005)
-    assert (kept[0] != kept[1]).any()  # not one mask for the batch
-    assert torch.allclose(x[kept], torch.tensor(1 / (1 - p)))

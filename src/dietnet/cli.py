@@ -348,10 +348,9 @@ def compute_input_stats(dataset_path, partition_path, out):
     default=1.0,
     show_default=True,
     help="Engine 'dietnet', Diet Network only: train each batch on this share of the SNPs, "
-    "the same for the whole batch (1: off). The auxiliary network and the fat layer then do "
-    "that share of the work; evaluation uses every SNP. Input dropout on these SNPs, sample "
-    "by sample, makes up the rest of the config's input_dropout, so the overall rate does "
-    "not change. At least 1 - input_dropout.",
+    "the same for the whole batch, in place of per-sample input dropout (1: off). The "
+    "auxiliary network and the fat layer then do that share of the work; evaluation uses "
+    "every SNP. 1 - input_dropout keeps the dropout rate.",
 )
 @click.option(
     "--chunk-rows",
