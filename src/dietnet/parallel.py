@@ -137,9 +137,10 @@ class SnpSampled(nn.Module):
     layer's expected input is unchanged, as dropout's 1 / (1 - p) scaling keeps it.
     This is input dropout with one mask per batch instead of one per sample, which
     is what lets the dropped SNPs be skipped: the auxiliary network and the fat
-    layer do ~``keep`` of the work. It replaces the main network's per-sample input
-    dropout (set to the identity by the caller); keep = 1 - input_dropout keeps the
-    rate. In evaluation every SNP is used, as upstream's model does.
+    layer do ~``keep`` of the work. The main network's own input dropout then applies
+    to the SNPs that are left, sample by sample, at the rate that makes the overall one
+    the config's (:func:`dropout_on_sample`). In evaluation every SNP is used, as
+    upstream's model does.
     """
 
     def __init__(self, net, keep: float):
@@ -159,6 +160,25 @@ class SnpSampled(nn.Module):
             x = x[:, cols]
         weights = hybrid.fat_weights(net, cols)  # with free per-SNP weights, if any
         return net.main_net(x * (n / len(cols)), weights, results, epoch, batch, step)
+
+
+def dropout_on_sample(
+    input_dropout: float, snp_sample: float, n_snps: int, snp_blocks: int = 0
+) -> float:
+    """The per-sample input dropout on the SNPs a batch keeps, so that a sample keeps
+    ``1 - input_dropout`` of all the SNPs: with a share s kept, 1 - (1 - p) / s.
+
+    The share is the one actually kept, after rounding to whole SNPs or whole blocks.
+    """
+    units = snp_blocks or n_snps
+    share = max(1, round(snp_sample * units)) / units
+    if share < (1 - input_dropout) * (1 - 1e-9):
+        raise ValueError(
+            f"--snp-sample {snp_sample:g} keeps {share:.4g} of the SNPs, fewer than the "
+            f"{1 - input_dropout:.4g} that input_dropout {input_dropout:g} keeps: raise "
+            "--snp-sample or input_dropout"
+        )
+    return max(0.0, 1 - (1 - input_dropout) / share)
 
 
 def halving_on_oom(run, batch: int, say=print):
@@ -281,7 +301,7 @@ def _args(argv=None):
     p.add_argument(
         "--snp-sample", type=float, default=1.0,
         help="Diet Network: train each batch on this share of the SNPs, shared by the batch, "
-        "in place of per-sample input dropout (1: off, as train.py)",
+        "per-sample input dropout on them makes up the config's rate (1: off, as train.py)",
     )  # fmt: skip
     p.add_argument(
         "--chunk-rows", type=int, default=0,
@@ -367,7 +387,12 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
     if args.snp_sample < 1:
         if args.model != "Dietnet":
             raise SystemExit("--snp-sample applies to the Diet Network only")
-        model.main_net.input_dropout = nn.Identity()  # replaced by the shared SNP sample
+        rate = dropout_on_sample(
+            config["input_dropout"], args.snp_sample, len(model.embedding), args.snp_blocks
+        )
+        model.main_net.input_dropout = nn.Dropout(rate)  # on the SNPs of the shared sample
+        say(f"dietnet: SNP sample {args.snp_sample:g}, input dropout {rate:.4g} on it "
+            f"(overall {config['input_dropout']:g})")  # fmt: skip
         trained = SnpSampled(model, args.snp_sample)
     ddp = DistributedDataParallel(trained, device_ids=[local_rank] if cuda else None)
     optimizers = model.get_optimizers()

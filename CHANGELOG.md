@@ -13,6 +13,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   genotypes, a block of samples at a time: the same numbers as upstream's script.
 - `compute-input-stats` always streams: means identical to upstream's script, SDs to
   floating-point rounding.
+- `train --snp-sample` keeps the config's `input_dropout`: input dropout on the sampled SNPs,
+  sample by sample, makes up what the sampling leaves. Before, sampling replaced it, whatever
+  its value. With `--snp-sample` at `1 - input_dropout` nothing changes, and below it is refused.
 
 ### Removed
 

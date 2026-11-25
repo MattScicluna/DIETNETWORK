@@ -228,9 +228,9 @@ def train(
     network batch-normalises the fat layer right after input dropout, so the
     statistics learned in training do not describe evaluation's activations.
     With ``snp_sample`` < 1 (Diet Network only) each training batch uses that share
-    of the SNPs, the same for the whole batch, in place of per-sample input dropout
-    (:class:`dietnet.parallel.SnpSampled`): the auxiliary network and the fat layer
-    then do that share of the work.
+    of the SNPs, the same for the whole batch (:class:`dietnet.parallel.SnpSampled`): the
+    auxiliary network and the fat layer then do that share of the work. Input dropout on
+    the SNPs that are left makes up the rest of the config's ``input_dropout``.
     With ``chunk_rows`` > 0 (engine "dietnet") training rows are read in contiguous
     chunks into shuffled in-memory buffers (:class:`dietnet.parallel.ChunkPlan`), so
     the genotype file need not fit in the page cache; with ``snp_blocks`` > 0 as well,
@@ -294,6 +294,12 @@ def train(
         }
     base = yaml.safe_load(Path(config).read_text())
     check_inputs(embedding, input_stats, dataset, partition, folds)
+    if snp_sample < 1:
+        from dietnet.parallel import dropout_on_sample
+
+        with h5py.File(dataset, "r") as f:
+            n_snps = f["inputs"].shape[1]
+        dropout_on_sample(base["input_dropout"], snp_sample, n_snps, snp_blocks)  # checked early
     try:
         env = {_launch.INPUTS_ENV: genotypes.choose(dataset, inputs)}
     except ValueError as error:
