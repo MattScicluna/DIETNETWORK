@@ -1,7 +1,7 @@
 # Training your own models
 
-This page trains Diet Networks on your own PLINK files and labels.
-The output is a directory of [model packages](formats.md#model-packages), which `dietnet predict` can then apply to new cohorts.
+Here we describe how to train a Diet Network on your own genotypes (PLINK files) and labels.
+The trained models are saved as [model packages](formats.md#model-packages), which `dietnet predict` can then apply to new cohorts.
 
 Training takes five commands, and each one writes files that a later one reads.
 A change to one step, such as a new set of SNP features, therefore does not require redoing the steps before it.
@@ -70,7 +70,7 @@ For this reason, `dietnet train` writes one copy of the config per seed, to `exp
 
 ### `create-dataset`
 
-This step converts the PLINK files into the [HDF5 dataset](formats.md#the-hdf5-dataset) that the other steps read, a block of samples at a time.
+`create-dataset` converts the PLINK files into the [HDF5 dataset](formats.md#the-hdf5-dataset) that the other steps read, a block of samples at a time.
 It also stores each SNP's chromosome, position and alleles, which are needed later to match a new cohort to the model.
 
 The genotypes are always written to a packed 2-bit file next to the dataset.
@@ -80,7 +80,7 @@ If that copy is too large, use `compute-input-stats --engine dietnet` and the `g
 
 ### `partition`
 
-This step splits the samples into folds: `--nb-folds` of them (5 by default), each with its own train, validation and test samples.
+`partition` splits the samples into folds: `--nb-folds` of them (5 by default), each with its own train, validation and test samples.
 
 With `--balanced`, the default and the setting used in the paper, every class is split separately.
 At five folds, each class contributes 60% of its samples to training, 20% to validation and 20% to test.
@@ -96,9 +96,8 @@ Both settings need class labels in the dataset, so a regression dataset needs `-
 
 ### `generate-embedding` and `compute-input-stats`
 
-These two steps summarize each SNP.
-`generate-embedding` computes its genotype frequencies in each class, which is what the auxiliary network reads (`emb`, folds × SNPs × 3·classes).
-`compute-input-stats` computes its mean and standard deviation (`means_by_fold`, `sd_by_fold`).
+`generate-embedding` computes each SNP's genotype frequencies in each class, which is what the auxiliary network reads (`emb`, folds × SNPs × 3·classes).
+`compute-input-stats` computes each SNP's mean and standard deviation (`means_by_fold`, `sd_by_fold`).
 Both are computed separately for each fold, from its training samples only, and both take `--ncpus`.
 
 Every class needs at least one training sample in every fold.
@@ -112,7 +111,7 @@ To replace or extend the embedding, see [SNP features](features.md).
 
 ### `train`
 
-This step trains one model for every combination of `--seeds` and `--folds`.
+`train` fits one model for every combination of `--seeds` and `--folds`.
 The model, the training loop, early stopping and the choice of best checkpoint are all upstream's.
 Values are comma-separated (`--seeds 78,79,80`), or the flag is repeated.
 
@@ -132,7 +131,7 @@ The [command line reference](cli.md#dietnet-train) lists every option.
 
 ### `check`
 
-This step reports how well the models do on samples they were not trained on.
+`check` reports how accurate the models are on samples they were not trained on.
 
 ```bash
 dietnet check --packages exp/packages
