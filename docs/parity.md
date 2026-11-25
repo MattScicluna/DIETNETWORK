@@ -24,6 +24,7 @@ On a biobank, this takes too much memory and leaves the GPU idle most of the tim
 `dietnet train` therefore reads whole batches from the packed file.
 
 As a result, the individuals are grouped into different batches, and a model trained with `dietnet train` does not have the same weights as one trained with `train.py`, even with the same seed.
+The accuracy is close: retrained on the published split, the 15 models had a mean accuracy of 0.9252 with `dietnet train` and 0.9282 with `train.py` (see [Scaling](scaling.md#reproducing-the-published-models)).
 The published models themselves are not affected, since `predict` uses their weights as they are.
 
 ### Matching the SNPs of a cohort

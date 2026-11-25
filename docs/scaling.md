@@ -114,7 +114,9 @@ The jobs read the partition from `reproduction/1kgp_partition_seed124.npz`.
 The published models have a mean accuracy of 0.9214 on their test folds.
 When we retrained them with the published loop, it was 0.9282, and each took 19 to 58 minutes on an A100.
 `reproduction/README.md` has the results of each model.
-Since then, `dietnet train` uses a [different loop](parity.md#training), so the accuracy of each model will not be exactly the same.
+Since then, `dietnet train` uses a [different loop](parity.md#training).
+With it, the mean accuracy of the 15 retrained models was 0.9252.
+Compared model by model with the published loop, this is 0.003 lower on average, which is within the variation between models (the standard deviation of the paired differences was 0.011).
 
 ## Benchmarks
 
