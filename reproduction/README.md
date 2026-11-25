@@ -18,7 +18,7 @@ Taken from the lab's 1KGP directory on the cluster, and verified, not assumed:
 - `dietnet partition --seed 124` regenerates the same fold *membership*, but
   not the order within folds: upstream iterates `set(labels)`, whose order
   depends on Python's hash seed. Order changes which samples share a minibatch,
-  so a bit-for-bit retrain needs this file, not a regenerated one.
+  so retraining on the published split needs this file, not a regenerated one.
 
 SHA-256 `e8f7799b00d0667fbedeaf26f498d96d4c6d0801c9e53b92ac73320c98790d71`.
 Indices are rows of the published `1KGP_dataset.hdf5`.
@@ -66,8 +66,8 @@ dietnet check --packages $EXP_DIR/exp/packages
 ## Retrained with dietnet (2026-10-26)
 
 All 15 retrained on Narval A100s (19-58 min each) with `submit_retrain.sh`:
-upstream's train.py through `dietnet train`, the published configs and this
-split. The recomputed per-fold embedding, means and SDs equalled Zenodo's
+upstream's train.py, which `dietnet train` ran up to version 0.5.0, with the published
+configs and this split. The recomputed per-fold embedding, means and SDs equalled Zenodo's
 exactly. Held-out accuracy on the same test folds, and how often the retrained
 and published model of the same (seed, fold) predict the same population:
 

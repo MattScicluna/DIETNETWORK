@@ -1,10 +1,10 @@
-"""Train with upstream's train.py and package what it produces.
+"""Train each (seed, fold) and package the result.
 
-Training is upstream's script, run unmodified: the published model, loop,
-early stopping and checkpoint selection. This module supplies its inputs (one
-config per seed, since upstream reads the seed from the config), finds its
-results directory by upstream's own naming, and turns each (seed, fold) into a
-model package with the fold's held-out predictions next to it.
+Training runs in :mod:`dietnet.parallel`, with the published model, loss, early
+stopping and choice of best epoch. This module supplies its inputs (one config
+per seed, since the seed is read from the config), finds its results directory
+by upstream's own naming, and turns each (seed, fold) into a model package with
+the fold's held-out predictions next to it.
 """
 
 from __future__ import annotations
@@ -292,7 +292,7 @@ def train(
             args = [
                 "--exp-path", exp_dir, "--exp-name", "runs", "--config", cfg_path,
                 "--model", model, "--dataset", dataset, "--partition", partition,
-                # Required by train.py, read only for the Diet Network.
+                # Read only for the Diet Network.
                 "--embedding", embedding or "none", "--input-features-stats", input_stats,
                 "--task", task, "--which-fold", fold,
             ]  # fmt: skip

@@ -4,11 +4,12 @@ Upstream's training code is a set of scripts (``train.py``, ``partition_data.py`
 ...) that import their helpers as a top-level ``helpers`` package. Two ways in:
 
 * :func:`run` executes a script as upstream's README does, in a subprocess.
-  Used for everything that produces a published artefact: partitions,
-  embeddings, input statistics, trained weights.
+  Used for partitions, and by the tests that compare this package with
+  upstream's scripts.
 * :func:`modules` imports upstream modules in this process. Used where this
-  package needs the model class and inference step without upstream's I/O
-  (biobank-scale prediction), so that the arithmetic is still upstream's.
+  package needs the model, loss and inference step without upstream's I/O
+  (training and prediction at biobank scale), so that the arithmetic is still
+  upstream's.
 
 :func:`verify` checks the files against the manifest of the commit they came
 from (``upstream_manifest.json``); ``dietnet info`` reports it, and the test

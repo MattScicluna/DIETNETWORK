@@ -101,7 +101,7 @@ nav:
       - "Quantitative traits: height and BMI": uk-biobank.md
   - SNP features: features.md
   - Formats: formats.md
-  - Parity with upstream: parity.md
+  - Parity with the published code: parity.md
   - Scaling: scaling.md
   - Command line: cli.md
   - Python API: api.md

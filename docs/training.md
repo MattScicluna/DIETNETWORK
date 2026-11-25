@@ -84,7 +84,7 @@ Both settings need class labels in the dataset, so a regression dataset needs `-
 !!! note "Reproducing the published partition"
     The same seed gives the same partition from run to run, but not the partition that the published models were trained on.
     The samples are in a different order within each fold, and the order decides which samples share a minibatch.
-    To retrain the published models bit for bit, use `reproduction/1kgp_partition_seed124.npz` (see [scaling](scaling.md#reproducing-the-published-models)).
+    To retrain the published models, use `reproduction/1kgp_partition_seed124.npz` (see [scaling](scaling.md#reproducing-the-published-models)).
 
 ### `generate-embedding` and `compute-input-stats`
 

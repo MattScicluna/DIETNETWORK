@@ -1,67 +1,61 @@
-# Parity with upstream
+# Parity with the published code
 
-`dietnet` exists to run the published Diet Network, so its definition of
-correct is *the same result as upstream*. Where this package does something
-upstream's scripts also do, a test runs both and compares. A change that moves
-a parity result is a bug, or a deliberate change recorded in the changelog; it is
-never a tolerance to loosen.
+Here we describe which results of `dietnet` are the same as those of the published code ([HussinLab/DIETNETWORK](https://github.com/HussinLab/DIETNETWORK)), which are different on purpose, and how this is tested.
 
-## Upstream's code, unmodified
+## What is the same
 
-`Dietnet_train_and_evaluate/` holds upstream's scripts and the `helpers` package they import,
-byte for byte as they are at HussinLab/DIETNETWORK commit `5481556e`. `dietnet` runs
-`partition_data.py`, and uses the model and helper modules. `train.py`, `generate_embedding.py`
-and `compute_input_features_statistics.py` are run by the tests only. The rest of upstream
-(deprecated code, experiments, its own inference scripts) is not kept.
+| command | compared with the published code |
+|---|---|
+| `create-dataset` | the same individuals, SNPs, labels and genotypes, value for value |
+| `partition` | runs the published script |
+| `generate-embedding` | the same numbers |
+| `compute-input-stats` | the same means, and standard deviations equal to floating-point rounding |
+| `train` | the same network, loss, optimizers, early stopping and choice of best epoch, but [not the same weights](#training) |
+| `predict` | the same scores, to floating-point rounding, when both read the same genotypes |
 
-`src/dietnet/upstream_manifest.json` records the commit, a SHA-256 for every
-kept file, and the list of removed ones. `tests/unit/test_upstream_unchanged.py`
-fails if a kept file is modified or missing, if a file is added to upstream's
-directories, if a removed one comes back, or if CI clones a different commit
-from the one the manifest pins. `dietnet info` runs the same check on an
-installed copy.
+`predict` also treats missing SNPs as the published code does: the standardized genotypes of the SNPs that were found are multiplied by the total number of SNPs divided by the number found.
 
-Where upstream's behaviour has to differ, it is changed *around* the call, never
-in the file:
+## What is different
 
-- **torch's safe loader.** Upstream's scripts reload checkpoints with a bare `torch.load`, which
-  torch ≥ 2.6 refuses for the numpy scalars they hold. `dietnet._launch` allowlists exactly
-  those numpy types (keeping `weights_only=True`) and then runs the script unmodified.
-- **Hash seed.** `partition_data.py` iterates `set(labels)`, so the order of
-  samples within a fold, and with it training under a fixed seed, depends on
-  Python's per-process hash seed. Every upstream script runs with
-  `PYTHONHASHSEED=0`.
+### Training
 
-Upstream's scripts run in a subprocess from their own directory, as upstream's
-README runs them. For prediction, upstream's modules are imported in-process
-instead, so that the model class and inference step are upstream's while the
-I/O around them scales.
+The published `train.py` reads one individual at a time from a copy of all the genotypes in memory.
+On a biobank, this takes too much memory and leaves the GPU idle most of the time (see [Scaling](scaling.md#training)).
+`dietnet train` therefore reads whole batches from the packed file.
 
-## What the parity tests compare
+As a result, the individuals are grouped into different batches, and a model trained with `dietnet train` does not have the same weights as one trained with `train.py`, even with the same seed.
+The published models themselves are not affected, since `predict` uses their weights as they are.
 
-`tests/parity/` runs upstream's scripts from a full checkout at the pinned
-commit (including the scripts this package removed) and requires:
+### Matching the SNPs of a cohort
 
-| test | this package | against upstream's |
-|---|---|---|
-| `test_dataset.py` | `create-dataset` from the `.bed` | `create_dataset.py` from `plink --recode A` text: every dataset identical in dtype and value, built in one block and in many |
-| `test_predict.py` | `predict` on a matched cohort | `test_independent_dataset.py` on the same cohort: same scores |
-| `test_predict.py` | `predict` on a cohort missing 30% of the model's SNPs | `test_independent_dataset.py` doing its own SNP matching: same scores, so the missing-SNP handling and D/(D−\|C\|) scale are upstream's too |
-| `test_predict.py` (slow) | `predict` with the 15 published models | `Dietnet_inference/inference.py`, the published inference path: same scores |
-| `test_published.py` (slow) | the 15 published models on their own test folds | the published held-out accuracy, per model (mean 0.9214) |
+The published code matches SNPs by name only.
+When a cohort counts the other allele of a SNP, the two homozygous genotypes are then read the wrong way around.
+This is common: it is the case for 56,195 of the 229,986 SNPs of the published models in the distributed 1KGP PLINK files.
+`dietnet` also compares the positions and alleles, and flips the genotypes of these SNPs.
 
-Datasets must be identical. Scores are compared to floating-point rounding
-(`rtol=1e-5`, `atol=1e-6`), since they come from separate processes; the
-published accuracies may move by at most one test sample.
+### The order of the samples in a fold
 
-The HDF5 references in `tests/fixtures/` were built by upstream's
-`create_dataset.py` with plink 1.9 (`tests/fixtures/build_fixtures.py`
-rebuilds them).
+The published `partition_data.py` orders the individuals in a way that depends on Python's hash seed, which changes each time Python starts.
+`dietnet partition` fixes this seed, so it gives the same partition each time.
+The partition of the published models has another order, which cannot be obtained this way, so it is included as [a file](scaling.md#reproducing-the-published-models).
 
-## Running them
+## How it is tested
 
-The parity tests skip unless `DIETNET_UPSTREAM_DIR` points at a full upstream
-checkout of the pinned commit:
+Tests run the published code and `dietnet` on the same inputs and compare the results.
+
+| test | what is compared |
+|---|---|
+| `tests/parity/test_dataset.py` | the dataset, with files that the published `create_dataset.py` made (the genotypes are written out in full for this comparison) |
+| `tests/unit/test_features.py` | the SNP features, with `generate_embedding.py`: equal |
+| `tests/unit/test_input_stats.py` | the statistics, with `compute_input_features_statistics.py`: means equal, standard deviations within a relative error of 1e-12 |
+| `tests/parity/test_predict.py` | the scores, with `test_independent_dataset.py`, on a full cohort and on one that is missing 30% of the SNPs: within a relative error of 1e-5 |
+| `tests/parity/test_predict.py` (slow) | the scores of the 15 published models, with the published `inference.py`: within a relative error of 1e-5 |
+| `tests/parity/test_published.py` (slow) | the accuracy of each published model on its own test fold, with the published value (0.9214 on average): within about one individual |
+
+If a change to `dietnet` moves one of these results, it is a bug, or a decision recorded in the [changelog](https://github.com/MattScicluna/DIETNETWORK/blob/master/CHANGELOG.md).
+The tolerances are never loosened.
+
+The tests in `tests/parity/test_predict.py` need a copy of the published code at the commit we compare with:
 
 ```bash
 git init upstream && cd upstream
@@ -70,39 +64,29 @@ git checkout FETCH_HEAD
 cd ..
 
 DIETNET_UPSTREAM_DIR=$PWD/upstream uv run pytest
-DIETNET_UPSTREAM_DIR=$PWD/upstream uv run pytest -m slow   # the published models; downloads Zenodo
+DIETNET_UPSTREAM_DIR=$PWD/upstream uv run pytest -m slow   # the published models, downloaded from Zenodo
 ```
 
-CI does this on every pull request (without `slow`). Set
-`DIETNET_PUBLISHED_DIR` to reuse a downloaded Zenodo release across slow runs.
+Without `DIETNET_UPSTREAM_DIR`, they are skipped.
+They run on every pull request, except for the slow ones.
+To reuse a downloaded release between slow runs, set `DIETNET_PUBLISHED_DIR`.
 
-## Beyond parity
+## The copy of the published code
 
-Some checks have no upstream counterpart:
+The files of the published code that we keep are in `Dietnet_train_and_evaluate/`, and they are not edited.
+`dietnet` uses the network, the data handling and the partition script.
+It no longer runs `train.py`, `generate_embedding.py` and `compute_input_features_statistics.py`, but we keep them for comparison.
 
-- **Allele-aware matching** (`tests/unit/test_align.py`): swapped alleles, the
-  other strand, strand-ambiguous SNPs, missing SNPs and the scale. Upstream
-  matches by SNP name only, which feeds mirror-coded genotypes for a SNP whose
-  dosage counts the other allele. In the distributed 1KGP PLINK files that is
-  56,195 of the published models' 229,986 SNPs.
-- **The pipeline end to end** (`tests/integration/`): every command on both
-  fixtures through the CLI, with accuracy floors, regression, the recorded
-  preprocessing and strict loading.
-- **Training** differs from upstream's `train.py` on purpose: see [Scaling](scaling.md). Training
-  the 15 published models with upstream's `train.py`, on the
-  published split and configs, gave held-out accuracy 0.9282 against the published
-  0.9214, and 96.1% agreement with the published model of the same (seed,
-  fold). Weights are not identical (GPU nondeterminism, a newer torch); see
-  `reproduction/README.md`.
+`src/dietnet/upstream_manifest.json` lists the commit, a checksum for each file, and the files that we removed.
+A test fails if a file was changed, added or brought back, and `dietnet info` makes the same check on an installed copy.
 
-## Taking newer upstream code
+To update to a newer version of the published code:
 
 ```bash
 git merge upstream/main
-# delete again any file the manifest lists as removed
+# delete again any file that the manifest lists as removed
 python scripts/upstream_manifest.py --commit upstream/main
 uv run pytest
 ```
 
-and move `UPSTREAM_SHA` in `.github/workflows/ci.yml` to the same commit, which
-the manifest test checks.
+Then set `UPSTREAM_SHA` in `.github/workflows/ci.yml` to the same commit, which a test checks.

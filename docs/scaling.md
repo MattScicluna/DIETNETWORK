@@ -1,190 +1,132 @@
 # Scaling and clusters
 
-`dietnet` is built to apply the published models to biobank cohorts, and the
-work splits along the hardware it needs:
+Here we describe how much time and memory `dietnet` needs on a biobank, how to run it on a SLURM cluster, and how to retrain the published models.
 
-| step | needs | why |
+## Prediction
+
+Prediction has two steps that need different hardware, so they can be two jobs.
+`match` finds the models' SNPs in the cohort, which is limited by the CPU and the disk.
+`predict` then runs the models, which is faster on a GPU.
+
+We measured both on UK Biobank (486,748 individuals) with the 15 published models:
+
+| step | hardware | time |
 |---|---|---|
-| `match` | CPU and I/O | reads the `.bed` once, a block of samples at a time (1 GiB per block), and writes the matched cohort as contiguous runs of rows |
-| `predict` | a GPU, ideally | memory-maps the matched cohort and reads each batch of samples once for every model |
-| `train` | a GPU | reads the training set from the packed file, a batch at a time |
+| `match` | 8 CPUs, 23 GB of memory | 4 min 27 s |
+| `predict` | one A100 | 11 min 34 s |
 
-Measured on UK Biobank (486,748 samples) on Narval:
+That cohort had only 5,810 of the models' 229,986 SNPs, so these numbers say nothing about accuracy, and `match` can take longer on a cohort with more of the SNPs.
 
-| step | where | wall time | peak memory |
-|---|---|---|---|
-| `match` onto the published models (229,986 SNPs) | 8 CPUs | 4 min 27 s | 23 GB |
-| `predict`, the 15 published models | one A100 | 694 s | memory-mapped |
-
-!!! note
-    That fileset holds only 5,810 of the published models' SNPs, so the run
-    measures scale, not accuracy. Real predictions from the published models
-    need genotypes at the published SNPs.
-
-## Rules for cluster work
-
-- Heavy work goes to SLURM jobs on compute nodes, never the login node.
-- Cohort data, and anything derived from it (datasets, matched cohorts,
-  predictions, trained packages), stays on the cluster. The repository's
-  pre-commit hook refuses genotype files, HDF5 datasets, `.npy`/`.npz` arrays,
-  `.pt` weights and absolute cluster paths.
-- No cluster path is committed: every job below takes its paths from
-  environment variables and stops with a message naming any that is unset.
-  Pass the account to `sbatch`.
-
-## Prediction jobs: `benchmarks/slurm/`
-
-`bench_predict.sbatch` times every pipeline step (wall time and peak RSS, with
-GNU `time`): it trains a throwaway one-fold model for 3 epochs on a reference
-panel (the work per step is the same; accuracy is not the point), then matches
-a cohort to it.
+`match` can be run in any CPU job:
 
 ```bash
-TRAIN_PREFIX=/path/panel TRAIN_LABELS=/path/panel_labels.tsv \
-TEST_PREFIX=/path/cohort DIETNET_VENV=/path/.venv RUN_DIR=/path/to/run_dir \
-sbatch --account=ACCOUNT benchmarks/slurm/bench_predict.sbatch
+dietnet match --model models/packages --plink cohort --work-dir work
 ```
 
-`predict_gpu.sbatch` is the GPU half: inference after `match` has written the
-matched cohort to `WORK_DIR`.
+`benchmarks/slurm/predict_gpu.sbatch` is a GPU job that runs `predict` on its result:
 
 ```bash
-MODEL_DIR=/path/packages TEST_PREFIX=/path/cohort WORK_DIR=/path/to/run_dir/work \
-OUT=/path/to/run_dir/predictions.tsv DIETNET_VENV=/path/.venv \
+MODEL_DIR=/path/models/packages TEST_PREFIX=/path/cohort WORK_DIR=/path/work \
+OUT=/path/predictions.tsv DIETNET_VENV=/path/.venv \
 sbatch --account=ACCOUNT benchmarks/slurm/predict_gpu.sbatch
 ```
 
-To apply the published models, run `dietnet match` as a CPU job with the same
-`--model` and `--work-dir`, then this.
+The file that `match` writes holds genotypes, so keep it where the cohort is allowed to be.
 
-## The genotype I/O benchmark
+## Training
 
-`benchmarks/bench_genotype_io.py` settled which on-disk format the pipeline
-builds once from PLINK and reads in every later step: PLINK decoded each time,
-`.npy`, or HDF5 contiguous, row-chunked, or compressed. It times a full load
-and random minibatch reads, and reports the first (cold) run separately from
-the median.
+A training set the size of UK Biobank does not fit in the memory of most jobs.
+At one byte per genotype, 486,748 individuals and 169,829 SNPs take about 83 GB.
+`dietnet train` reads the packed file, which takes 2 bits per genotype, one batch at a time, and unpacks each batch on the GPU.
+
+To train on a cluster, first copy the dataset to the local disk of the node:
 
 ```bash
-PLINK_PREFIX=/path/to/cohort OUT_JSON=/path/to/results.json \
-DIETNET_VENV=/path/to/.venv [WORKDIR=/path/to/workdir] [FORMATS=...] \
-sbatch --account=ACCOUNT benchmarks/slurm/bench_io.sbatch
+dietnet create-dataset --plink cohort --labels labels.tsv --out dataset.h5   # a CPU job
+
+# then one GPU job for each seed and fold (8 CPUs, 32 GB of memory):
+cp --preserve=timestamps dataset.h5 dataset.h5.packed.* "$SLURM_TMPDIR/"
+dietnet train --dataset "$SLURM_TMPDIR/dataset.h5" ... --seeds 78 --folds 0
 ```
 
-`WORKDIR` defaults to the node-local `$SLURM_TMPDIR`; point it at scratch to
-time the shared filesystem. It needs about 2.2× the int8 matrix (samples × SNPs
-bytes) in memory. The outcome is contiguous HDF5.
+Reading the genotypes from network storage is far too slow: in the measurements below, an epoch of the published loop took 2,923 s instead of 131 s.
+`--preserve=timestamps` is needed because the packed file is refused when the modification time of `dataset.h5` changes.
 
-## Training on a biobank
+If the packed file is larger than the memory of the job, add `--chunk-rows 2048`, the value that we used for [height and BMI](uk-biobank.md).
+The individuals are then read in chunks of neighbors instead of one at a time (see the [command line reference](cli.md#dietnet-train)).
 
-The published `train.py` copies every genotype into memory before training (~83 GB for
-UK Biobank's 486,748 × 169,829), then reads one sample per Python call in one process. On an
-A100 that left the GPU ~87% idle. `dietnet train` uses the same network, loss, optimizers and
-epoch logic (baseline, annealing, best-model rule, patience, the test pass, the same result
-files), but reads whole batches of packed genotypes, decodes them on the GPU, and skips the
-published loop's evaluation pass over the training set. Optionally it is data-parallel
-(`--gpus N`). It is not bit-identical to `train.py`, so it is checked on held-out accuracy.
+### Time and memory
 
-### Benchmarks
+We compared `dietnet train` with the published `train.py` on simulated genotypes of the size of UK Biobank (292,048 training individuals and 169,829 SNPs).
+Every run used A100 GPUs with 40 GB of memory.
 
-Simulated genotypes of UK Biobank's shape (292,048 training samples ×
-169,829 SNPs), one A100 40 GB unless stated, dataset staged to the node's
-local NVMe unless stated (`benchmarks/slurm/bench_train_inputs.sbatch`, Mila,
-2026-10-27):
-
-| loop | genotypes | GPUs | batch | memory used | before training | whole epoch |
+| loop | genotypes | GPUs | batch size | memory | before training | one epoch |
 |---|---|---|---|---|---|---|
-| published | RAM | 1 | 138 | 82 GB | 346 s load | 65–80 s |
-| published | memmap, network storage | 1 | 138 | — | — | 2,923 s |
-| published | memmap | 1 | 138 | 4.4 GB | 217 s staging | 131 s |
-| published, fast loader | packed | 1 | 138 | 5.3 GB | 280 s staging | 82 s |
-| **`dietnet train`** | packed | 1 | 138 | 8.3 GB | 244 s staging | **13.5–14 s** |
-| **`dietnet train`** | packed | 1 | 2,048 | 8.6 GB | 244 s staging | **8.9–9.5 s** |
-| `dietnet train` | packed | 4 | 2,048 | 5.8 GB | 217 s staging | 7.8–8.6 s |
+| published | in memory | 1 | 138 | 82 GB | 346 s (load) | 65–80 s |
+| published | read from local disk | 1 | 138 | 4.4 GB | 217 s (copy) | 131 s |
+| published | read from network storage | 1 | 138 | not measured | none | 2,923 s |
+| `dietnet train` | packed, local disk | 1 | 138 | 8.3 GB | 244 s (copy) | **13.5–14 s** |
+| `dietnet train` | packed, local disk | 1 | 2,048 | 8.6 GB | 244 s (copy) | 8.9–9.5 s |
+| `dietnet train` | packed, local disk | 4 | 2,048 | 5.8 GB | 217 s (copy) | 7.8–8.6 s |
 
-Training throughput by data path, upstream's model, samples/s
-(`benchmarks/bench_train_throughput.py`):
+At the published batch size, an epoch is about five times faster than the published loop with the genotypes in memory, and takes a tenth of the memory.
 
-| batch | upstream's data path | batched memmap, 8 workers | packed, decoded on CPU | packed, decoded on GPU |
-|---|---|---|---|---|
-| 512 | 1,811 | 11,840 | 7,847 | 31,409 |
-| 2,048 | 1,580 | 11,405 | 7,775 | 40,711 |
-
-What they say:
-
-- Network storage is unusable for training; stage the dataset (and its packed
-  copy, with `cp --preserve=timestamps`; `cp -p` fails on Narval's node disk) to `$SLURM_TMPDIR` first. Staging ~100 GB takes 3–5 min.
-- At the published batch size, the epoch is 5–6× faster than the published loop in RAM, in a
-  tenth of the memory. At ~1,000–2,000 epochs per model
-  that is hours, not days.
-- On one node, more GPUs barely help: the epoch is bound by reading the packed
-  rows (~50,000 samples/s from 8 CPUs). For an ensemble, train **one model per
-  GPU** (a SLURM array, as for the published models) rather than one model on
-  several.
-- Larger batches are faster still, but batch size is a hyperparameter; see
-  below.
+Using more GPUs for one model barely helps, because the time is then spent reading the packed file.
+To train several models, use one GPU for each.
 
 ### Batch size
 
-Held-out accuracy on the published 1KGP split, seed 78, published config with
-the learning rates scaled for a batch k times 138
-(`benchmarks/slurm/batch_size_study.sbatch`):
+A larger batch is faster, but it can change the accuracy.
+To see by how much, we trained on the 1KGP dataset with the published split and seed 78, with the config's learning rates multiplied as shown.
+These models were trained with the published loop, which `dietnet` used up to version 0.5.0.
 
-| batch | learning rates | fold 0 | fold 1 | fold 2 | fold 3 | fold 4 | mean (sd) |
+| batch size | learning rates | fold 0 | fold 1 | fold 2 | fold 3 | fold 4 | mean (sd) |
 |---|---|---|---|---|---|---|---|
 | 138 | published | 0.9270 | 0.9332 | 0.9272 | 0.9310 | 0.9111 | **0.926** (0.009) |
-| 552 | × 2 (√4) | 0.9378 | 0.9267 | 0.9358 | 0.9181 | 0.9154 | **0.927** (0.010) |
-| 552 | × 4 (linear) | 0.9378 | 0.9224 | 0.9272 | 0.9095 | 0.9197 | 0.923 (0.010) |
-| 2,208 | × 4 (√16) | 0.9013 | 0.8987 | 0.9143 | 0.8750 | 0.8850 | 0.895 (0.015) |
-| 2,208 | × 16 (linear) | 0.8197 | 0.7823 | 0.8522 | 0.8125 | 0.7939 | 0.812 (0.027) |
+| 552 | × 2 | 0.9378 | 0.9267 | 0.9358 | 0.9181 | 0.9154 | **0.927** (0.010) |
+| 552 | × 4 | 0.9378 | 0.9224 | 0.9272 | 0.9095 | 0.9197 | 0.923 (0.010) |
+| 2,208 | × 4 | 0.9013 | 0.8987 | 0.9143 | 0.8750 | 0.8850 | 0.895 (0.015) |
+| 2,208 | × 16 | 0.8197 | 0.7823 | 0.8522 | 0.8125 | 0.7939 | 0.812 (0.027) |
 
-1KGP has only ~1,400 training samples per fold, so a batch of 2,208 is one
-step per epoch: full-batch gradient descent, which these results penalise. A
-batch four times the published one with the learning rates scaled by √4 kept
-accuracy. At UK Biobank's ~290,000 training samples even a batch of 2,048 is
-~140 steps per epoch; check a larger batch on one UK Biobank fold against 138
-before using it for the ensemble.
-
-### Recipe
-
-```bash
-dietnet create-dataset --plink cohort --labels labels.tsv --out dataset.h5   # CPU job
-# then, per (seed, fold), one GPU job (8 CPUs, 32 GB):
-cp --preserve=timestamps dataset.h5 dataset.h5.packed.* "$SLURM_TMPDIR/"
-dietnet train --dataset "$SLURM_TMPDIR/dataset.h5" ... --inputs packed \
-    --seeds 78 --folds 0
-```
+A batch four times larger kept the accuracy when the learning rates were multiplied by two, the square root of four.
+A batch of 2,208 lost accuracy.
+However, each fold has only about 1,400 training individuals, so this is a single step per epoch.
+On a biobank, a batch of 2,048 is still about 140 steps per epoch, and the result can be different.
+Before training many models with a larger batch, compare it with 138 on one fold.
 
 ## Reproducing the published models
 
-`reproduction/` retrains the 15 published models on a SLURM cluster from the
-Zenodo release (`dietnet published --dest DIR` downloads it to
-`DIR/download/Dietnet_training`) and the published split:
+`reproduction/` has the jobs that retrain the 15 published models on a SLURM cluster, from the Zenodo release (which `dietnet published --dest DIR` downloads to `DIR/download/Dietnet_training`):
 
 ```bash
-RELEASE=/path/to/Dietnet_training DIETNET_VENV=/path/to/.venv EXP_DIR=/path/to/run_dir \
+RELEASE=/path/Dietnet_training DIETNET_VENV=/path/.venv EXP_DIR=/path/run \
   ACCOUNT=my-account bash reproduction/submit_retrain.sh
+
+dietnet check --packages /path/run/exp/packages    # once the jobs are done
 ```
 
-- `prep.sbatch` (CPU) recomputes the per-fold embedding and statistics with
-  `dietnet generate-embedding` and `compute-input-stats`, and stops unless
-  they equal Zenodo's.
-- `retrain.sbatch` (GPU), once prep succeeds, is a 15-task array: one
-  (seed, fold) per task, with the published config for that seed.
+The first job computes the SNP features and statistics, and stops if they differ from the published ones.
+The second trains one model for each seed and fold, with the published configs.
 
-Then:
+The jobs read the partition from `reproduction/1kgp_partition_seed124.npz`.
+`dietnet partition --seed 124` puts the same individuals in each fold, but in a different order, which changes the batches.
 
-```bash
-dietnet check --packages $EXP_DIR/exp/packages
-```
+The published models have a mean accuracy of 0.9214 on their test folds.
+When we retrained them with the published loop, it was 0.9282, and each took 19 to 58 minutes on an A100.
+`reproduction/README.md` has the results of each model.
+Since then, `dietnet train` uses a [different loop](parity.md#training), so the accuracy of each model will not be exactly the same.
 
-The split is `reproduction/1kgp_partition_seed124.npz`: upstream's
-`partition_data.py --balance-class --seed 124` over the published
-`1KGP_dataset.hdf5`. Its training indices reproduce Zenodo's per-fold
-statistics and embedding exactly. `dietnet partition --seed 124` regenerates the
-same fold membership but not the order within folds, which decides minibatches,
-so a retrain uses the file.
+## Benchmarks
 
-Retrained on Narval A100s (19 to 58 minutes per model), the mean held-out
-accuracy was 0.9282 against the published 0.9214; per-model results are in
-`reproduction/README.md`.
+Most of the numbers on this page come from scripts in `benchmarks/`, which take their paths from environment variables:
+
+| script | what it measures |
+|---|---|
+| `slurm/bench_predict.sbatch` | every step from PLINK files to a matched cohort: time and memory |
+| `slurm/bench_train_inputs.sbatch` | training, by how the genotypes are read |
+| `slurm/bench_train_throughput.sbatch` | individuals per second, by how the genotypes are read and by batch size |
+| `slurm/batch_size_study.sbatch` | accuracy by batch size and learning rate |
+| `slurm/bench_io.sbatch` | reading genotypes from different file formats |
+
+The comments at the top of each script say what to set.
+The rows of the published loop in the tables above were measured with earlier versions of these scripts.

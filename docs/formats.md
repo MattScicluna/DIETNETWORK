@@ -32,7 +32,7 @@ The [training config](training.md#inputs) and the [descriptions of SNP features]
 | `snps/chrom`, `snps/pos`, `snps/a1`, `snps/a2` | the position and alleles of each SNP, needed to match a new cohort |
 | `class_labels`, `class_label_names` | the class of each individual, as a position in the sorted list of class names (with `--labels`) |
 | `regression_labels` | the value of each individual (with `--regression-labels`) |
-| `inputs` | individuals × SNPs: has the shape of the genotypes, but holds them only with `--int8` (−1 where missing) |
+| `inputs` | individuals × SNPs: has the shape of the genotypes, but does not hold them |
 
 The packed file stores each genotype in 2 bits: 0, 1 and 2 are the dosages and 3 is missing.
 A small file next to it, `dataset.h5.packed.json`, records the size and modification time of `dataset.h5`.

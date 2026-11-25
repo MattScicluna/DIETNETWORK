@@ -4,11 +4,11 @@ Pipeline (each step writes one file the next reads)::
 
     dietnet create-dataset      PLINK + labels   -> dataset.h5       (this package)
     dietnet partition           dataset.h5       -> partition.npz    (upstream partition_data.py)
-    dietnet generate-embedding  + partition      -> embedding.npz    (upstream generate_embedding.py)
+    dietnet generate-embedding  + partition      -> embedding.npz    (this package)
       or build-embedding --spec                  (several feature sources, see dietnet.features;
                                                   dietnet alphagenome makes one of them)
-    dietnet compute-input-stats + partition      -> input_stats.npz  (upstream compute_input_features_statistics.py)
-    dietnet train               all of the above -> model packages   (upstream train.py)
+    dietnet compute-input-stats + partition      -> input_stats.npz  (this package)
+    dietnet train               all of the above -> model packages   (upstream model and loss, dietnet.parallel)
     dietnet match               packages + PLINK -> matched cohort   (optional, CPU: ahead of predict)
     dietnet predict             packages + PLINK -> predictions.tsv  (upstream model and inference step)
     dietnet check               predictions + labels -> accuracy
@@ -413,7 +413,7 @@ def train(
     snp_penalty_weights,
     valid_subset,
 ):
-    """Train each (seed, fold) with upstream train.py; package the results."""
+    """Train one model per (seed, fold); package the results."""
     from dietnet import training
 
     try:

@@ -1,230 +1,232 @@
 # Command line
 
-```bash
-dietnet --help
-dietnet <command> --help
-dietnet --version
-```
+Here we list every command and its options.
+To learn how to use them, start with the [Quickstart](quickstart.md) or [Training](training.md).
+`dietnet --help` and `dietnet <command> --help` print the same information, and `dietnet --version` prints the version.
 
-| command | does |
+| to predict | |
 |---|---|
-| [`create-dataset`](#dietnet-create-dataset) | PLINK + labels → upstream's HDF5 dataset |
-| [`partition`](#dietnet-partition) | dataset → folds (upstream `partition_data.py`) |
-| [`generate-embedding`](#dietnet-generate-embedding) | per-fold genotype × class frequencies (upstream `generate_embedding.py`) |
-| [`build-embedding`](#dietnet-build-embedding) | the auxiliary network's input from several feature sources |
-| [`alphagenome`](#dietnet-alphagenome) | AlphaGenome variant effects per SNP, for `build-embedding` |
-| [`compute-input-stats`](#dietnet-compute-input-stats) | per-fold SNP means and SDs (upstream `compute_input_features_statistics.py`) |
-| [`train`](#dietnet-train) | train one model per (seed, fold) → model packages |
-| [`match`](#dietnet-match) | a cohort on the models' SNPs, ahead of `predict` |
-| [`predict`](#dietnet-predict) | a cohort through every selected model, combined |
-| [`check`](#dietnet-check) | accuracy against labels, or each package's held-out accuracy |
-| [`published`](#dietnet-published) | the 15 published models, as packages |
-| [`info`](#dietnet-info) | versions, and whether the upstream code is intact |
+| [`published`](#dietnet-published) | downloads the published models |
+| [`match`](#dietnet-match) | finds the models' SNPs in a cohort, ahead of `predict` |
+| [`predict`](#dietnet-predict) | predicts a cohort with one or more models |
+| [`check`](#dietnet-check) | reports how accurate predictions or models are |
 
-Options that take several integers (`--seeds`, `--folds`) accept
-comma-separated values (`--seeds 78,79,80`) or the flag repeated
-(`--seeds 78 --seeds 79`). Paths marked *existing* must exist.
+| to train | |
+|---|---|
+| [`create-dataset`](#dietnet-create-dataset) | reads the genotypes and labels |
+| [`partition`](#dietnet-partition) | splits the individuals into folds |
+| [`generate-embedding`](#dietnet-generate-embedding) | computes the published SNP features |
+| [`compute-input-stats`](#dietnet-compute-input-stats) | computes the mean and standard deviation of each SNP |
+| [`train`](#dietnet-train) | trains one model per seed and fold |
 
-## `dietnet create-dataset`
+| less often | |
+|---|---|
+| [`build-embedding`](#dietnet-build-embedding) | builds other SNP features |
+| [`alphagenome`](#dietnet-alphagenome) | gets AlphaGenome variant effects, for `build-embedding` |
+| [`adjust-phenotype`](#dietnet-adjust-phenotype) | adjusts a trait for covariates |
+| [`pack-genotypes`](#dietnet-pack-genotypes) | packs the genotypes of an older dataset |
+| [`info`](#dietnet-info) | prints versions and checks the published code |
 
-Build upstream's HDF5 dataset from PLINK, without the text round-trip
-([schema](formats.md#the-hdf5-dataset)), and its 2-bit genotype copy
-(`<dataset>.packed.bin`, a quarter of the bytes, with a `.packed.json` recording what it
-was built from), which training from the packed store, the per-fold steps and
-`build-embedding` read. The copy is laid out in 64 blocks of SNPs, so training that keeps
-a share of 64 SNP blocks per buffer reads only those. The `.h5` holds the labels, the SNP
-table and the shape of `inputs`, and the copy holds the genotypes. At least one
-of `--labels` and `--regression-labels` is required.
-
-| option | | default |
-|---|---|---|
-| `--plink TEXT` | PLINK prefix (`.bed/.bim/.fam`) | required |
-| `--labels PATH` | *existing* TSV: sample id, class label | |
-| `--regression-labels PATH` | *existing* TSV: sample id, value | |
-| `--out PATH` | output `.h5` | required |
-
-## `dietnet partition`
-
-Split samples into folds (upstream `partition_data.py`).
-
-| option | | default |
-|---|---|---|
-| `--dataset PATH` | *existing* dataset | required |
-| `--out PATH` | output `.npz` (`.npz` is appended if missing) | required |
-| `--nb-folds INTEGER` | number of folds | 5 |
-| `--seed INTEGER` | random seed | 23 |
-| `--train-valid-ratio FLOAT` | train share of train + valid; unbalanced split only | 0.75 |
-| `--balanced / --unbalanced` | balance class labels across splits, as in the paper | balanced |
-
-## `dietnet generate-embedding`
-
-Per-fold genotype × class frequencies, the published SNP features: the same numbers as
-upstream's `generate_embedding.py`, a block of samples at a time. Stops, naming them, if a
-class has no training samples in some fold.
-
-| option | | default |
-|---|---|---|
-| `--dataset PATH` | *existing* dataset | required |
-| `--partition PATH` | *existing* partition | required |
-| `--out PATH` | output `.npz` | required |
-
-## `dietnet build-embedding`
-
-SNP features for the auxiliary network from several sources; writes
-`embedding.npz` and `embedding.npz.json`. See [SNP features](features.md).
-
-| option | | default |
-|---|---|---|
-| `--dataset PATH` | *existing* dataset | required |
-| `--partition PATH` | *existing* partition | required |
-| `--spec PATH` | *existing* YAML list of feature blocks | required |
-| `--out PATH` | output `.npz` | required |
-
-## `dietnet alphagenome`
-
-AlphaGenome variant effects for every SNP, through the hosted API, with the key
-in `ALPHAGENOME_API_KEY`. Writes a table for `build-embedding`'s `precomputed`
-provider (`orient: effect`). Resumable: rerun the same command after an
-interruption. Needs the `alphagenome` extra, and sends every SNP's coordinates
-and alleles to Google's API; see [SNP features](features.md#alphagenome-variant-effects).
-
-| option | | default |
-|---|---|---|
-| `--dataset PATH` | *existing* dataset; SNP ids must be `chr:pos:REF:ALT` on GRCh38 | one of these two |
-| `--bim PATH` | a PLINK `.bim` instead: only its SNP ids are read (same `chr:pos:REF:ALT` form), so no genotypes are needed | one of these two |
-| `--out PATH` | feature table (`.tsv`) | required |
-| `--scorers TEXT` | AlphaGenome recommended scorers, comma-separated | `ATAC,DNASE,CHIP_TF,CHIP_HISTONE,CAGE,RNA_SEQ` |
-| `--sequence-length` | context around each variant: `16KB`, `100KB`, `500KB` or `1MB` | `1MB` |
-| `--chunk INTEGER` | SNPs per saved part | 200 |
-| `--max-workers INTEGER` | parallel API requests | 5 |
-
-## `dietnet adjust-phenotype`
-
-A trait regressed on covariates and standardised, as regression labels for
-`create-dataset --regression-labels`: the residual of `trait ~ 1 + covariates`
-divided by its SD. Text covariates (e.g. assessment centre) become indicator
-columns. Samples missing the trait or a covariate are left out; the summary
-(samples, covariates' R², coefficients) goes to `<out>.json`. For height:
-`--trait height --covariates sex,age`, since a model of autosomes cannot see sex.
-
-| option | | default |
-|---|---|---|
-| `--phenotypes PATH` | *existing* TSV, header row, sample id first | required |
-| `--trait TEXT` | the column to predict | required |
-| `--covariates TEXT` | columns to adjust for, comma-separated | none |
-| `--out PATH` | labels TSV | required |
-
-## `dietnet pack-genotypes`
-
-(Re)write the 2-bit copy of a dataset's int8 genotypes (`<dataset>.packed.bin`).
-`create-dataset` writes it; this is for a dataset with int8 genotypes that changed since
-(a stale copy is refused), or built by dietnet 0.4 or earlier.
-
-| option | | default |
-|---|---|---|
-| `--dataset PATH` | *existing* dataset | required |
-
-## `dietnet compute-input-stats`
-
-Per-fold SNP means and SDs, as upstream's `compute_input_features_statistics.py` computes
-them (means identical, SDs to floating-point rounding), from genotype counts, a block of
-samples at a time.
-
-| option | | default |
-|---|---|---|
-| `--dataset PATH` | *existing* dataset | required |
-| `--partition PATH` | *existing* partition | required |
-| `--out PATH` | output `.npz` | required |
-
-## `dietnet train`
-
-Train each (seed, fold); package the results under
-`EXP_DIR/packages/seed_<seed>/fold_<fold>/`. See [training](training.md#train).
-
-| option | | default |
-|---|---|---|
-| `--dataset PATH` | *existing* dataset | required |
-| `--partition PATH` | *existing* partition | required |
-| `--embedding PATH` | *existing* auxiliary-network input: required for the Diet Network, refused for the MLP | |
-| `--input-stats PATH` | *existing* per-fold statistics | required |
-| `--config PATH` | *existing* upstream training config (YAML) | required |
-| `--exp-dir PATH` | runs, logs, configs and packages | required |
-| `--seeds TEXT` | e.g. `78,79,80`; each overrides the config's `seed` | required |
-| `--folds TEXT` | e.g. `0,1,2,3,4` | required |
-| `--task` | `classification` or `regression` | classification |
-| `--normalize / --no-normalize` | standardise inputs with the fold's means and SDs | normalize |
-| `--model` | `dietnet`, upstream's Diet Network, or `mlp`, its MLP baseline (no auxiliary network) | dietnet |
-| `--inputs` | where training reads genotypes: `ram` copies them all into memory first (upstream), `memmap` reads each batch from the dataset file, `packed` from its 2-bit copy (`pack-genotypes`); same model in every case. `auto` uses the packed copy if there is one, else memory-maps above 2 GiB | auto |
-| `--workers INTEGER` | loader processes | the CPUs available, less one, at most 8 |
-| `--gpus INTEGER` | above 1, train each model data-parallel over this many GPUs on one node (CPU processes where there are none), the config's `batch_size` split across them; see Scaling | 1 |
-| `--bn-recalibrate` | before each validation, recompute the batch-norm statistics on this many training samples without dropout. Upstream batch-normalises the fat layer right after input dropout, so the statistics learned in training misfit evaluation | 0 (off) |
-| `--snp-sample` | Diet Network only: each training batch uses this share of the SNPs, the same for the whole batch, scaled up to keep the fat layer's expected input, in place of per-sample input dropout. The dropped SNPs are skipped, so the auxiliary network and the fat layer do that share of the work; evaluation uses every SNP. `1 - input_dropout` keeps the dropout rate | 1 (off) |
-| `--chunk-rows` | read training rows in contiguous chunks of this size into shuffled in-memory buffers, not batches of random rows, so the genotype file need not fit in the page cache | 0 (off) |
-| `--chunks-per-buffer` | with `--chunk-rows`: random chunks read into each buffer | 4 |
-| `--free-snp-weights` | Diet Network only: each SNP's fat-layer weights become the auxiliary network's plus a free term, trained under a group-lasso penalty of this strength (one group per SNP, a proximal step after each update), so the model can weigh SNPs jointly, as a penalised regression does. Packages carry the free weights and `predict` applies them | 0 (off) |
-| `--free-snp-lr` | with `--free-snp-weights`: their Adam learning rate | the config's `lr_main` |
-| `--snp-penalty-weights` | with `--free-snp-weights`: a `.npy` vector of per-SNP multipliers of the penalty, in the dataset's SNP order (1: unchanged, below 1: shrink the SNP less, 0: not at all), for example from a prior on which SNPs are causal. Packages record its path and checksum | none (every SNP 1) |
-| `--valid-subset N` | validate each epoch, and stop early, on N validation samples, a fixed random subset; the test set is still evaluated whole | 0 (all) |
-| `--snp-blocks` | with `--chunk-rows` and `--snp-sample`: cut the SNPs into this many contiguous blocks and keep a `--snp-sample` share of the blocks per buffer, not random SNPs per batch | 0 (off) |
-
-## `dietnet match`
-
-Match a cohort to the models' SNPs, ahead of `predict`. CPU and I/O only: run it
-as its own job, then `dietnet predict` with the same `--work-dir` on a GPU,
-which finds the matched cohort and goes straight to inference. Prints the
-matching counts, and warns if fewer than 1,000 model SNPs were found.
-
-| option | | default |
-|---|---|---|
-| `--model PATH` | *existing* package, or a directory of packages | required |
-| `--plink TEXT` | cohort PLINK prefix | required |
-| `--work-dir PATH` | where the matched cohort HDF5 goes | required |
-| `--seeds TEXT` | only these seeds | all |
-| `--folds TEXT` | only these folds | all |
-
-## `dietnet predict`
-
-Predict a cohort with every selected model and combine them
-([output](formats.md#predictions)). Warns if fewer than 1,000 model SNPs were
-found.
-
-| option | | default |
-|---|---|---|
-| `--model PATH` | *existing* package, or a directory of packages | required |
-| `--plink TEXT` | cohort PLINK prefix | required |
-| `--out PATH` | predictions TSV | required |
-| `--work-dir PATH` | where the matched cohort HDF5 goes, or already is | next to `--out` |
-| `--seeds TEXT` | only these seeds | all |
-| `--folds TEXT` | only these folds | all |
-| `--batch-size INTEGER` | samples read and scored at a time | 1024 |
-| `--device TEXT` | `cpu`, `cuda`, ... | `cuda` if available |
-| `--scores PATH` | also save per-model scores ([`.npz`](formats.md#per-model-scores)) | |
-
-## `dietnet check`
-
-Accuracy of predictions against labels, overall and per class; or, with
-`--packages`, each package's accuracy on its own held-out test fold (from the
-`test_predictions.tsv` that `train` writes). Give `--packages`, or
-`--predictions` with `--labels`.
-
-| option | | default |
-|---|---|---|
-| `--predictions PATH` | *existing* output of `dietnet predict` | |
-| `--packages PATH` | *existing* directory of packages from `train` | |
-| `--labels PATH` | *existing* TSV: sample id, label | |
-| `--min-accuracy FLOAT` | exit with status 1 below this | |
+`--seeds` and `--folds` take several values, either separated by commas (`--seeds 78,79,80`) or by repeating the option (`--seeds 78 --seeds 79`).
 
 ## `dietnet published`
 
-Fetch the 15 published models (Zenodo record 21133813) as model packages, in
-`DEST/packages/`. The archive is checked against Zenodo's checksum.
+Downloads the 15 published models from Zenodo, checks the download, and saves the models as [packages](formats.md#model-packages) in `DEST/packages/`.
 
 | option | | default |
 |---|---|---|
-| `--dest PATH` | where the download and packages go | required |
-| `--release PATH` | *existing* already unpacked `Dietnet_training/` (skips the download) | |
+| `--dest PATH` | where the download and the packages go | required |
+| `--release PATH` | a `Dietnet_training/` directory that you already have, instead of downloading it | |
+
+## `dietnet match`
+
+Finds the models' SNPs in a cohort and saves their genotypes, so that `predict` does not have to.
+It does not use a GPU, so on a cluster it can be a separate job.
+It prints how many SNPs were found, and warns you if there are fewer than 1,000.
+
+| option | | default |
+|---|---|---|
+| `--model PATH` | a package, or a directory of packages | required |
+| `--plink TEXT` | prefix of the cohort's PLINK files | required |
+| `--work-dir PATH` | where the genotypes are saved | required |
+| `--seeds TEXT` | use only these seeds | all |
+| `--folds TEXT` | use only these folds | all |
+
+## `dietnet predict`
+
+Predicts a cohort with every selected model and combines the predictions ([output](formats.md#predictions)).
+It finds the models' SNPs first, unless `match` already has, and warns you if there are fewer than 1,000.
+
+| option | | default |
+|---|---|---|
+| `--model PATH` | a package, or a directory of packages | required |
+| `--plink TEXT` | prefix of the cohort's PLINK files | required |
+| `--out PATH` | the predictions (TSV) | required |
+| `--work-dir PATH` | where the cohort's genotypes are saved, or were saved by `match` | next to `--out` |
+| `--seeds TEXT` | use only these seeds | all |
+| `--folds TEXT` | use only these folds | all |
+| `--batch-size INTEGER` | individuals predicted at a time | 1024 |
+| `--device TEXT` | `cpu`, `cuda`, ... | `cuda` if available |
+| `--scores PATH` | also save the scores of each model ([format](formats.md#per-model-scores)) | |
+
+## `dietnet check`
+
+Reports accuracy in one of two ways.
+With `--packages`, it reports the accuracy of each model on its own test fold.
+With `--predictions` and `--labels`, it compares predictions with known labels, overall and for each class.
+For regression, it reports Pearson's r, R² and the RMSE.
+
+| option | | default |
+|---|---|---|
+| `--packages PATH` | a directory of packages from `train` | |
+| `--predictions PATH` | the output of `predict` | |
+| `--labels PATH` | a TSV of sample id and label, with a header row | |
+| `--min-accuracy FLOAT` | exit with status 1 if the accuracy is lower (classification only) | |
+
+## `dietnet create-dataset`
+
+Reads PLINK files and labels, and writes the [dataset](formats.md#the-hdf5-dataset) and, next to it, a packed file that holds the genotypes.
+At least one of `--labels` and `--regression-labels` is required.
+
+| option | | default |
+|---|---|---|
+| `--plink TEXT` | prefix of the PLINK files | required |
+| `--labels PATH` | a TSV of sample id and class, with a header row | |
+| `--regression-labels PATH` | a TSV of sample id and value, with a header row | |
+| `--out PATH` | the dataset (`.h5`) | required |
+
+## `dietnet partition`
+
+Splits the individuals into folds, each with train, validation and test individuals.
+
+| option | | default |
+|---|---|---|
+| `--dataset PATH` | the dataset | required |
+| `--out PATH` | the partition (`.npz`) | required |
+| `--nb-folds INTEGER` | number of folds | 5 |
+| `--seed INTEGER` | random seed | 23 |
+| `--balanced / --unbalanced` | split each class separately, as in the paper, or ignore the classes | balanced |
+| `--train-valid-ratio FLOAT` | with `--unbalanced`, the fraction of the individuals outside the test set that are used to train | 0.75 |
+
+## `dietnet generate-embedding`
+
+Computes the published SNP features: the genotype frequencies of each SNP in each class, from the training individuals of each fold.
+It stops if a class has no training individuals in some fold, and names the class.
+
+| option | | default |
+|---|---|---|
+| `--dataset PATH` | the dataset | required |
+| `--partition PATH` | the partition | required |
+| `--out PATH` | the SNP features (`.npz`) | required |
+
+## `dietnet compute-input-stats`
+
+Computes the mean and standard deviation of each SNP, from the training individuals of each fold.
+
+| option | | default |
+|---|---|---|
+| `--dataset PATH` | the dataset | required |
+| `--partition PATH` | the partition | required |
+| `--out PATH` | the statistics (`.npz`) | required |
+
+## `dietnet train`
+
+Trains one model for each seed and fold, and saves each as a package in `EXP_DIR/packages/seed_<seed>/fold_<fold>/`.
+See [Training](training.md#train).
+
+| option | | default |
+|---|---|---|
+| `--dataset PATH` | the dataset | required |
+| `--partition PATH` | the partition | required |
+| `--embedding PATH` | the SNP features (required, except for the MLP, which does not use them) | |
+| `--input-stats PATH` | the statistics | required |
+| `--config PATH` | the [config](training.md#inputs) (YAML) | required |
+| `--exp-dir PATH` | where the packages, logs and results go | required |
+| `--seeds TEXT` | for example `78,79,80`; each replaces the `seed` of the config | required |
+| `--folds TEXT` | for example `0,1,2,3,4` | required |
+
+Options that change the model:
+
+| option | | default |
+|---|---|---|
+| `--task` | `classification` or `regression` | classification |
+| `--model` | `dietnet`, or `mlp`, the [baseline](training.md#the-mlp-baseline) without the auxiliary network | dietnet |
+| `--normalize / --no-normalize` | standardize the genotypes with the mean and standard deviation of each SNP | normalize |
+| `--free-snp-weights FLOAT` | \(\lambda\), for [free SNP weights](training.md#free-snp-weights) (not for the MLP) | 0 (none) |
+| `--free-snp-lr FLOAT` | the learning rate of the free SNP weights | the config's `lr_main` |
+| `--snp-penalty-weights PATH` | \(v_j\), a value [for each SNP](training.md#a-different-penalty-for-each-snp) that multiplies \(\lambda\) (`.npy`) | 1 for every SNP |
+| `--snp-sample FLOAT` | train each batch on this fraction of the SNPs, chosen again for each batch, instead of dropping SNPs for each individual (not for the MLP). Faster, because only these SNPs are computed. The config's `input_dropout` is then ignored; `1 - input_dropout` keeps its rate | 1 (off) |
+| `--bn-recalibrate INTEGER` | before each validation, recompute the batch normalization statistics on this many training individuals, without dropout | 0 (off) |
+| `--valid-subset N` | validate on N of the validation individuals, chosen at random once. The test set is not affected | 0 (all) |
+
+Options that change how the genotypes are read:
+
+| option | | default |
+|---|---|---|
+| `--inputs` | `packed` reads each batch from the packed file, `memmap` from the dataset (if it holds the genotypes), and `ram` copies the genotypes of the dataset into memory first. `auto` is `packed` if there is a packed file, and otherwise `memmap` above 2 GiB and `ram` below | auto |
+| `--workers INTEGER` | processes that read the genotypes | the CPUs available less one, at most 8 |
+| `--gpus INTEGER` | GPUs for each model, which share each batch (see [Scaling](scaling.md#time-and-memory)) | 1 |
+| `--chunk-rows INTEGER` | read the individuals in chunks of this many neighbors, so that the packed file does not have to fit in memory. Individuals are then shuffled within a buffer of chunks, and not over the whole training set | 0 (off) |
+| `--chunks-per-buffer INTEGER` | with `--chunk-rows`, the number of chunks in a buffer | 4 |
+| `--snp-blocks INTEGER` | with `--chunk-rows` and `--snp-sample`, cut the SNPs into this many blocks of neighbors, and read a fraction `--snp-sample` of the blocks for each buffer | 0 (off) |
+
+## `dietnet build-embedding`
+
+Builds [SNP features](features.md) from a list of blocks.
+It writes the features and a description of them, `<out>.json`.
+
+| option | | default |
+|---|---|---|
+| `--dataset PATH` | the dataset | required |
+| `--partition PATH` | the partition | required |
+| `--spec PATH` | the list of blocks (YAML) | required |
+| `--out PATH` | the SNP features (`.npz`) | required |
+
+## `dietnet alphagenome`
+
+Gets the AlphaGenome variant effects of every SNP, as a table for the `precomputed` block of `build-embedding`.
+The coordinates and alleles of every SNP are sent to Google's API, and the API key is read from `ALPHAGENOME_API_KEY`.
+If it is interrupted, run the same command again to continue.
+See [SNP features](features.md#alphagenome-variant-effects).
+
+| option | | default |
+|---|---|---|
+| `--dataset PATH` | the dataset; its SNP ids must be `chr:pos:REF:ALT` on GRCh38 | one of these two |
+| `--bim PATH` | a PLINK `.bim` with such ids, when there is no dataset | one of these two |
+| `--out PATH` | the table (`.tsv`) | required |
+| `--scorers TEXT` | AlphaGenome's recommended scorers to use, separated by commas | `ATAC,DNASE,CHIP_TF,CHIP_HISTONE,CAGE,RNA_SEQ` |
+| `--sequence-length` | context around each variant: `16KB`, `100KB`, `500KB` or `1MB` | `1MB` |
+| `--chunk INTEGER` | SNPs saved at a time | 200 |
+| `--max-workers INTEGER` | API requests at a time | 5 |
+
+## `dietnet adjust-phenotype`
+
+Adjusts a trait for covariates, and writes the result as labels for `create-dataset`.
+The trait is regressed on the covariates, and the residuals are divided by their standard deviation.
+For example, height is usually adjusted for sex and age, since a model of the autosomes cannot see sex.
+
+Covariates that are text, such as an assessment center, become indicators.
+Individuals who are missing the trait or a covariate are left out.
+A summary is written to `<out>.json`.
+
+| option | | default |
+|---|---|---|
+| `--phenotypes PATH` | a TSV with a header row and the sample id first | required |
+| `--trait TEXT` | the column to predict | required |
+| `--covariates TEXT` | the columns to adjust for, separated by commas | none |
+| `--out PATH` | the labels (TSV) | required |
+
+## `dietnet pack-genotypes`
+
+Writes the packed file of a dataset that holds its genotypes, such as one made by version 0.4 or earlier or by the published code.
+`create-dataset` writes this file itself.
+
+| option | | default |
+|---|---|---|
+| `--dataset PATH` | the dataset | required |
 
 ## `dietnet info`
 
-Versions, and whether the upstream code is exactly the pinned commit. Exits
-with status 1, naming the files, if not. No options.
+Prints the versions, and whether the [copy of the published code](parity.md#the-copy-of-the-published-code) is unmodified.
+If it is not, it names the files and exits with status 1.
+It has no options.
