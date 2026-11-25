@@ -3,21 +3,18 @@
 Here we describe how to train a Diet Network on your own genotypes (PLINK files) and labels.
 The trained models are saved as [model packages](formats.md#model-packages), which `dietnet predict` can then apply to new cohorts.
 
-Training takes five commands, and each one writes files that a later one reads.
-A change to one step, such as a new set of SNP features, therefore does not require redoing the steps before it.
-A sixth command, `check`, reports the accuracy of the result.
+Training takes five commands, and each one writes a file that a later one reads.
+A change to one of them, such as a new set of SNP features, therefore does not require rerunning the commands before it.
+A sixth command, `check`, reports the accuracy of the trained models.
 
-| command | writes | upstream script |
+| command | what it does | output |
 |---|---|---|
-| `dietnet create-dataset` | `dataset.h5` | replaces `create_dataset.py` |
-| `dietnet partition` | `partition.npz` | `partition_data.py` |
-| `dietnet generate-embedding` | `embedding.npz` | `generate_embedding.py` |
-| `dietnet compute-input-stats` | `stats.npz` | `compute_input_features_statistics.py` |
-| `dietnet train` | model packages | `train.py`, once per (seed, fold) |
-| `dietnet check` | (prints accuracy) | |
-
-By default, the four commands from `partition` to `train` run upstream's scripts, unmodified.
-We replaced only `create_dataset.py`, and the [parity tests](parity.md) check that the replacement gives the same dataset.
+| `dietnet create-dataset` | reads the genotypes and labels | `dataset.h5` |
+| `dietnet partition` | splits the samples into folds | `partition.npz` |
+| `dietnet generate-embedding` | computes the SNP features that the auxiliary network reads | `embedding.npz` |
+| `dietnet compute-input-stats` | computes each SNP's mean and standard deviation | `stats.npz` |
+| `dietnet train` | trains one model per seed and fold | model packages |
+| `dietnet check` | reports the accuracy of each model | printed |
 
 ```bash
 dietnet create-dataset      --plink panel --labels labels.tsv --out dataset.h5 --int8
@@ -35,14 +32,13 @@ The [tutorial](tutorial.ipynb) runs this pipeline on the bundled 1KGP fixture.
 ## Inputs
 
 **PLINK files**: `panel.bed`, `panel.bim` and `panel.fam`.
-They are read directly, without the `plink --recode A` text files that upstream needs.
 The dosages count each SNP's A1 allele, as listed in the `.bim`.
 
 **Labels**: `labels.tsv`, with a header row and then `sample id<TAB>label`.
 Every sample in the `.fam` needs a label, and duplicated ids are refused.
 
-**Config**: `config.yaml`, in upstream's format.
-We suggest starting from the published one:
+**Config**: `config.yaml`, the settings of the network and its training.
+We suggest starting from the published ones:
 
 ```yaml
 batch_size: 138
@@ -63,8 +59,7 @@ The high `input_dropout` is deliberate.
 At 0.995, training keeps an average of 1,150 of the published model's 229,986 SNPs per sample, which prevents the model from relying on a small set of informative SNPs.
 In the paper, this made predictions more robust to missing SNPs.
 
-Upstream's `train.py` reads its seed from the config.
-For this reason, `dietnet train` writes one copy of the config per seed, to `exp/configs/config_seed<seed>.yaml`.
+The `seed` in the config is replaced by each value of `--seeds`, and the config used for each seed is saved to `exp/configs/config_seed<seed>.yaml`.
 
 ## The steps
 
@@ -75,7 +70,7 @@ It also stores each SNP's chromosome, position and alleles, which are needed lat
 
 The genotypes are always written to a packed 2-bit file next to the dataset.
 With `--int8`, they are also written inside `dataset.h5`, which takes four times the disk space of the packed file.
-Upstream's scripts for `generate-embedding` and `compute-input-stats` can only read the genotypes from `dataset.h5`, so without `--int8` these two commands stop with an error.
+By default, `generate-embedding` and `compute-input-stats` read the genotypes from `dataset.h5`, so without `--int8` they stop with an error.
 If that copy is too large, use `compute-input-stats --engine dietnet` and the `genotype_freq` block of [`build-embedding`](features.md) (with `classes:` for frequencies per class), which read the packed file.
 
 ### `partition`
@@ -89,9 +84,8 @@ Both settings need class labels in the dataset, so a regression dataset needs `-
 `--seed` defaults to 23.
 
 !!! note "Reproducing the published partition"
-    The same seed gives the same partition from run to run, but it does not give the partition that the published models were trained on.
-    `partition_data.py` iterates over `set(labels)`, whose order depends on Python's per-process hash seed, and that order decides which samples share a minibatch.
-    `dietnet` fixes the hash seed (`PYTHONHASHSEED=0`) for every upstream script, and the published partition was made with a different order.
+    The same seed gives the same partition from run to run, but not the partition that the published models were trained on.
+    The samples are in a different order within each fold, and the order decides which samples share a minibatch.
     To retrain the published models bit for bit, use `reproduction/1kgp_partition_seed124.npz` (see [scaling](scaling.md#reproducing-the-published-models)).
 
 ### `generate-embedding` and `compute-input-stats`
@@ -101,18 +95,15 @@ Both settings need class labels in the dataset, so a regression dataset needs `-
 Both are computed separately for each fold, from its training samples only, and both take `--ncpus`.
 
 Every class needs at least one training sample in every fold.
-Upstream's script divides by the number of training samples in the class, so an empty class gives NaN, which spreads through the whole model.
-If the empty class is the last one, its columns are silently dropped instead.
-`generate-embedding` therefore stops and names the empty classes.
+Without one, its genotype frequencies are undefined, so `generate-embedding` stops and names the class.
 When this happens, merge or drop the classes that are too small (each needs at least `--nb-folds` samples), rebuild the dataset and rerun.
-`train` makes the same check, and also refuses NaN in the statistics.
 
 To replace or extend the embedding, see [SNP features](features.md).
 
 ### `train`
 
 `train` fits one model for every combination of `--seeds` and `--folds`.
-The model, the training loop, early stopping and the choice of best checkpoint are all upstream's.
+By default, it runs the [published code](parity.md), with the same training loop, early stopping and choice of best checkpoint.
 Values are comma-separated (`--seeds 78,79,80`), or the flag is repeated.
 
 Each finished model becomes a [package](formats.md#model-packages) in `exp/packages/seed_<seed>/fold_<fold>/`, with its held-out predictions in `test_predictions.tsv`.
@@ -139,11 +130,11 @@ dietnet check --packages exp/packages
 
 It prints the accuracy of each package on its own test fold, and then the mean and standard deviation over packages.
 With `--predictions` and `--labels` instead, it scores the output of `predict` against known labels.
-In both cases, `--min-accuracy` makes it exit with status 1 below a threshold, which is how the integration tests and the reproduction use it.
+In both cases, `--min-accuracy` makes it exit with status 1 below a threshold, so it can be used in a script.
 
 ## The MLP baseline
 
-The MLP baseline is upstream's network without the auxiliary network, trained by the same `train.py`.
+The MLP baseline is a network that learns the weights of its first layer directly, without the auxiliary network.
 It is the comparison point for any change to the SNP features.
 
 ```bash
@@ -158,7 +149,7 @@ Since there is no auxiliary network, giving `--embedding` is an error and the pa
 ## Regression
 
 To predict a quantitative trait, give `create-dataset` two label files: `--regression-labels`, a TSV of `sample id<TAB>value`, and `--labels`, the class labels.
-The class labels are still needed because upstream builds the partition and the embedding from them.
+The class labels are still needed because `partition` and `generate-embedding` use them.
 Then train with `--task regression`.
 
 The `predictions.tsv` of a regression ensemble has three columns: `sample`, `prediction` (the mean over models) and `sd_across_models`.
@@ -195,7 +186,7 @@ The group lasso sets all the values in \(\delta_j\) to zero together, and the we
 dietnet train --engine dietnet --free-snp-weights 1 ...      # lambda = 1
 ```
 
-This needs `--engine dietnet`, since upstream's `train.py` does not have \(\delta\).
+This needs `--engine dietnet`, since the default engine does not have \(\delta\).
 Packages store \(\delta\) (package format 3), and `predict` uses it.
 
 ### Choosing lambda
