@@ -28,10 +28,10 @@ Most commands call one function, with the same inputs:
 | `dietnet generate-embedding` | none |
 | `dietnet build-embedding` | [`features.build`][dietnet.features.build] |
 | `dietnet alphagenome` | [`alphagenome.score`][dietnet.alphagenome.score] |
-| `dietnet compute-input-stats` | [`input_stats.write`][dietnet.input_stats.write], with `--engine dietnet` only |
+| `dietnet compute-input-stats` | [`input_stats.write`][dietnet.input_stats], with `--engine dietnet` only |
 | `dietnet train` | [`training.train`][dietnet.training.train] |
 | `dietnet match` | [`predict.matched_dataset`][dietnet.predict.matched_dataset] |
-| `dietnet predict` | [`predict.matched_dataset`][dietnet.predict.matched_dataset], then [`predict.predict`][dietnet.predict.predict] |
+| `dietnet predict` | [`predict.matched_dataset`][dietnet.predict.matched_dataset], then [`predict.predict`][dietnet.predict] |
 | `dietnet check` | none |
 | `dietnet published` | [`published.fetch`][dietnet.published.fetch], then [`published.import_training_release`][dietnet.published.import_training_release] |
 | `dietnet info` | [`upstream.verify`][dietnet.upstream.verify], for the check of the published code |

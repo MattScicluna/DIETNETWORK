@@ -184,7 +184,7 @@ The option's value is \(\lambda\), and \(v_j\) is 1 unless it is [set for each S
 The group lasso can set all the values in \(\delta_j\) to zero together, and the weights of that SNP are then exactly those of the standard Diet Network.
 
 ```bash
-dietnet train --engine dietnet --free-snp-weights 1 ...      # lambda = 1
+dietnet train --engine dietnet --free-snp-weights 0.3 ...    # lambda = 0.3
 ```
 
 The flag `--engine dietnet` selects the training loop of this package instead of the published one, which does not have \(\delta\).
