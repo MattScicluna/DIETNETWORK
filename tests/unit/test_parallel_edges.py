@@ -13,6 +13,7 @@ import torch.distributed as dist
 import yaml
 from support import CONFIG, DATASETS, dietnet
 
+from dietnet import dataset as ds
 from dietnet import parallel, training, upstream
 
 
@@ -22,13 +23,7 @@ def prepared(tmp_path_factory):
     of the statistics without standard deviations and a one-epoch config."""
     root = tmp_path_factory.mktemp("parallel_edges")
     data = DATASETS["synthetic"]
-    dietnet(
-        "create-dataset",
-        "--int8",
-        plink=data.plink_prefix,
-        out=root / "dataset.h5",
-        labels=data.labels,
-    )
+    ds.build(data.plink_prefix, root / "dataset.h5", int8=True, class_labels=data.labels)
     common = dict(dataset=root / "dataset.h5", partition=root / "partition.npz")
     dietnet("partition", dataset=root / "dataset.h5", out=root / "partition.npz")
     dietnet("compute-input-stats", **common, out=root / "stats.npz")
@@ -111,7 +106,7 @@ def test_the_mlp_trains_from_chunks_unnormalised_and_stops_early(
     parallel.main(argv)
 
     out = capsys.readouterr().out
-    assert "data-parallel training on 1 CPU processes; global batch 32" in out
+    assert "training on 1 CPU processes; global batch 32" in out
     assert "batch-norm statistics recomputed on 20 training samples" in out
     assert "Epoch 1:" in out and "Epoch 2:" not in out
     assert "Early stopping, exiting training loop" in out

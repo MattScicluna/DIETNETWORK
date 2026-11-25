@@ -39,11 +39,10 @@ results and the commands that reproduce it are in the docs' tutorial
 
 ## Speed
 
-- Training: `--engine dietnet --inputs packed`, one model per A100, the 2-bit
+- Training: `--inputs packed`, one model per A100, the 2-bit
   copy staged to the node's disk (~50 GB; the `.h5` stays on Lustre, linked,
   since training reads only labels from it).
-- Upstream's statistics script loads a fold's training genotypes (~125 GB) and
-  takes 10 min to 2 h a fold. `stats.sbatch` runs the five folds side by side,
+- `stats.sbatch` runs the five folds side by side,
   on one-fold partitions; `merge_stats.sbatch` joins them into the file one
   run over all folds writes (the dry run checks they are identical).
 - The four datasets, the five embeddings and the five statistics folds are

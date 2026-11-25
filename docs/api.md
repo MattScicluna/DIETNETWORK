@@ -25,10 +25,10 @@ Most commands call one function, with the same inputs:
 | `dietnet pack-genotypes` | [`genotypes.pack`][dietnet.genotypes.pack] |
 | `dietnet adjust-phenotype` | [`phenotype.adjust`][dietnet.phenotype.adjust] |
 | `dietnet partition` | none |
-| `dietnet generate-embedding` | none |
+| `dietnet generate-embedding` | [`features.class_frequencies`][dietnet.features.class_frequencies] |
 | `dietnet build-embedding` | [`features.build`][dietnet.features.build] |
 | `dietnet alphagenome` | [`alphagenome.score`][dietnet.alphagenome.score] |
-| `dietnet compute-input-stats` | [`input_stats.write`][dietnet.input_stats], with `--engine dietnet` only |
+| `dietnet compute-input-stats` | [`input_stats.write`][dietnet.input_stats] |
 | `dietnet train` | [`training.train`][dietnet.training.train] |
 | `dietnet match` | [`predict.matched_dataset`][dietnet.predict.matched_dataset] |
 | `dietnet predict` | [`predict.matched_dataset`][dietnet.predict.matched_dataset], then [`predict.predict`][dietnet.predict] |
@@ -36,7 +36,7 @@ Most commands call one function, with the same inputs:
 | `dietnet published` | [`published.fetch`][dietnet.published.fetch], then [`published.import_training_release`][dietnet.published.import_training_release] |
 | `dietnet info` | [`upstream.verify`][dietnet.upstream.verify], for the check of the published code |
 
-`partition`, `generate-embedding` and the default engine of `compute-input-stats` run scripts of the published code in a subprocess, which [`upstream.run`][dietnet.upstream.run] does from Python.
+`partition` runs a script of the published code in a subprocess, which [`upstream.run`][dietnet.upstream.run] does from Python.
 `check` computes its scores in the command itself, from the files that `train` and `predict` write.
 
 ## Prediction

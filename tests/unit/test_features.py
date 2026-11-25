@@ -9,7 +9,7 @@ import pytest
 from support import dietnet
 
 from dietnet import dataset as ds
-from dietnet import features
+from dietnet import features, upstream
 
 COMPLEMENT = str.maketrans("ACGT", "TGCA")
 
@@ -99,19 +99,23 @@ def table_from_ids(h5):
 
 def test_class_genotype_freq_alone_is_upstreams_embedding(tmp_path, prepared):
     h5, partition = prepared
-    dietnet("generate-embedding", dataset=h5, partition=partition, out=tmp_path / "upstream.npz")
+    upstream.run(
+        "generate_embedding.py",
+        ["--exp-path", tmp_path, "--dataset", h5, "--partition", partition, "--out", "upstream"],
+        log=tmp_path / "upstream.log",
+    )
+    dietnet("generate-embedding", dataset=h5, partition=partition, out=tmp_path / "ours.npz")
 
     values, meta = features.build(
         {"blocks": [{"provider": "class_genotype_freq"}]}, h5, partition, tmp_path / "e.npz"
     )
 
     np.testing.assert_array_equal(values, np.load(tmp_path / "upstream.npz")["emb"])
+    np.testing.assert_array_equal(values, np.load(tmp_path / "ours.npz")["emb"])
     assert meta["fold_dependent"] and meta["column_names"][0].endswith(":genotype0")
 
 
-def test_relative_paths_reach_upstreams_script(tmp_path, prepared, monkeypatch):
-    """Upstream's scripts run from their own directory; paths given relative to ours
-    must still find the dataset, as they do for generate-embedding."""
+def test_relative_paths_find_the_dataset(tmp_path, prepared, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "spec.yaml").write_text("blocks:\n  - provider: class_genotype_freq\n")
     dietnet("build-embedding", dataset="d.h5", partition="p.npz", spec="spec.yaml", out="e.npz")

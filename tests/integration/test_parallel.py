@@ -1,10 +1,7 @@
-"""Data-parallel training (dietnet.parallel), on CPU processes.
+"""Training (dietnet.parallel), on CPU processes.
 
-``dietnet train --gpus N`` trains each model under torchrun, one process per
-GPU, with the config's batch split across them. Its batches differ from
-train.py's, so its weights do too; what it must give is a model of the same
-quality, packaged like any other. Two gloo processes on the synthetic fixture
-stand in for two GPUs.
+``dietnet train`` trains each model with one process per GPU, with the config's batch
+split across them. Two gloo processes on the synthetic fixture stand in for two GPUs.
 """
 
 import re
@@ -19,12 +16,12 @@ pytestmark = pytest.mark.integration
 @pytest.mark.parametrize(
     "inputs, processes", [("memmap", 2), ("packed", 2), ("packed", 1)]
 )  # fmt: skip
-def test_the_dietnet_engine_trains_a_model_as_good_as_train_py(tmp_path, inputs, processes):
+def test_training_gives_a_good_model(tmp_path, inputs, processes):
     data = DATASETS["synthetic"]
     root = tmp_path / "ddp"
-    flags = [f"--gpus={processes}", "--engine=dietnet", "--workers=1", f"--inputs={inputs}"]
+    flags = [f"--gpus={processes}", "--workers=1", f"--inputs={inputs}"]
     if inputs == "packed":  # train_pipeline builds the dataset; pack it, then train
-        train_pipeline(root, data, folds="0", flags=["--inputs=memmap", "--loader=upstream"])
+        train_pipeline(root, data, folds="0", flags=["--inputs=memmap"])
         dietnet("pack-genotypes", dataset=root / "dataset.h5")
         packages = root / "exp_packed"
         dietnet(
@@ -48,7 +45,7 @@ def test_the_dietnet_engine_trains_a_model_as_good_as_train_py(tmp_path, inputs,
     text = log.read_text()
     per = -(-32 // processes)
     assert (
-        f"dietnet: data-parallel training on {processes} CPU processes; global batch 32 "
+        f"dietnet: training on {processes} CPU processes; global batch 32 "
         f"({per} per process)" in text
     )
     assert f"{inputs} store" in text
@@ -64,7 +61,7 @@ def test_snp_sampling_trains_a_model_as_good(tmp_path):
     import json
 
     data = DATASETS["synthetic"]
-    flags = ["--engine=dietnet", "--workers=1", "--inputs=memmap", "--snp-sample=0.5"]
+    flags = ["--workers=1", "--inputs=memmap", "--snp-sample=0.5"]
     packages = train_pipeline(tmp_path / "ss", data, folds="0", flags=flags)
 
     report = dietnet("check", packages=packages)
@@ -80,7 +77,7 @@ def test_chunked_reads_train_a_model_as_good(tmp_path, processes):
     (which must see equal batch counts, or DDP hangs)."""
     data = DATASETS["synthetic"]
     flags = [
-        f"--gpus={processes}", "--engine=dietnet", "--workers=1", "--inputs=memmap",
+        f"--gpus={processes}", "--workers=1", "--inputs=memmap",
         "--snp-sample=0.5", "--chunk-rows=64", "--chunks-per-buffer=2", "--snp-blocks=8",
     ]  # fmt: skip
     packages = train_pipeline(tmp_path / "ch", data, folds="0", flags=flags)
@@ -99,13 +96,13 @@ def test_chunked_packed_runs_cache_the_evaluation_rows_once(tmp_path):
 
     data = DATASETS["synthetic"]
     root = tmp_path / "pk"
-    train_pipeline(root, data, folds="0", flags=["--inputs=memmap", "--loader=upstream"])
+    train_pipeline(root, data, folds="0", flags=["--inputs=memmap"])
     common = dict(
         dataset=root / "dataset.h5", partition=root / "partition.npz",
         embedding=root / "embedding.npz", input_stats=root / "stats.npz",
         config=root / "config.yaml", seeds=3, folds="0",
     )  # fmt: skip
-    flags = ["--engine=dietnet", "--workers=1", "--inputs=packed", "--snp-sample=0.5",
+    flags = ["--workers=1", "--inputs=packed", "--snp-sample=0.5",
              "--chunk-rows=64", "--chunks-per-buffer=2", "--snp-blocks=8",
              "--bn-recalibrate=50"]  # fmt: skip
     cache = Path(f"{(root / 'dataset.h5').resolve()}.eval_cache")
@@ -139,7 +136,7 @@ def test_free_snp_weights_kept_at_zero_train_the_plain_model(tmp_path):
     import torch
 
     data = DATASETS["synthetic"]
-    flags = ["--engine=dietnet", "--workers=0", "--inputs=memmap"]
+    flags = ["--workers=0", "--inputs=memmap"]
     plain = train_pipeline(tmp_path / "plain", data, folds="0", flags=flags)
     held = train_pipeline(
         tmp_path / "held", data, folds="0", flags=[*flags, "--free-snp-weights=1e12"]
@@ -171,7 +168,7 @@ def test_penalty_weights_of_zero_free_only_those_snps(tmp_path):
     weights = np.ones(n_snps)
     weights[: n_snps // 4] = 0
     np.save(path := tmp_path / "weights.npy", weights)
-    flags = ["--engine=dietnet", "--workers=0", "--inputs=memmap", "--free-snp-weights=1e12",
+    flags = ["--workers=0", "--inputs=memmap", "--free-snp-weights=1e12",
              f"--snp-penalty-weights={path}"]  # fmt: skip
     (pkg,) = package.find(train_pipeline(tmp_path / "w", data, folds="0", flags=flags))
     delta = torch.load(pkg.path / "model.pt", weights_only=False)["model_state_dict"][
@@ -195,7 +192,7 @@ def test_a_hybrid_package_predicts_what_training_reported(tmp_path):
 
     data = DATASETS["synthetic"]
     root = tmp_path / "hy"
-    flags = ["--engine=dietnet", "--workers=0", "--inputs=memmap", "--free-snp-weights=1e-4"]
+    flags = ["--workers=0", "--inputs=memmap", "--free-snp-weights=1e-4"]
     packages = train_pipeline(root, data, folds="0", flags=flags)
     (pkg,) = package.find(packages)
     meta = json.loads((pkg.path / "metadata.json").read_text())
@@ -225,7 +222,7 @@ def test_a_hybrid_package_predicts_what_training_reported(tmp_path):
 def test_recalibrated_batchnorm_trains_a_model_as_good(tmp_path):
     """--bn-recalibrate: the same quality, with statistics recomputed before validation."""
     data = DATASETS["synthetic"]
-    flags = ["--engine=dietnet", "--workers=1", "--inputs=memmap", "--bn-recalibrate=100"]
+    flags = ["--workers=1", "--inputs=memmap", "--bn-recalibrate=100"]
     packages = train_pipeline(tmp_path / "bn", data, folds="0", flags=flags)
 
     (log,) = (tmp_path / "bn" / "exp" / "logs").glob("train_*.log")

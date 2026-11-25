@@ -84,8 +84,8 @@ def build(
     """Write ``out`` (upstream's HDF5 schema) and its 2-bit copy
     (:class:`dietnet.genotypes.PackedWriter`) from a PLINK fileset.
 
-    The genotypes are stored only in the 2-bit copy, unless ``int8``: then ``inputs``
-    holds them too, as upstream's own scripts read them (four times the disk). Without
+    The genotypes are stored only in the 2-bit copy, unless ``int8`` (not on the command
+    line: to compare with upstream's own scripts, which read ``inputs``). Without
     it, ``inputs`` keeps its shape but stores nothing (HDF5 allocates contiguous storage
     on the first write), so what reads only the shape, labels or SNP table works, and the
     genotypes are read through the packed store. The .bed is read once: in stripes of

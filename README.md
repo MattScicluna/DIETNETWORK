@@ -19,10 +19,12 @@ This repository is HussinLab's published code
 ([HussinLab/DIETNETWORK](https://github.com/HussinLab/DIETNETWORK)) behind a
 command line, `dietnet`, that takes PLINK files in and gives predictions out:
 
-- **The model and training are upstream's, unmodified.** The training scripts
-  in `Dietnet_train_and_evaluate/` are byte for byte HussinLab's, pinned to
-  one commit (`src/dietnet/upstream_manifest.json`, checked by the test suite).
-  `dietnet` runs them, and runs their model class for prediction.
+- **The network is the published one, unmodified.** The files in
+  `Dietnet_train_and_evaluate/` are byte for byte HussinLab's, pinned to one commit
+  (`src/dietnet/upstream_manifest.json`, checked by the test suite). `dietnet` predicts
+  with their model class, and tests check that the scores are the same as the published
+  code's. Training uses the same network and loss in a faster loop, so the weights of a
+  model that you train are not bit-identical to those from `train.py`.
 - **Biobank scale.** Cohorts are read straight from `.bed`. They are matched to
   a model once and memory-mapped, and every model in an ensemble reads the
   same copy.
@@ -36,7 +38,7 @@ command line, `dietnet`, that takes PLINK files in and gives predictions out:
 
 ```bash
 pip install dietnetwork
-dietnet info       # versions; confirms the upstream code is unmodified
+dietnet info       # versions; confirms the copy of the published code is unmodified
 ```
 
 Needs Python 3.10 to 3.13, and is tested on Linux (all four) and macOS (3.12). A GPU is
@@ -75,7 +77,7 @@ where the cohort is.
 ## Train your own
 
 ```bash
-dietnet create-dataset      --plink panel --labels labels.tsv --out dataset.h5 --int8
+dietnet create-dataset      --plink panel --labels labels.tsv --out dataset.h5
 dietnet partition           --dataset dataset.h5 --out partition.npz          # 5 folds, labels balanced
 dietnet generate-embedding  --dataset dataset.h5 --partition partition.npz --out embedding.npz
 dietnet compute-input-stats --dataset dataset.h5 --partition partition.npz --out stats.npz
@@ -120,8 +122,7 @@ with int8 genotypes.
   embedding is built from them, as upstream does) and `--regression-labels`,
   then `train --task regression`.
 
-Each step after `create-dataset` is the upstream script of the same name; logs
-are under `exp/logs/`. Packages land in `exp/packages/seed_*/fold_*/`, with the
+Logs are under `exp/logs/`. Packages land in `exp/packages/seed_*/fold_*/`, with the
 fold's held-out predictions in `test_predictions.tsv`.
 
 ## Other SNP features for the auxiliary network
@@ -134,7 +135,7 @@ upstream's model (it reads whatever matrix `embedding.npz` holds):
 ```yaml
 # features.yaml
 blocks:
-  - provider: class_genotype_freq      # the published features (upstream's script)
+  - provider: class_genotype_freq      # the published features
   - provider: precomputed              # any per-SNP table: chrom, pos, ref, alt, features...
     path: scores.tsv
     orient: effect                     # ALT-vs-REF values: flipped where A1 is REF
@@ -182,10 +183,11 @@ against the same spec with a `random` block of the same width, and with a
 
 ## How it is kept exact
 
-- `Dietnet_train_and_evaluate/` holds only the upstream files the CLI runs (the
-  four scripts and their imports), unedited. The rest of upstream (deprecated
-  code, experiments, its own inference scripts) is not kept; the manifest lists
-  it.
+- `Dietnet_train_and_evaluate/` holds the upstream files that the CLI uses, and three
+  scripts that it no longer runs, kept for comparison (`train.py`,
+  `generate_embedding.py` and `compute_input_features_statistics.py`), all unedited. The
+  rest of upstream (deprecated code, experiments, its own inference scripts) is not kept;
+  the manifest lists it.
 - `tests/parity/` checks, against a full upstream checkout at the pinned
   commit, that:
   - `create-dataset` writes the same HDF5 as upstream's `create_dataset.py`;

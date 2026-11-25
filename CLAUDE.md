@@ -21,7 +21,9 @@ the manifest lists as removed, and regenerate the manifest with
 `scripts/upstream_manifest.py`.
 
 Keep only code the API uses. Upstream files the CLI does not run are removed
-and listed in the manifest; nothing unused lives in `src/` either.
+and listed in the manifest; nothing unused lives in `src/` either. Exception:
+`train.py`, `generate_embedding.py` and `compute_input_features_statistics.py`
+stay, unused by the CLI, until Matthew says they can go.
 
 ## Layout
 
@@ -36,7 +38,7 @@ and listed in the manifest; nothing unused lives in `src/` either.
   dataset.
 - `package.py`: model packages; loads via upstream's `DietNetworkHandler`,
   strictly.
-- `training.py`: drives upstream `train.py` per (seed, fold) and packages the
+- `training.py`: runs `parallel.py` per (seed, fold) and packages the
   results.
 - `predict.py`: memory-mapped matched cohort and upstream's `indep_test_step`
   for every model; ensemble table.

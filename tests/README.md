@@ -8,7 +8,7 @@ DIETNET_UPSTREAM_DIR=... uv run pytest -m slow  # published models vs upstream i
 
 | Directory | What it pins |
 |---|---|
-| `unit/test_upstream_unchanged.py` | The upstream files this package runs are byte-identical to the commit in `src/dietnet/upstream_manifest.json`, which is also the commit CI clones. |
+| `unit/test_upstream_unchanged.py` | The upstream files this package keeps are byte-identical to the commit in `src/dietnet/upstream_manifest.json`, which is also the commit CI clones. |
 | `parity/test_dataset.py` | `dietnet create-dataset` writes exactly the HDF5 upstream's `create_dataset.py` writes. |
 | `parity/test_predict.py` | `dietnet predict` scores equal upstream's `test_independent_dataset.py`: on a matched cohort, and with upstream's own SNP matching on a cohort missing 30% of SNPs. The published models' scores equal `Dietnet_inference/inference.py` (slow). |
 | `unit/test_align.py` | Allele-aware matching: swapped alleles, other strand, ambiguous SNPs, missing SNPs and the D/(D−\|C\|) scale. |
@@ -16,7 +16,7 @@ DIETNET_UPSTREAM_DIR=... uv run pytest -m slow  # published models vs upstream i
 
 ## Upstream checkout
 
-This repository keeps only the upstream files its API runs. The parity tests
+This repository keeps only some of the upstream files. The parity tests
 compare it with upstream scripts it removed, so they need the full tree at the
 pinned commit:
 

@@ -5,11 +5,9 @@ the running statistics it learns in training describe activations with dropout,
 and evaluation applies them to activations without it.
 """
 
-import pytest
 import torch
 from torch import nn
 
-from dietnet import training
 from dietnet.parallel import recalibrate_batchnorm
 
 
@@ -29,12 +27,3 @@ def test_statistics_become_those_of_the_inputs_without_dropout():
     torch.testing.assert_close(bn.running_mean, torch.cat(acts).mean(0))
     torch.testing.assert_close(bn.running_var, torch.stack([a.var(0) for a in acts]).mean(0))
     assert seen == 200 and bn.momentum == 0.1 and not model.training
-
-
-def test_the_upstream_engine_refuses_it():
-    with pytest.raises(ValueError, match="needs engine 'dietnet'"):
-        training.train(
-            dataset="d.h5", partition="p.npz", embedding="e.npz", input_stats="s.npz",
-            config="c.yaml", exp_dir="x", seeds=[1], folds=[0],
-            engine="upstream", bn_recalibrate=100,
-        )  # fmt: skip

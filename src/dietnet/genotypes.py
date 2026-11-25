@@ -170,8 +170,8 @@ def pack(dataset, block: int = 4096) -> Path:
 
 
 def inputs_stored(dataset) -> bool:
-    """Whether ``dataset`` stores its genotypes as int8 ``inputs`` (``create-dataset
-    --int8``); otherwise they are only in the 2-bit copy."""
+    """Whether ``dataset`` stores its genotypes as int8 ``inputs``, as upstream's datasets
+    do; those of ``create-dataset`` are only in the 2-bit copy."""
     with h5py.File(dataset, "r") as f:
         return bool(f.attrs.get("inputs_stored", True))
 
@@ -181,7 +181,7 @@ def require_inputs(dataset, what: str) -> None:
     if not inputs_stored(dataset):
         raise ValueError(
             f"{what} reads the int8 genotypes, but {dataset} has them only in its packed "
-            "copy: read them with --inputs packed, or build it with create-dataset --int8"
+            "copy: read them with --inputs packed"
         )
 
 

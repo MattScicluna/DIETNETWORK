@@ -196,8 +196,7 @@ def packed_only(tmp_path, kgp_mini):
 
 
 def test_by_default_a_dataset_keeps_its_genotypes_only_in_the_copy(dataset, packed_only):
-    """create-dataset without --int8: the same file minus the int8 values, and the same
-    2-bit copy."""
+    """Built without int8: the same file minus the int8 values, and the same 2-bit copy."""
     assert genotypes.is_packed(packed_only)
     assert (
         genotypes.packed_path(packed_only).read_bytes()

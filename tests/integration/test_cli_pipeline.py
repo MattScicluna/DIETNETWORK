@@ -137,9 +137,9 @@ def test_regression_end_to_end(tmp_path, synthetic):
     assert "mean held-out r:" in report and "R^2" in report
 
 
-def test_regression_on_pooled_frequencies_with_the_dietnet_engine(tmp_path, synthetic):
+def test_regression_on_pooled_frequencies(tmp_path, synthetic):
     """The height setup: a trait with no classes, the auxiliary network fed genotype
-    frequencies pooled over classes, trained by the dietnet engine."""
+    frequencies pooled over classes, as a model is trained."""
     root = tmp_path / "reg"
     train_pipeline(root, synthetic, folds="0", task="regression")  # dataset, partition, stats
     (root / "spec.yaml").write_text(yaml.safe_dump({"blocks": [{"provider": "genotype_freq"}]}))
@@ -147,7 +147,6 @@ def test_regression_on_pooled_frequencies_with_the_dietnet_engine(tmp_path, synt
             spec=root / "spec.yaml", out=root / "pooled.npz")  # fmt: skip
     dietnet(
         "train",
-        "--engine=dietnet",
         dataset=root / "dataset.h5",
         partition=root / "partition.npz",
         embedding=root / "pooled.npz",
@@ -213,7 +212,7 @@ def test_a_class_too_small_for_every_fold_is_refused(tmp_path, synthetic, name):
     labels = pd.read_csv(synthetic.labels, sep="\t")
     labels.iloc[0, 1] = name
     labels.to_csv(tmp_path / "labels.tsv", sep="\t", index=False)
-    dietnet("create-dataset", "--int8", plink=synthetic.plink_prefix, labels=tmp_path / "labels.tsv",
+    dietnet("create-dataset", plink=synthetic.plink_prefix, labels=tmp_path / "labels.tsv",
             out=tmp_path / "d.h5")  # fmt: skip
     dietnet("partition", dataset=tmp_path / "d.h5", out=tmp_path / "p.npz")
 
@@ -222,7 +221,8 @@ def test_a_class_too_small_for_every_fold_is_refused(tmp_path, synthetic, name):
         "--partition", str(tmp_path / "p.npz"), "--out", str(tmp_path / "e.npz"),
     ])  # fmt: skip
     assert result.exit_code == 1
-    assert f"no training samples for {name}" in result.output
+    assert f"class '{name}' has no training samples in fold" in result.output
+    assert not (tmp_path / "e.npz").exists()
 
 
 def test_train_and_predict_with_a_built_embedding(tmp_path, synthetic):
@@ -241,7 +241,6 @@ def test_train_and_predict_with_a_built_embedding(tmp_path, synthetic):
     )
     dietnet(
         "create-dataset",
-        "--int8",
         plink=synthetic.plink_prefix,
         labels=synthetic.labels,
         out=root / "d.h5",
@@ -278,7 +277,6 @@ def test_the_mlp_baseline_trains_and_predicts_without_an_embedding(tmp_path, syn
     (root / "config.yaml").write_text(yaml.safe_dump(CONFIG))
     dietnet(
         "create-dataset",
-        "--int8",
         plink=synthetic.plink_prefix,
         labels=synthetic.labels,
         out=root / "d.h5",

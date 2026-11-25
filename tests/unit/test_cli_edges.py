@@ -17,7 +17,9 @@ import yaml
 from click.testing import CliRunner
 from support import DATASETS
 
-from dietnet import cli, package
+from dietnet import cli
+from dietnet import dataset as ds
+from dietnet import genotypes, package
 
 
 def run(*args):
@@ -41,10 +43,9 @@ def test_create_dataset_needs_labels(tmp_path):
     assert not (tmp_path / "d.h5").exists()
 
 
-def test_a_dataset_without_int8_refuses_the_int8_readers(trained_root, tmp_path):
-    """create-dataset writes the pack only; pack-genotypes and upstream's per-fold
-    scripts, which read the int8 genotypes, refuse the dataset, saying why; dietnet's
-    statistics read the pack and match those of the int8 dataset."""
+def test_the_per_fold_steps_read_the_packed_copy(trained_root, tmp_path):
+    """create-dataset writes the pack only; pack-genotypes, which reads int8 genotypes,
+    refuses the dataset, and the per-fold steps give what they give from int8 genotypes."""
     data = DATASETS["synthetic"]
     out = tmp_path / "p.h5"
     result = run("create-dataset", "--plink", data.plink_prefix, "--labels", data.labels,
@@ -52,20 +53,29 @@ def test_a_dataset_without_int8_refuses_the_int8_readers(trained_root, tmp_path)
     assert result.exit_code == 0, result.output
     assert "and its packed copy" in result.output
     assert run("pack-genotypes", "--dataset", out).exit_code == 1
+    full = ds.build(data.plink_prefix, tmp_path / "full.h5", int8=True, class_labels=data.labels)
+    genotypes.packed_path(full).unlink()
     for command in ("generate-embedding", "compute-input-stats"):
-        result = run(command, "--dataset", out, "--partition", trained_root / "partition.npz",
-                     "--out", tmp_path / f"{command}.npz")  # fmt: skip
-        assert result.exit_code == 1
-        assert "has them only in its packed copy" in result.output
-    stats = {}
-    for name, dataset in (("packed", out), ("full", trained_root / "dataset.h5")):
-        result = run("compute-input-stats", "--engine", "dietnet", "--dataset", dataset,
-                     "--partition", trained_root / "partition.npz",
-                     "--out", tmp_path / f"{name}.npz")  # fmt: skip
-        assert result.exit_code == 0, result.output
-        stats[name] = np.load(tmp_path / f"{name}.npz")
-    for key in stats["full"].files:
-        np.testing.assert_array_equal(stats["packed"][key], stats["full"][key])
+        written = []
+        for dataset in (out, full):
+            path = tmp_path / f"{command}_{dataset.stem}.npz"
+            result = run(command, "--dataset", dataset,
+                         "--partition", trained_root / "partition.npz", "--out", path)  # fmt: skip
+            assert result.exit_code == 0, result.output
+            written.append(np.load(path))
+        assert written[0].files == written[1].files
+        for key in written[0].files:
+            np.testing.assert_array_equal(written[0][key], written[1][key])
+
+
+def test_generate_embedding_needs_class_labels(trained_root, tmp_path):
+    data = DATASETS["synthetic"]
+    out = ds.build(data.plink_prefix, tmp_path / "r.h5",
+                   regression_labels=data.labels.with_name("synthetic_trait.tsv"))  # fmt: skip
+    result = run("generate-embedding", "--dataset", out, "--partition",
+                 trained_root / "partition.npz", "--out", tmp_path / "e.npz")  # fmt: skip
+    assert result.exit_code == 1
+    assert "has no class labels" in result.output
 
 
 def test_partition_unbalanced_adds_the_npz_suffix(trained_root, tmp_path):
@@ -105,9 +115,9 @@ def test_train_reports_inconsistent_options(trained_root, tmp_path):
                  "--embedding", trained_root / "embedding.npz",
                  "--input-stats", trained_root / "stats.npz",
                  "--config", trained_root / "config.yaml", "--exp-dir", tmp_path / "exp",
-                 "--seeds", 1, "--folds", 0, "--engine", "upstream", "--gpus", 2)  # fmt: skip
+                 "--seeds", 1, "--folds", 0, "--model", "mlp", "--snp-sample", 0.5)  # fmt: skip
     assert result.exit_code == 1
-    assert "engine 'upstream' is train.py's own loop, on one GPU" in result.output
+    assert "--snp-sample needs the Diet Network" in result.output
     assert not (tmp_path / "exp").exists()
 
 

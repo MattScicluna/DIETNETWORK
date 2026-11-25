@@ -16,8 +16,8 @@ cd "$EXP_DIR"
 DATASET="$RELEASE/1KGP_dataset.hdf5"
 PARTITION="$REPO/reproduction/1kgp_partition_seed124.npz"
 
-"$DIETNET" generate-embedding --dataset "$DATASET" --partition "$PARTITION" --out embedding.npz --ncpus 8
-"$DIETNET" compute-input-stats --dataset "$DATASET" --partition "$PARTITION" --out stats.npz --ncpus 8
+"$DIETNET" generate-embedding --dataset "$DATASET" --partition "$PARTITION" --out embedding.npz
+"$DIETNET" compute-input-stats --dataset "$DATASET" --partition "$PARTITION" --out stats.npz
 
 "$DIETNET_VENV/bin/python" - "$RELEASE" <<'PY'
 import sys

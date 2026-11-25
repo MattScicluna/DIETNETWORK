@@ -17,7 +17,7 @@ A sixth command, `check`, reports the accuracy of the trained models.
 | `dietnet check` | reports the accuracy of each model | printed |
 
 ```bash
-dietnet create-dataset      --plink panel --labels labels.tsv --out dataset.h5 --int8
+dietnet create-dataset      --plink panel --labels labels.tsv --out dataset.h5
 dietnet partition           --dataset dataset.h5 --out partition.npz          # 5 folds, labels balanced
 dietnet generate-embedding  --dataset dataset.h5 --partition partition.npz --out embedding.npz
 dietnet compute-input-stats --dataset dataset.h5 --partition partition.npz --out stats.npz
@@ -68,10 +68,8 @@ The `seed` in the config is replaced by each value of `--seeds`, and the config 
 `create-dataset` converts the PLINK files into the [HDF5 dataset](formats.md#the-hdf5-dataset) that the other steps read, a block of samples at a time.
 It also stores each SNP's chromosome, position and alleles, which are needed later to match a new cohort to the model.
 
-The genotypes are always written to a packed 2-bit file next to the dataset.
-With `--int8`, they are also written inside `dataset.h5`, which takes four times the disk space of the packed file.
-By default, `generate-embedding` and `compute-input-stats` read the genotypes from `dataset.h5`, so without `--int8` they stop with an error.
-The [command line reference](cli.md#dietnet-create-dataset) describes how to avoid this copy when the cohort is large.
+The genotypes are written to a packed file next to the dataset, `dataset.h5.packed.bin`, which takes 2 bits per genotype.
+Keep the two files together.
 
 ### `partition`
 
@@ -86,13 +84,13 @@ Both settings need class labels in the dataset, so a regression dataset needs `-
 !!! note "Reproducing the published partition"
     The same seed gives the same partition from run to run, but not the partition that the published models were trained on.
     The samples are in a different order within each fold, and the order decides which samples share a minibatch.
-    To retrain the published models bit for bit, use `reproduction/1kgp_partition_seed124.npz` (see [scaling](scaling.md#reproducing-the-published-models)).
+    To retrain the published models, use `reproduction/1kgp_partition_seed124.npz` (see [scaling](scaling.md#reproducing-the-published-models)).
 
 ### `generate-embedding` and `compute-input-stats`
 
 `generate-embedding` computes each SNP's genotype frequencies in each class, which is what the auxiliary network reads (`emb`, folds × SNPs × 3·classes).
 `compute-input-stats` computes each SNP's mean and standard deviation (`means_by_fold`, `sd_by_fold`).
-Both are computed separately for each fold, from its training samples only, and both take `--ncpus`.
+Both are computed separately for each fold, from its training samples only, and read the genotypes a block of samples at a time, so they work on a biobank.
 
 Every class needs at least one training sample in every fold.
 Without one, its genotype frequencies are undefined, so `generate-embedding` stops and names the class.
@@ -103,7 +101,7 @@ To replace or extend the embedding, see [SNP features](features.md).
 ### `train`
 
 `train` fits one model for every combination of `--seeds` and `--folds`.
-By default, it runs the [published code](parity.md), with the same training loop, early stopping and choice of best checkpoint.
+The network, loss, early stopping and choice of best epoch are those of the [published code](parity.md), but the batches are read in another order, so the weights are not bit-identical to those of a model trained with it.
 Values are comma-separated (`--seeds 78,79,80`), or the flag is repeated.
 
 Each finished model becomes a [package](formats.md#model-packages) in `exp/packages/seed_<seed>/fold_<fold>/`, with its held-out predictions in `test_predictions.tsv`.
@@ -184,11 +182,9 @@ The option's value is \(\lambda\), and \(v_j\) is 1 unless it is [set for each S
 The group lasso can set all the values in \(\delta_j\) to zero together, and the weights of that SNP are then exactly those of the standard Diet Network.
 
 ```bash
-dietnet train --engine dietnet --free-snp-weights 0.3 ...    # lambda = 0.3
+dietnet train --free-snp-weights 0.3 ...    # lambda = 0.3
 ```
 
-The flag `--engine dietnet` selects the training loop of this package instead of the published one, which does not have \(\delta\).
-It trains the same network and is [faster](scaling.md#training-on-a-biobank), but the results are not bit-identical.
 Packages store \(\delta\) (package format 3), and `predict` uses it.
 
 ### Choosing lambda

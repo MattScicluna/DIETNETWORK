@@ -1,10 +1,10 @@
-"""Train with upstream's train.py and package what it produces.
+"""Train each (seed, fold) and package the result.
 
-Training is upstream's script, run unmodified: the published model, loop,
-early stopping and checkpoint selection. This module supplies its inputs (one
-config per seed, since upstream reads the seed from the config), finds its
-results directory by upstream's own naming, and turns each (seed, fold) into a
-model package with the fold's held-out predictions next to it.
+Training runs in :mod:`dietnet.parallel`, with the published model, loss, early
+stopping and choice of best epoch. This module supplies its inputs (one config
+per seed, since the seed is read from the config), finds its results directory
+by upstream's own naming, and turns each (seed, fold) into a model package with
+the fold's held-out predictions next to it.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from dietnet import _launch, genotypes, hybrid, package, upstream
+from dietnet import genotypes, hybrid, package, upstream
 
 
 def _free_port() -> int:
@@ -39,7 +39,7 @@ def _loopback() -> str | None:
 
 
 def _run_parallel(args: list, processes: int, log: Path) -> None:
-    """One data-parallel training run (:mod:`dietnet.parallel`): one process per
+    """One training run (:mod:`dietnet.parallel`): one process per
     GPU on this node, meeting at 127.0.0.1 (torchrun's own rendezvous resolves the
     host's name, which some machines cannot reach). Rank 0 writes ``log``, rank k
     ``log.rank<k>``; if one process fails the others are stopped."""
@@ -80,7 +80,7 @@ def _run_parallel(args: list, processes: int, log: Path) -> None:
         path = logs[procs.index(failed)]
         tail = "".join(path.read_text().splitlines(keepends=True)[-25:])
         raise upstream.UpstreamError(
-            f"data-parallel training exited with status {failed.returncode}; log {path}:\n{tail}"
+            f"training exited with status {failed.returncode}; log {path}:\n{tail}"
         )
 
 
@@ -171,8 +171,8 @@ def _held_out_predictions(results_dir: Path, train_dataset: Path, task: str) -> 
 
 
 def _flags(**options) -> list:
-    """``--name value`` for each option given (not None): the engine's command line, its
-    defaults left to it."""
+    """``--name value`` for each option given (not None): the training process's command line,
+    its defaults left to it."""
     return [x for k, v in options.items() if v is not None for x in (f"--{k.replace('_', '-')}", v)]
 
 
@@ -190,10 +190,8 @@ def train(
     normalize=True,
     model="Dietnet",
     inputs="auto",
-    loader="fast",
     workers: int | None = None,
     gpus: int = 1,
-    engine: str | None = None,
     bn_recalibrate: int = 0,
     snp_sample: float = 1.0,
     chunk_rows: int = 0,
@@ -209,20 +207,11 @@ def train(
     ``model`` is upstream's: "Dietnet", or "Mlp", the baseline without an
     auxiliary network, which takes no embedding.
 
-    ``engine`` "upstream" (the default on one GPU) runs upstream's train.py,
-    unmodified, fed so that the trained model is bit-identical to train.py's:
-
-    - ``inputs``: the genotype store it reads (:mod:`dietnet.genotypes`): "ram"
-      (upstream's copy of the whole dataset), "memmap", "packed", or "auto".
-    - ``loader``: "fast" reads each batch in one call with ``workers`` loader
-      processes (default :func:`default_workers`) and fills missing values in
-      one operation; "upstream" leaves train.py's own loader alone.
-
-    ``engine`` "dietnet" (the default, and the only choice, for ``gpus`` > 1)
-    trains with :mod:`dietnet.parallel`: upstream's model and epoch logic in a
-    loop of its own, data-parallel over ``gpus``, packed genotypes decoded on the
-    GPU, without train.py's per-batch bookkeeping; on Mila's A100 its training
-    pass ran ~20x upstream's (docs/scaling.md). Its weights differ from train.py's.
+    Training runs in :mod:`dietnet.parallel`: upstream's model, loss, optimisers and epoch
+    logic in a loop that reads whole batches from the genotype store ``inputs``
+    (:mod:`dietnet.genotypes`: "ram", "memmap", "packed", or "auto") with ``workers`` loader
+    processes (default :func:`default_workers`), data-parallel over ``gpus``, packed genotypes
+    decoded on the GPU. Its batches differ from train.py's, so the weights do too.
     With ``bn_recalibrate`` > 0 it recomputes the batch-norm statistics on that
     many training samples, without dropout, before each validation: upstream's
     network batch-normalises the fat layer right after input dropout, so the
@@ -231,12 +220,12 @@ def train(
     of the SNPs, the same for the whole batch, in place of per-sample input dropout
     (:class:`dietnet.parallel.SnpSampled`): the auxiliary network and the fat layer
     then do that share of the work.
-    With ``chunk_rows`` > 0 (engine "dietnet") training rows are read in contiguous
+    With ``chunk_rows`` > 0 training rows are read in contiguous
     chunks into shuffled in-memory buffers (:class:`dietnet.parallel.ChunkPlan`), so
     the genotype file need not fit in the page cache; with ``snp_blocks`` > 0 as well,
     ``snp_sample`` of that many contiguous SNP blocks is kept per buffer, not random
     SNPs per batch.
-    With ``free_snp_weights`` > 0 (engine "dietnet", Diet Network) each SNP's
+    With ``free_snp_weights`` > 0 (Diet Network) each SNP's
     fat-layer weights get a free term under a group-lasso penalty of that strength
     (:mod:`dietnet.hybrid`), learnt by its own Adam at ``free_snp_lr`` (default the
     config's ``lr_main``); packages carry it and ``predict`` applies it.
@@ -244,35 +233,22 @@ def train(
     penalty, in the dataset's SNP order (:func:`dietnet.hybrid.load_penalty_weights`), so that
     SNPs more likely to matter, by a prior, are shrunk less.
     """
-    engine = engine or ("dietnet" if gpus > 1 else "upstream")
-    if engine not in ("upstream", "dietnet"):
-        raise ValueError(f"engine must be 'upstream' or 'dietnet', not {engine!r}")
-    if loader not in ("fast", "upstream"):
-        raise ValueError(f"loader must be 'fast' or 'upstream', not {loader!r}")
     if gpus < 1:
         raise ValueError("gpus must be at least 1")
-    if gpus > 1 and engine == "upstream":
-        raise ValueError("engine 'upstream' is train.py's own loop, on one GPU")
-    if bn_recalibrate and engine != "dietnet":
-        raise ValueError("--bn-recalibrate needs engine 'dietnet' (train.py runs unmodified)")
     if not 0 < snp_sample <= 1:
         raise ValueError(f"snp_sample must be in (0, 1], not {snp_sample}")
-    if snp_sample < 1 and (engine != "dietnet" or model != "Dietnet"):
-        raise ValueError("--snp-sample needs engine 'dietnet' and the Diet Network")
-    if chunk_rows and engine != "dietnet":
-        raise ValueError("--chunk-rows needs engine 'dietnet' (train.py runs unmodified)")
+    if snp_sample < 1 and model != "Dietnet":
+        raise ValueError("--snp-sample needs the Diet Network")
     if free_snp_weights < 0:
         raise ValueError(f"free_snp_weights must be >= 0, not {free_snp_weights}")
-    if free_snp_weights and (engine != "dietnet" or model != "Dietnet"):
-        raise ValueError("--free-snp-weights needs engine 'dietnet' and the Diet Network")
+    if free_snp_weights and model != "Dietnet":
+        raise ValueError("--free-snp-weights needs the Diet Network")
     if snp_penalty_weights is not None and not free_snp_weights:
         raise ValueError("--snp-penalty-weights needs --free-snp-weights")
-    if valid_subset and (engine != "dietnet" or valid_subset < 0):
-        raise ValueError("--valid-subset needs engine 'dietnet' and a positive size")
+    if valid_subset < 0:
+        raise ValueError("--valid-subset needs a positive size")
     if snp_blocks and (not chunk_rows or snp_sample >= 1):
         raise ValueError("--snp-blocks needs --chunk-rows and a --snp-sample below 1")
-    if engine == "dietnet" and loader == "upstream":
-        raise ValueError("--loader upstream applies to engine 'upstream' only")
     if model not in upstream.MODELS:
         raise ValueError(f"model must be one of {sorted(upstream.MODELS)}")
     if (embedding is None) != (model == "Mlp"):
@@ -295,12 +271,10 @@ def train(
     base = yaml.safe_load(Path(config).read_text())
     check_inputs(embedding, input_stats, dataset, partition, folds)
     try:
-        env = {_launch.INPUTS_ENV: genotypes.choose(dataset, inputs)}
+        store = genotypes.choose(dataset, inputs)
     except ValueError as error:
         raise InputError(str(error)) from None
-    if loader == "fast":
-        workers = default_workers() if workers is None else workers
-        env.update({_launch.LOADER_ENV: "fast", _launch.WORKERS_ENV: str(workers)})
+    workers = default_workers() if workers is None else workers
 
     emb_by_fold = np.load(embedding, allow_pickle=True)["emb"] if embedding else None
     described = Path(f"{embedding}.json") if embedding else None
@@ -318,25 +292,22 @@ def train(
             args = [
                 "--exp-path", exp_dir, "--exp-name", "runs", "--config", cfg_path,
                 "--model", model, "--dataset", dataset, "--partition", partition,
-                # Required by train.py, read only for the Diet Network.
+                # Read only for the Diet Network.
                 "--embedding", embedding or "none", "--input-features-stats", input_stats,
                 "--task", task, "--which-fold", fold,
             ]  # fmt: skip
             if normalize:
                 args.append("--normalize")
             log = exp_dir / "logs" / f"train_seed{seed}_fold{fold}.log"
-            if engine == "dietnet":
-                args += _flags(
-                    inputs=env[_launch.INPUTS_ENV], workers=workers,
-                    bn_recalibrate=bn_recalibrate, snp_sample=snp_sample,
-                    chunk_rows=chunk_rows, chunks_per_buffer=chunks_per_buffer,
-                    snp_blocks=snp_blocks, free_snp_weights=free_snp_weights,
-                    free_snp_lr=free_snp_lr or None, snp_penalty_weights=snp_penalty_weights,
-                    valid_subset=valid_subset or None,
-                )  # fmt: skip
-                _run_parallel(args, gpus, log)
-            else:
-                upstream.run("train.py", args, log=log, env=env)
+            args += _flags(
+                inputs=store, workers=workers,
+                bn_recalibrate=bn_recalibrate, snp_sample=snp_sample,
+                chunk_rows=chunk_rows, chunks_per_buffer=chunks_per_buffer,
+                snp_blocks=snp_blocks, free_snp_weights=free_snp_weights,
+                free_snp_lr=free_snp_lr or None, snp_penalty_weights=snp_penalty_weights,
+                valid_subset=valid_subset or None,
+            )  # fmt: skip
+            _run_parallel(args, gpus, log)
 
             results = (
                 exp_dir / "runs" / f"RESULTS_{upstream.exp_identifier(cfg, fold, task, model)}"

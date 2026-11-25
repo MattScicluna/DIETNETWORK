@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One published (seed, fold) per array task: 15 tasks, seeds 78-80 x folds 0-4,
-# trained by upstream's train.py through `dietnet train` with the published config.
+# trained by `dietnet train` with the published config.
 # MODEL=mlp trains upstream's MLP baseline instead (same configs, no embedding).
 #SBATCH --job-name=dietnet_repro_train
 #SBATCH --array=0-14

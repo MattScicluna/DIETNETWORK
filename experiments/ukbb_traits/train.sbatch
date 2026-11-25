@@ -2,7 +2,7 @@
 # One model per GPU: array task i is the i-th of every combination of
 # TRAIN_LABELS x TRAIN_SPECS x TRAIN_CONFIGS x SEEDS x FOLDS (space separated;
 # a spec of "mlp" trains upstream's MLP, without features). The fastest path in
-# docs/scaling.md: dietnet's engine on the 2-bit copy, staged to the node's disk.
+# docs/scaling.md: training on the 2-bit copy, staged to the node's disk.
 #SBATCH --job-name=traits_train
 #SBATCH --gres=gpu:a100:1
 #SBATCH --cpus-per-task=12
@@ -61,4 +61,4 @@ read -ra extra <<< "${TRAIN_FLAGS:-}"
 "$DIETNET" train --dataset "$local_data" --partition partition.npz "${features[@]}" \
     --input-stats stats.npz --config "$HERE/configs/$config.yaml" \
     --exp-dir "runs/$label/$spec/$config${RUN_SUFFIX:-}" --seeds "$seed" --folds "$fold" \
-    --task regression --engine dietnet --inputs packed --workers 8 ${extra[@]+"${extra[@]}"}
+    --task regression --inputs packed --workers 8 ${extra[@]+"${extra[@]}"}

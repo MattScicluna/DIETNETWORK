@@ -13,6 +13,7 @@ from pathlib import Path
 import yaml
 from click.testing import CliRunner
 
+from dietnet import dataset as ds
 from dietnet import upstream
 from dietnet.cli import main
 
@@ -79,14 +80,20 @@ def train_pipeline(root: Path, data: Dataset, folds="0,1", task="classification"
     labels = {"labels": data.labels}
     if task == "regression":
         labels["regression_labels"] = data.labels.with_name("synthetic_trait.tsv")
-    dietnet("create-dataset", "--int8", plink=data.plink_prefix, out=root / "dataset.h5", **labels)
+    flags = extra.pop("flags", ())
+    if any(store in str(flag) for flag in flags for store in ("ram", "memmap")):
+        # Those stores read int8 genotypes, which datasets made by upstream's code have.
+        names = {"class_labels" if k == "labels" else k: v for k, v in labels.items()}
+        ds.build(data.plink_prefix, root / "dataset.h5", int8=True, **names)
+    else:
+        dietnet("create-dataset", plink=data.plink_prefix, out=root / "dataset.h5", **labels)
     common = dict(dataset=root / "dataset.h5", partition=root / "partition.npz")
     dietnet("partition", dataset=root / "dataset.h5", out=root / "partition.npz")
     dietnet("generate-embedding", **common, out=root / "embedding.npz")
     dietnet("compute-input-stats", **common, out=root / "stats.npz")
     dietnet(
         "train",
-        *extra.pop("flags", ()),
+        *flags,
         **common,
         embedding=root / "embedding.npz",
         input_stats=root / "stats.npz",

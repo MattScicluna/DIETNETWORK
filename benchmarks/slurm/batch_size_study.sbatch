@@ -49,5 +49,5 @@ start=$(date +%s)
     --embedding "$RELEASE/supporting_files/SNPs_embedding.npz" \
     --input-stats "$RELEASE/supporting_files/normalization_stats.npz" \
     --config "$CONFIG" --exp-dir "$RUN/exp" --seeds "$SEED" --folds "$FOLD" \
-    --inputs ram --loader fast --workers 5
+    --inputs ram --workers 5
 echo "trained in $(( $(date +%s) - start )) s"

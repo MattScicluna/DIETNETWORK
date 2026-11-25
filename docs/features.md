@@ -42,11 +42,9 @@ It also writes a description of every block to `embedding.npz.json`.
 ## Genotype frequencies
 
 `class_genotype_freq` gives the features of the published models: the frequencies of genotypes 0, 1 and 2 in each class, computed from the training samples of each fold.
-It needs a dataset made with `create-dataset --int8`.
 
 `genotype_freq` gives the frequencies over all the training samples, without classes.
 Use it for a quantitative trait such as height, which has no classes.
-It reads the packed genotypes a block of samples at a time, so it works on a biobank.
 
 `genotype_freq` can also use classes, from a file of sample ids and classes in the format of `--labels`:
 
@@ -55,8 +53,7 @@ It reads the packed genotypes a block of samples at a time, so it works on a bio
     classes: labels.tsv
 ```
 
-With the labels of the dataset, the result equals that of `class_genotype_freq`, without needing `--int8`.
-The classes can also be new ones, such as the deciles of a quantitative trait, as long as each class has training samples in every fold.
+The classes need not be those of the dataset: they can be the deciles of a quantitative trait, for example, as long as each class has training samples in every fold.
 
 ## A table of your own
 
