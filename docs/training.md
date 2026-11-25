@@ -166,95 +166,55 @@ The `predictions.tsv` of a regression ensemble has three columns: `sample`, `pre
 
 ## Free SNP weights
 
-### The standard Diet Network
+For individual \(i\), the first layer of the network computes the input to hidden unit \(k\) as
 
-For individual i, the first layer of the network computes the input to hidden unit k as
+\[
+z_{ik} = b_k + \sum_j x_{ij} \left( W_{jk} + \delta_{jk} \right), \qquad W_{jk} = f_k(e_j),
+\]
 
-    z_ik = b_k + Σ_j x_ij W_jk
+where \(x_{ij}\) is the standardized genotype of individual \(i\) at SNP \(j\) and \(b_k\) is a bias.
+The weights \(W_{jk}\) are not learned directly.
+They are computed by the auxiliary network \(f\) from the features \(e_j\) of SNP \(j\), such as its genotype frequencies in each population.
+In the standard Diet Network, \(\delta_{jk} = 0\).
 
-| symbol | meaning |
-|---|---|
-| `x_ij` | genotype of individual i at SNP j, standardized |
-| `W_jk` | weight from SNP j to hidden unit k |
-| `b_k` | bias of hidden unit k |
+Computing the weights this way keeps the number of parameters small: the published model has about 23 million weights \(W_{jk}\) (229,986 SNPs and 100 hidden units) and a dataset of 2,322 individuals.
+However, two SNPs with similar features get similar weights, even when one of them is associated with the trait only because it is in linkage disequilibrium with the other.
 
-The weights `W_jk` are the same for every individual.
-With the published model's 229,986 SNPs and 100 hidden units there are about 23 million of them, and its dataset has 2,322 individuals.
+With `--free-snp-weights`, \(\delta_{jk}\) is learned from the data, so a SNP's weights can differ from what its features predict.
+Since this adds one parameter per weight, \(\delta\) is penalized with a group lasso.
+Training minimizes
 
-The Diet Network does not learn these weights directly.
-Instead, a second, smaller network f (the auxiliary network) computes them from a vector `e_j` that describes SNP j, such as its genotype frequencies in each population:
+\[
+L + \lambda \sum_j v_j \lVert \delta_j \rVert_2,
+\]
 
-    W_jk = f_k(e_j)
-
-Only the parameters of f are learned, which is a much smaller number.
-However, two SNPs with similar `e_j` then get similar weights, even when one of them is associated with the trait only because it is in linkage disequilibrium with the other.
-
-### Adding a free term
-
-`--free-snp-weights` adds a parameter `δ_jk` to every weight, learned directly from the data:
-
-    W_jk = f_k(e_j) + δ_jk
-
-On its own, this would bring back all 23 million parameters.
-The model is therefore trained with a group-lasso penalty on δ:
-
-    minimize   L + λ Σ_j v_j ‖δ_j‖        where ‖δ_j‖ = √(Σ_k δ_jk²)
-
-| symbol | meaning | option |
-|---|---|---|
-| `L` | prediction loss (cross-entropy, or mean squared error for regression) | `--task` |
-| `δ_j` | the values `δ_j1, δ_j2, ...` of SNP j, one per hidden unit | |
-| `λ` | strength of the penalty | `--free-snp-weights` |
-| `v_j` | multiplier of the penalty for SNP j, 1 by default | `--snp-penalty-weights` |
-
-The group lasso treats the values `δ_j1, δ_j2, ...` of a SNP as one group: either all of them are zero, or the SNP is free to use them.
-When they are all zero, `W_jk = f_k(e_j)`, exactly as in the standard Diet Network.
-The penalty therefore pulls `W_jk` toward `f_k(e_j)`, not toward zero.
+where \(L\) is the prediction loss and \(\delta_j\) is the vector of the values \(\delta_{jk}\) of SNP \(j\) over all hidden units \(k\).
+The option's value is \(\lambda\), and \(v_j\) is 1 unless it is [set for each SNP](#a-different-penalty-for-each-snp).
+The group lasso sets all the values in \(\delta_j\) to zero together, and the weights of that SNP are then exactly those of the standard Diet Network.
 
 ```bash
-dietnet train --engine dietnet --free-snp-weights 1 ...      # λ = 1
+dietnet train --engine dietnet --free-snp-weights 1 ...      # lambda = 1
 ```
 
-This needs `--engine dietnet`, since upstream's `train.py` does not have this term.
-The packages store δ (package format 3), and `predict` uses it.
+This needs `--engine dietnet`, since upstream's `train.py` does not have \(\delta\).
+Packages store \(\delta\) (package format 3), and `predict` uses it.
 
-### How δ is trained
+### Choosing lambda
 
-Every `δ_jk` starts at zero.
-Each training step first updates δ with Adam, with learning rate η (`--free-snp-lr`, by default the config's `lr_main`), and then applies the penalty:
+When \(\lambda\) is large, \(\delta_j = 0\) for most SNPs and the model is close to the standard Diet Network.
+When \(\lambda\) is small, \(\delta_j \neq 0\) for most SNPs.
+The weights of all SNPs are then fitted jointly, as in penalized regression, with \(W_{jk}\) acting as a prior.
+When \(\lambda\) is too small, the model overfits, and a best epoch that comes early is a sign of this.
 
-    δ_j  ←  δ_j · max(0, 1 − η λ v_j / ‖δ_j‖)
-
-This makes `‖δ_j‖` smaller by `η λ v_j`, and sets `δ_j` to zero if `‖δ_j‖` is less than that.
-
-### Choosing λ
-
-| λ | effect on δ | resulting model |
-|---|---|---|
-| large | `δ_j = 0` for most SNPs | close to the standard Diet Network, since `W_jk = f_k(e_j)` for those SNPs |
-| small | `δ_j ≠ 0` for most SNPs | the weights of all SNPs are fitted jointly, as in penalized regression, with `f_k(e_j)` as a prior |
-| too small | `δ_j` is hardly penalized | overfits, and the best epoch comes early |
-
-Useful values of λ are of order 0.1 to 10, rather than the small values usual for a lasso.
-The update above shows why.
-Adam changes each `δ_jk` by about η, whatever the size of the gradient, so with K hidden units one step changes `‖δ_j‖` by about `η √K`.
-The penalty then reduces it by `η λ` (for `v_j = 1`).
-When λ is near `√K` or above it (10 for K = 100), the penalty cancels each update and `δ_j` stays at zero.
-Both terms contain η, so the useful range of λ does not depend on the learning rate.
-Choose λ on the validation samples.
+Useful values are of order 0.1 to 10, and they do not depend on the learning rate \(\eta\) (`--free-snp-lr`, by default the config's `lr_main`).
+At each step, Adam moves \(\delta_j\) by at most about \(\eta \sqrt{K}\), where \(K\) is the number of hidden units, and the penalty then pulls it back toward zero by \(\eta \lambda v_j\).
+When \(\lambda\) approaches \(\sqrt{K}\) (10 for 100 hidden units, with \(v_j = 1\)), the penalty cancels the updates and \(\delta_j\) stays at zero.
+Choose \(\lambda\) on the validation samples.
 
 ### A different penalty for each SNP
 
-`--snp-penalty-weights WEIGHTS.npy` sets `v_j`, with one value per SNP in the dataset's SNP order.
-This can encode prior evidence about which SNPs are causal, such as functional annotations:
-
-| `v_j` | penalty on `δ_j` |
-|---|---|
-| 0 | none |
-| between 0 and 1 | weaker than λ, so `δ_j` is more likely to be nonzero |
-| 1 | λ |
-| above 1 | stronger than λ, so `δ_j` is more likely to be zero |
-
+Prior evidence about which SNPs are causal, such as functional annotations, can be used to set \(v_j\).
+`--snp-penalty-weights WEIGHTS.npy` takes one value per SNP, in the dataset's SNP order.
+A value below 1 weakens the penalty, so \(\delta_j\) is more likely to be nonzero, 0 removes it, and a value above 1 strengthens it.
 This is the adaptive group lasso.
-Annotations can then enter the model in two places: through `e_j`, where they affect `f_k(e_j)`, and through `v_j`, where they affect which `δ_j` are nonzero.
 Packages record the file's path and SHA-256.
