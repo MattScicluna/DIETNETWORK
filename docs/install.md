@@ -1,102 +1,68 @@
 # Installation
 
-From PyPI, from the first release (0.3.0) on:
+Here we describe how to install the `dietnetwork` package, which provides the `dietnet` command.
+It needs Python 3.10 to 3.13, and is tested on Linux (all four versions) and macOS (3.12).
+A GPU is optional: a CPU is enough for prediction, and `dietnet` uses a GPU when PyTorch finds one.
 
 ```bash
 pip install dietnetwork
-dietnet info
 ```
 
-From a clone, with the locked versions:
+To check the installation, run `dietnet info`:
+
+```text
+$ dietnet info
+dietnet 0.5.0
+upstream HussinLab/DIETNETWORK 5481556e472140c6d3a67363c1286f22109fb1ce at ...
+upstream files: identical to the pinned commit
+torch 2.15.0, cuda available: False
+```
+
+The second and third lines concern the code of the published models, which is included in the package.
+If any of its files has been changed, `dietnet info` names them and exits with status 1.
+The last line says whether PyTorch can use a GPU.
+
+You can now go to the [quickstart](quickstart.md).
+
+## AlphaGenome features
+
+To score SNPs with AlphaGenome ([SNP features](features.md#alphagenome-variant-effects)), install its client as well:
 
 ```bash
-git clone https://github.com/MattScicluna/DIETNETWORK && cd DIETNETWORK
-uv sync --frozen          # or: pip install -e .
-uv run dietnet info
+pip install 'dietnetwork[alphagenome]'
 ```
 
-Or straight from GitHub, without a clone:
+## The development version
+
+The latest code can be installed from GitHub:
 
 ```bash
 pip install git+https://github.com/MattScicluna/DIETNETWORK
 ```
 
-The wheel carries HussinLab's `Dietnet_train_and_evaluate/` inside the package
-(as `dietnet/_upstream/`), byte for byte, so an installed `dietnet` runs exactly
-the published training and model code.
-
-Tested on Python 3.10–3.13, on Linux and macOS. A GPU is optional: CPU is
-enough for prediction, and training uses CUDA when torch finds it.
-
-## Checking it works
+To work on the code, clone the repository and install the locked versions of the dependencies with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-dietnet info
-```
-
-prints the package and torch versions, whether CUDA is available, and the
-upstream commit it runs. It also hashes every upstream file against
-`src/dietnet/upstream_manifest.json`, and exits with status 1, naming the
-files, if any is modified, missing or added:
-
-```text
-dietnet 0.3.0
-upstream HussinLab/DIETNETWORK 5481556e472140c6d3a67363c1286f22109fb1ce at ...
-upstream files: identical to the pinned commit
-torch ..., cuda available: False
-```
-
-The test suite runs the whole pipeline on small fixtures in a few minutes:
-
-```bash
+git clone https://github.com/MattScicluna/DIETNETWORK && cd DIETNETWORK
 uv sync --frozen --extra dev
+uv run pre-commit install
 uv run pytest -m "not slow and not network"
 ```
 
-The parity tests skip unless a full upstream checkout is given; see
-[parity with upstream](parity.md).
+The tests run the whole pipeline on small datasets.
+Before each commit, pre-commit formats the code (black and isort), checks it (flake8, with lines of at most 100 characters) and refuses files that should not be shared, such as genotypes, model weights and passwords.
+The code in `Dietnet_train_and_evaluate/` is the published code, and must not be edited: a test fails if any of it changes.
 
-## Extras
-
-| extra | for |
-|---|---|
-| `alphagenome` | `dietnet alphagenome`: the hosted AlphaGenome client |
-| `tracking` | comet-ml |
-| `docs` | this site |
-| `dev` | tests, formatters, pre-commit |
-
-```bash
-uv sync --frozen --extra alphagenome      # in a clone, locked versions
-pip install -e '.[alphagenome]'           # in a clone, with pip
-pip install 'dietnetwork[alphagenome]'                 # from PyPI
-pip install 'dietnetwork[alphagenome] @ git+https://github.com/MattScicluna/DIETNETWORK'
-```
-
-## Developing on the repository
-
-```bash
-uv sync --frozen --extra dev && uv run pre-commit install
-uv run pytest
-```
-
-black, isort and flake8 run at line length 100. pre-commit also runs a check for
-files that should not be shared (genotypes, HDF5 datasets, `.npy`/`.npz`
-arrays, `.pt` weights, cluster paths) and gitleaks. `Dietnet_train_and_evaluate/`
-is upstream's code and is never edited: `tests/unit/test_upstream_unchanged.py`
-fails on any change.
-
-To work on this site:
+To preview this site, run:
 
 ```bash
 uv sync --frozen --extra docs
 uv run mkdocs serve
 ```
 
-The tutorial renders without its outputs, because the build does not execute
-it; the docs workflow does that in a separate step. To see them locally:
+The tutorial is shown without its outputs, which are computed when the site is built on GitHub.
+To see them, execute the notebook, but do not commit the result:
 
 ```bash
 uv run jupyter nbconvert --to notebook --inplace --execute docs/tutorial.ipynb
 ```
-
-(and do not commit the executed notebook).
