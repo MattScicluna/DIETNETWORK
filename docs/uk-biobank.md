@@ -48,9 +48,12 @@ blocks:
 The frequencies come from the training samples of each fold only.
 They tell the auxiliary network whether an allele becomes more or less common as the trait increases.
 
-**Lower the input dropout.** The published value of 0.995 keeps about 0.5% of the SNPs of each sample at each step.
+**Keep more SNPs at each step.** The published models use an input dropout of 0.995, which keeps about 0.5% of the SNPs of each sample at each step.
 This suits ancestry, where a few hundred SNPs are informative, but the effects on height and BMI are spread over many SNPs.
-We kept a random half of the SNPs at each step instead (`--snp-sample 0.5`).
+We did not use input dropout for these models.
+Instead, we divided the SNPs into 64 blocks of neighbors and kept a random half of the blocks (`--snp-sample 0.5 --snp-blocks 64`).
+The same blocks are used for all the samples that are read together, so the other half does not have to be read, whereas input dropout drops different SNPs for each sample.
+Prediction uses all the SNPs.
 
 **Compare with a polygenic score on the same folds.** An r of 0.39 for height means little on its own.
 The comparison is what showed that the Diet Network without free SNP weights was not enough.
