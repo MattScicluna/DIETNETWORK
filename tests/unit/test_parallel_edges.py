@@ -13,6 +13,7 @@ import torch.distributed as dist
 import yaml
 from support import CONFIG, DATASETS, dietnet
 
+from dietnet import dataset as ds
 from dietnet import parallel, training, upstream
 
 
@@ -22,13 +23,7 @@ def prepared(tmp_path_factory):
     of the statistics without standard deviations and a one-epoch config."""
     root = tmp_path_factory.mktemp("parallel_edges")
     data = DATASETS["synthetic"]
-    dietnet(
-        "create-dataset",
-        "--int8",
-        plink=data.plink_prefix,
-        out=root / "dataset.h5",
-        labels=data.labels,
-    )
+    ds.build(data.plink_prefix, root / "dataset.h5", int8=True, class_labels=data.labels)
     common = dict(dataset=root / "dataset.h5", partition=root / "partition.npz")
     dietnet("partition", dataset=root / "dataset.h5", out=root / "partition.npz")
     dietnet("compute-input-stats", **common, out=root / "stats.npz")

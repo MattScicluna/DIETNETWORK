@@ -33,7 +33,7 @@ Build upstream's HDF5 dataset from PLINK, without the text round-trip
 was built from), which training from the packed store, dietnet's statistics engine and
 `build-embedding` read. The copy is laid out in 64 blocks of SNPs, so training that keeps
 a share of 64 SNP blocks per buffer reads only those. The `.h5` holds the labels, the SNP
-table and the shape of `inputs`; the genotypes themselves only with `--int8`. At least one
+table and the shape of `inputs`, and the copy holds the genotypes. At least one
 of `--labels` and `--regression-labels` is required.
 
 | option | | default |
@@ -42,7 +42,6 @@ of `--labels` and `--regression-labels` is required.
 | `--labels PATH` | *existing* TSV: sample id, class label | |
 | `--regression-labels PATH` | *existing* TSV: sample id, value | |
 | `--out PATH` | output `.h5` | required |
-| `--int8` | also store the genotypes as int8 in the `.h5` (four times the disk), for the steps that run upstream's own scripts on them: `generate-embedding` and upstream's statistics engine. Without it, those steps, `pack-genotypes` and the `ram` and `memmap` genotype stores refuse the dataset | off |
 
 ## `dietnet partition`
 
@@ -59,16 +58,15 @@ Split samples into folds (upstream `partition_data.py`).
 
 ## `dietnet generate-embedding`
 
-Per-fold genotype × class frequency embedding (upstream
-`generate_embedding.py`). Stops, naming them, if a class has no training
-samples in some fold.
+Per-fold genotype × class frequencies, the published SNP features: the same numbers as
+upstream's `generate_embedding.py`, a block of samples at a time. Stops, naming them, if a
+class has no training samples in some fold.
 
 | option | | default |
 |---|---|---|
 | `--dataset PATH` | *existing* dataset | required |
 | `--partition PATH` | *existing* partition | required |
 | `--out PATH` | output `.npz` | required |
-| `--ncpus INTEGER` | processes | 1 |
 
 ## `dietnet build-embedding`
 
@@ -128,16 +126,15 @@ columns. Samples missing the trait or a covariate are left out; the summary
 
 ## `dietnet compute-input-stats`
 
-Per-fold SNP means and SDs (upstream `compute_input_features_statistics.py`).
+Per-fold SNP means and SDs, as upstream's `compute_input_features_statistics.py` computes
+them (means identical, SDs to floating-point rounding), from genotype counts, a block of
+samples at a time.
 
 | option | | default |
 |---|---|---|
 | `--dataset PATH` | *existing* dataset | required |
 | `--partition PATH` | *existing* partition | required |
 | `--out PATH` | output `.npz` | required |
-| `--ncpus INTEGER` | processes (engine `upstream`) | 1 |
-| `--engine` | `upstream`: its script, which holds a fold's training genotypes in memory (int8, samples x SNPs: ~330 GB at 254k x 1.29M); `dietnet`: the same statistics from genotype counts, a block of samples at a time, in a few GB (means identical, SDs to floating-point rounding) | `upstream` |
-| `--inputs` | engine `dietnet`: where genotypes are read from, as for `train` | auto |
 
 ## `dietnet train`
 

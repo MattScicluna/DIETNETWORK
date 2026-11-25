@@ -75,7 +75,7 @@ where the cohort is.
 ## Train your own
 
 ```bash
-dietnet create-dataset      --plink panel --labels labels.tsv --out dataset.h5 --int8
+dietnet create-dataset      --plink panel --labels labels.tsv --out dataset.h5
 dietnet partition           --dataset dataset.h5 --out partition.npz          # 5 folds, labels balanced
 dietnet generate-embedding  --dataset dataset.h5 --partition partition.npz --out embedding.npz
 dietnet compute-input-stats --dataset dataset.h5 --partition partition.npz --out stats.npz

@@ -7,6 +7,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- `generate-embedding` and the `class_genotype_freq` features are computed from the packed
+  genotypes, a block of samples at a time: the same numbers as upstream's script.
+- `compute-input-stats` always streams: means identical to upstream's script, SDs to
+  floating-point rounding.
+
+### Removed
+
+- `create-dataset --int8`: no command needs int8 genotypes any more.
+- `--ncpus` of `generate-embedding` and `compute-input-stats`, and `--engine` and `--inputs`
+  of `compute-input-stats`.
+
 ## [0.5.0] - 2026-11-21
 
 Per-SNP penalty weights, a single packed genotype format, evaluation at biobank scale, and a

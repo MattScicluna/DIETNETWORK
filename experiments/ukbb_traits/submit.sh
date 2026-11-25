@@ -88,8 +88,7 @@ prep-imputed)
     # The Diet Network's inputs for a cohort built by `imputed` (EXP_DIR), with
     # SRC_EXP's labels and folds (by sample id), then the pilot. Resources scaled
     # for ~1.3M SNPs (2.7x the array): create-dataset holds the .bed in memory.
-    # The statistics are streamed (compute-input-stats --engine dietnet: all folds
-    # in one pass, a few GB) rather than upstream's ~330 GB a fold.
+    # The statistics are streamed: all folds in one pass, a few GB.
     : "${SRC_EXP:?the array run directory}"
     [ -s cohort.bed ] || { echo "run submit.sh imputed first" >&2; exit 1; }
     [ -e inputs ] || ln -s "$SRC_EXP/inputs" inputs
@@ -101,7 +100,7 @@ prep-imputed)
         --dataset \"data/$FIRST.h5\" --out partition.npz")
     stats=$(submit stats --job-name=traits_stats --dependency="afterok:$partition" \
         --cpus-per-task=4 --mem=48G --time=08:00:00 --wrap "\"$DIETNET\" compute-input-stats \
-        --engine dietnet --dataset \"data/$FIRST.h5\" --partition partition.npz --out stats.npz")
+        --dataset \"data/$FIRST.h5\" --partition partition.npz --out stats.npz")
     embeddings=$(submit embeddings --array="0-$((${#SPEC_NAMES[@]} - 1))" --mem=64G \
         --time=12:00:00 --dependency="afterok:$partition" "$HERE/embedding.sbatch")
     TRAIN_LABELS="$FIRST" TRAIN_SPECS="${SPEC_NAMES[0]%@*}" TRAIN_CONFIGS="${PILOT_CONFIG:-b138_d50}" \

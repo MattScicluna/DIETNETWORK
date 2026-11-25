@@ -1,4 +1,4 @@
-"""compute-input-stats --engine dietnet: upstream's statistics, streamed."""
+"""compute-input-stats: upstream's statistics, streamed."""
 
 import h5py
 import numpy as np
@@ -6,7 +6,17 @@ import pytest
 from support import dietnet
 
 from dietnet import dataset as ds
-from dietnet import genotypes, input_stats
+from dietnet import genotypes, input_stats, upstream
+
+
+def upstreams(h5, partition, out):
+    """The statistics upstream's own script computes."""
+    upstream.run(
+        "compute_input_features_statistics.py",
+        ["--exp-path", out.parent, "--dataset", h5, "--partition", partition, "--out", out.stem],
+        log=out.with_suffix(".log"),
+    )
+    return np.load(out)
 
 
 @pytest.fixture
@@ -31,14 +41,13 @@ def test_streamed_statistics_are_upstreams(prepared, tmp_path, inputs):
     h5, partition = prepared
     if inputs == "packed":
         genotypes.pack(h5)
-    dietnet("compute-input-stats", dataset=h5, partition=partition, out=tmp_path / "up.npz")
-    upstream = np.load(tmp_path / "up.npz")
+    up = upstreams(h5, partition, tmp_path / "up.npz")
 
     ours = input_stats.compute(h5, partition, inputs=inputs, block=37)
 
-    assert ours["means_by_fold"].shape == upstream["means_by_fold"].shape
-    np.testing.assert_array_equal(ours["means_by_fold"], upstream["means_by_fold"])
-    np.testing.assert_allclose(ours["sd_by_fold"], upstream["sd_by_fold"], rtol=1e-12, atol=0)
+    assert ours["means_by_fold"].shape == up["means_by_fold"].shape
+    np.testing.assert_array_equal(ours["means_by_fold"], up["means_by_fold"])
+    np.testing.assert_allclose(ours["sd_by_fold"], up["sd_by_fold"], rtol=1e-12, atol=0)
 
 
 def test_a_fold_without_training_samples_is_refused(prepared, tmp_path):
@@ -53,12 +62,9 @@ def test_a_fold_without_training_samples_is_refused(prepared, tmp_path):
 
 def test_the_cli_writes_what_train_reads(prepared, tmp_path):
     h5, partition = prepared
-    dietnet("compute-input-stats", dataset=h5, partition=partition, out=tmp_path / "up.npz")
-    dietnet(
-        "compute-input-stats", dataset=h5, partition=partition, out=tmp_path / "ours.npz",
-        engine="dietnet",
-    )  # fmt: skip
-    up, ours = np.load(tmp_path / "up.npz"), np.load(tmp_path / "ours.npz")
+    up = upstreams(h5, partition, tmp_path / "up.npz")
+    dietnet("compute-input-stats", dataset=h5, partition=partition, out=tmp_path / "ours.npz")
+    ours = np.load(tmp_path / "ours.npz")
     assert sorted(ours.files) == sorted(up.files)
     for key in up.files:
         assert ours[key].dtype == up[key].dtype and ours[key].shape == up[key].shape

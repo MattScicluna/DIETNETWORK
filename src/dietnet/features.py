@@ -19,9 +19,9 @@ builds one from *blocks*, described in a YAML spec::
 Providers:
 
 ``class_genotype_freq``
-    Genotype frequencies per class and fold: upstream's generate_embedding.py,
-    run unmodified. Alone, the result is exactly what ``dietnet
-    generate-embedding`` writes.
+    Genotype frequencies per class and fold, for the dataset's classes: the published
+    features, the same numbers as upstream's generate_embedding.py. Alone, the result
+    is exactly what ``dietnet generate-embedding`` writes.
 ``genotype_freq``
     Genotype frequencies per fold over all its training samples, classes
     pooled: the same definition without the split by class, for regression
@@ -67,7 +67,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -77,7 +76,6 @@ import pandas as pd
 import yaml
 
 from dietnet import dataset as ds
-from dietnet import upstream
 
 COMPLEMENT = str.maketrans("ACGT", "TGCA")
 
@@ -104,41 +102,57 @@ class Context:
     built: list[Block]
 
 
+def _frequencies(dataset, partition, klass, names, inputs="auto", block=2048):
+    """Genotype frequencies of each fold's training samples in each class (folds x SNPs x
+    3·classes), and the number of samples counted (folds x classes).
+
+    Upstream's definition (generate_embedding.py): ``count(genotype == g) / n`` for g in
+    0, 1, 2, missing genotypes counted in ``n``. ``klass``: each sample's class, or None
+    for one. Counted a block of samples at a time from a genotype store, so it scales to
+    a biobank.
+    """
+    from dietnet import genotypes
+
+    folds = np.load(partition, allow_pickle=True)["folds_indexes"]
+    store = genotypes.open_store(dataset, genotypes.choose(dataset, inputs))
+    counts, n = genotypes.count_by_fold(
+        store, [fold[0] for fold in folds], klass, len(names), int(block)
+    )
+    empty = [
+        f"class '{names[c]}' has no training samples in fold {', '.join(map(str, folds_without))}"
+        for c in range(len(names))
+        if len(folds_without := np.flatnonzero(n[:, c] == 0))
+    ]
+    if empty:
+        raise ValueError("; ".join(empty))
+    values = np.zeros((len(folds), store.shape[1], 3 * len(names)))
+    for f in range(len(folds)):
+        for c in range(len(names)):
+            values[f, :, 3 * c : 3 * c + 3] = counts[f, c] / n[f, c]
+    return values, n
+
+
+def class_frequencies(dataset, partition, inputs="auto", block=2048) -> np.ndarray:
+    """The published features: genotype frequencies in the dataset's own classes."""
+    with h5py.File(dataset, "r") as h5:
+        if "class_labels" not in h5:
+            raise ValueError(f"{dataset} has no class labels: build it with --labels")
+        klass = np.array(h5["class_labels"])
+    return _frequencies(dataset, partition, klass, ds.class_label_names(dataset), inputs, block)[0]
+
+
 def _class_genotype_freq(ctx: Context, spec: dict) -> Block:
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "embedding.npz"
-        upstream.run(
-            "generate_embedding.py",
-            ["--exp-path", tmp, "--dataset", ctx.dataset, "--partition", ctx.partition,
-             "--out", out.stem, "--ncpus", spec.get("ncpus", 1)],
-            log=Path(tmp) / "generate_embedding.log",
-        )  # fmt: skip
-        values = np.load(out)["emb"]
-    classes = ds.class_label_names(ctx.dataset)[: values.shape[-1] // 3]
-    columns = [f"{c}:genotype{g}" for c in classes for g in range(3)]
+    values = class_frequencies(
+        ctx.dataset, ctx.partition, spec.get("inputs", "auto"), spec.get("block", 2048)
+    )
+    columns = [f"{c}:genotype{g}" for c in ds.class_label_names(ctx.dataset) for g in range(3)]
     return Block(values, columns, {"fold_dependent": True})
 
 
 def _genotype_freq(ctx: Context, spec: dict) -> Block:
-    """Genotype frequencies over each fold's training samples, classes pooled or
-    per class.
-
-    Upstream's definition (generate_embedding.py): ``count(genotype == g) / n``
-    for g in 0, 1, 2, missing genotypes counted in ``n``. Pooled by default, for
-    tasks without classes such as regression; with ``classes:`` (a TSV of
-    sample id and class, as for ``--labels``) per class, in upstream's column
-    order, so that classes can be defined apart from the dataset (deciles of a
-    trait, say). Rows are grouped by class and by the folds they train in, and
-    each group is counted once, a block at a time from a genotype store, so it
-    scales to a biobank.
-    """
-    from dietnet import genotypes
-
-    folds = np.load(ctx.partition, allow_pickle=True)["folds_indexes"]
-    store = genotypes.open_store(
-        ctx.dataset, genotypes.choose(ctx.dataset, spec.get("inputs", "auto"))
-    )
-    n_rows, n_snps = store.shape
+    """Genotype frequencies over each fold's training samples, classes pooled or, with
+    ``classes:`` (a TSV of sample id and class, as for ``--labels``), per class, so that
+    classes can be defined apart from the dataset (deciles of a trait, say)."""
     if "classes" in spec:
         with h5py.File(ctx.dataset, "r") as h5:
             samples = np.array(h5["samples"]).astype(str)
@@ -146,18 +160,13 @@ def _genotype_freq(ctx: Context, spec: dict) -> Block:
         names, klass = np.unique(labels, return_inverse=True)
     else:
         names, klass = np.array(["all"]), None
-
-    counts, n = genotypes.count_by_fold(
-        store, [fold[0] for fold in folds], klass, len(names), int(spec.get("block", 2048))
-    )
-    values = np.zeros((len(folds), n_snps, 3 * len(names)))
-    for f in range(len(folds)):
-        for c in range(len(names)):
-            if n[f, c] == 0:
-                raise ValueError(
-                    f"genotype_freq: class {names[c]!r} has no training samples in fold {f}"
-                )
-            values[f, :, 3 * c : 3 * c + 3] = counts[f, c] / n[f, c]
+    try:
+        values, n = _frequencies(
+            ctx.dataset, ctx.partition, klass, names,
+            spec.get("inputs", "auto"), spec.get("block", 2048),
+        )  # fmt: skip
+    except ValueError as error:
+        raise ValueError(f"genotype_freq: {error}") from None
     columns = [f"{c}:genotype{value}" for c in names for value in range(3)]
     info = {"fold_dependent": True, "training_samples": n.sum(axis=1).tolist()}
     if "classes" in spec:

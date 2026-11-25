@@ -3,7 +3,7 @@
 # memory map, packed copy), loader (upstream's or fast, with workers), and data
 # on network storage or staged to the node's local disk.
 # BENCH_DIR comes from benchmarks/make_train_bench.py + `dietnet partition`
-# (create-dataset --int8, for the int8 stores; its packed copy for INPUTS=packed).
+# (with int8 genotypes for the int8 stores; its packed copy for INPUTS=packed).
 #
 #   BENCH_DIR=/path/bench DIETNET_VENV=/path/.venv INPUTS=packed LOADER=fast WORKERS=7 \
 #   STAGE=1 sbatch --account=ACCOUNT --mem=32G benchmarks/slurm/bench_train_inputs.sbatch

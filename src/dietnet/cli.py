@@ -52,23 +52,13 @@ def main():
 @click.option("--labels", type=click.Path(exists=True), help="TSV: sample id, class label.")
 @click.option("--regression-labels", type=click.Path(exists=True), help="TSV: sample id, value.")
 @click.option("--out", required=True, type=click.Path(path_type=Path), help="Output .h5.")
-@click.option(
-    "--int8",
-    is_flag=True,
-    help="Also store the genotypes as int8 in the .h5 (four times the disk), for the steps "
-    "that run upstream's scripts on them: generate-embedding and compute-input-stats "
-    "--engine upstream.",
-)
-def create_dataset(plink_prefix, labels, regression_labels, out, int8):
+def create_dataset(plink_prefix, labels, regression_labels, out):
     """Build upstream's HDF5 dataset and its 2-bit genotype copy from PLINK."""
     from dietnet import dataset
 
     if not labels and not regression_labels:
         raise click.UsageError("give --labels, --regression-labels or both")
-    dataset.build(
-        plink_prefix, out, class_labels=labels, regression_labels=regression_labels,
-        int8=int8,
-    )  # fmt: skip
+    dataset.build(plink_prefix, out, class_labels=labels, regression_labels=regression_labels)
     click.echo(f"wrote {out} and its packed copy")
 
 
@@ -99,21 +89,6 @@ def partition(dataset_path, out, nb_folds, seed, train_valid_ratio, balanced):
     upstream.run("partition_data.py", args)
 
 
-def _per_fold_step(script, dataset_path, partition_path, out, ncpus):
-    from dietnet import genotypes, upstream
-
-    try:
-        genotypes.require_inputs(dataset_path, f"upstream's {script}")
-    except ValueError as error:
-        raise click.ClickException(str(error)) from None
-
-    out = _npz(out)
-    upstream.run(script, [
-        "--exp-path", out.parent.resolve(), "--dataset", dataset_path.resolve(),
-        "--partition", partition_path.resolve(), "--out", out.stem, "--ncpus", ncpus,
-    ])  # fmt: skip
-
-
 _dataset = click.option(
     "--dataset", "dataset_path", required=True, type=click.Path(exists=True, path_type=Path)
 )
@@ -121,23 +96,31 @@ _partition = click.option(
     "--partition", "partition_path", required=True, type=click.Path(exists=True, path_type=Path)
 )
 _out = click.option("--out", required=True, type=click.Path(path_type=Path), help="Output .npz.")
-_ncpus = click.option("--ncpus", default=1, show_default=True)
 
 
 @main.command("generate-embedding")
 @_dataset
 @_partition
 @_out
-@_ncpus
-def generate_embedding(dataset_path, partition_path, out, ncpus):
-    """Per-fold genotype x class frequency embedding (upstream generate_embedding.py)."""
-    from dietnet import training
+def generate_embedding(dataset_path, partition_path, out):
+    """Per-fold genotype x class frequencies, the published SNP features."""
+    import numpy as np
 
-    _per_fold_step("generate_embedding.py", dataset_path, partition_path, out, ncpus)
+    from dietnet import features
+
+    out = _npz(out)
     try:
-        training.check_inputs(_npz(out), None, dataset_path, partition_path)
-    except training.InputError as error:
-        raise click.ClickException(str(error)) from None
+        emb = features.class_frequencies(dataset_path, partition_path)
+    except ValueError as error:
+        raise click.ClickException(
+            f"{error}. Merge or drop classes too small to appear in every fold's training "
+            "split (at least nb-folds samples each), then rebuild the dataset and rerun."
+            if "no training samples" in str(error)
+            else str(error)
+        ) from None
+    out.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(out, emb=emb)
+    click.echo(f"wrote {out} {emb.shape}")
 
 
 @main.command("build-embedding")
@@ -262,7 +245,7 @@ def adjust_phenotype(phenotypes, trait, covariates, out):
 def pack_genotypes(dataset_path):
     """(Re)write the 2-bit copy of a dataset's int8 genotypes.
 
-    create-dataset writes it; this is for a dataset built with --int8 that changed since, or
+    create-dataset writes it; this is for a dataset with int8 genotypes that changed since, or
     built by an earlier version (<dataset>.packed.bin, in blocks of SNPs).
     """
     from dietnet import genotypes
@@ -277,32 +260,11 @@ def pack_genotypes(dataset_path):
 @_dataset
 @_partition
 @_out
-@_ncpus
-@click.option(
-    "--engine",
-    type=click.Choice(["upstream", "dietnet"]),
-    default="upstream",
-    show_default=True,
-    help="upstream: its script, which holds a fold's training genotypes in memory; "
-    "dietnet: the same statistics from genotype counts, a block of samples at a time.",
-)
-@click.option(
-    "--inputs",
-    type=click.Choice(["auto", "ram", "memmap", "packed"]),
-    default="auto",
-    show_default=True,
-    help="engine dietnet: where genotypes are read from (as for train).",
-)
-def compute_input_stats(dataset_path, partition_path, out, ncpus, engine, inputs):
-    """Per-fold SNP means and SDs (upstream compute_input_features_statistics.py)."""
-    if engine == "upstream":
-        _per_fold_step(
-            "compute_input_features_statistics.py", dataset_path, partition_path, out, ncpus
-        )
-        return
+def compute_input_stats(dataset_path, partition_path, out):
+    """Per-fold SNP means and SDs."""
     from dietnet import input_stats
 
-    click.echo(f"wrote {input_stats.write(dataset_path, partition_path, _npz(out), inputs)}")
+    click.echo(f"wrote {input_stats.write(dataset_path, partition_path, _npz(out))}")
 
 
 @main.command()

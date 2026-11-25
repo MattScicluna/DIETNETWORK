@@ -33,7 +33,7 @@ for i in 0 1 2 3 4; do SLURM_ARRAY_TASK_ID=$i bash "$HERE/embedding.sbatch"; don
 cd "$EXP_DIR"
 # Statistics fold by fold, merged, are what one run over every fold writes.
 "$DIETNET" compute-input-stats --dataset data/height.h5 --partition partition.npz \
-    --out stats_all.npz --ncpus 2
+    --out stats_all.npz
 "$DIETNET_VENV/bin/python" - <<'PY'
 import numpy as np
 a, b = np.load("stats.npz"), np.load("stats_all.npz")

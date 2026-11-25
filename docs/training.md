@@ -17,7 +17,7 @@ A sixth command, `check`, reports the accuracy of the trained models.
 | `dietnet check` | reports the accuracy of each model | printed |
 
 ```bash
-dietnet create-dataset      --plink panel --labels labels.tsv --out dataset.h5 --int8
+dietnet create-dataset      --plink panel --labels labels.tsv --out dataset.h5
 dietnet partition           --dataset dataset.h5 --out partition.npz          # 5 folds, labels balanced
 dietnet generate-embedding  --dataset dataset.h5 --partition partition.npz --out embedding.npz
 dietnet compute-input-stats --dataset dataset.h5 --partition partition.npz --out stats.npz
@@ -68,10 +68,8 @@ The `seed` in the config is replaced by each value of `--seeds`, and the config 
 `create-dataset` converts the PLINK files into the [HDF5 dataset](formats.md#the-hdf5-dataset) that the other steps read, a block of samples at a time.
 It also stores each SNP's chromosome, position and alleles, which are needed later to match a new cohort to the model.
 
-The genotypes are always written to a packed 2-bit file next to the dataset.
-With `--int8`, they are also written inside `dataset.h5`, which takes four times the disk space of the packed file.
-By default, `generate-embedding` and `compute-input-stats` read the genotypes from `dataset.h5`, so without `--int8` they stop with an error.
-The [command line reference](cli.md#dietnet-create-dataset) describes how to avoid this copy when the cohort is large.
+The genotypes are written to a packed file next to the dataset, `dataset.h5.packed.bin`, which takes 2 bits per genotype.
+Keep the two files together.
 
 ### `partition`
 
@@ -92,7 +90,7 @@ Both settings need class labels in the dataset, so a regression dataset needs `-
 
 `generate-embedding` computes each SNP's genotype frequencies in each class, which is what the auxiliary network reads (`emb`, folds × SNPs × 3·classes).
 `compute-input-stats` computes each SNP's mean and standard deviation (`means_by_fold`, `sd_by_fold`).
-Both are computed separately for each fold, from its training samples only, and both take `--ncpus`.
+Both are computed separately for each fold, from its training samples only, and read the genotypes a block of samples at a time, so they work on a biobank.
 
 Every class needs at least one training sample in every fold.
 Without one, its genotype frequencies are undefined, so `generate-embedding` stops and names the class.

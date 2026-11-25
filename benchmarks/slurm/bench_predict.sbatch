@@ -56,8 +56,8 @@ echo "cohort $(wc -l < "$TEST_PREFIX.fam") samples x $(wc -l < "$TEST_PREFIX.bim
 
 step create-dataset "$DIETNET" create-dataset --plink "$TRAIN_PREFIX" --labels "$TRAIN_LABELS" --out dataset.h5
 step partition "$DIETNET" partition --dataset dataset.h5 --out partition.npz
-step generate-embedding "$DIETNET" generate-embedding --dataset dataset.h5 --partition partition.npz --out embedding.npz --ncpus 8
-step compute-input-stats "$DIETNET" compute-input-stats --dataset dataset.h5 --partition partition.npz --out stats.npz --ncpus 8
+step generate-embedding "$DIETNET" generate-embedding --dataset dataset.h5 --partition partition.npz --out embedding.npz
+step compute-input-stats "$DIETNET" compute-input-stats --dataset dataset.h5 --partition partition.npz --out stats.npz
 step train "$DIETNET" train --dataset dataset.h5 --partition partition.npz --embedding embedding.npz \
     --input-stats stats.npz --config config.yaml --exp-dir exp --seeds 78 --folds 0
 # Matching is CPU and I/O; inference goes to a GPU job (predict_gpu.sbatch) with
