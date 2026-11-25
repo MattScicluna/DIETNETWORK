@@ -98,7 +98,7 @@ nav:
   - Training: training.md
   - Tutorials:
       - 1000 Genomes: tutorial.ipynb
-      - "UK Biobank: height and BMI": uk-biobank.md
+      - "Quantitative traits: height and BMI": uk-biobank.md
   - SNP features: features.md
   - Formats: formats.md
   - Parity with upstream: parity.md
