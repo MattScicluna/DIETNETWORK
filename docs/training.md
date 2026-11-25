@@ -179,6 +179,8 @@ Free SNP weights address this by giving each SNP a correction that it learns for
     W_j = aux(features_j) + delta_j
 
 Here `delta_j` is the correction for SNP j: one number per hidden unit, added to the weights that the auxiliary network predicts for that SNP.
+Like the weights, the correction belongs to the SNP and is the same for every individual.
+An individual only enters through their genotype at SNP j, which is multiplied by `W_j` to give that SNP's contribution to each hidden unit.
 
 The corrections are turned on by `--free-snp-weights LAMBDA`, which needs `--engine dietnet` because upstream's `train.py` does not include them:
 
