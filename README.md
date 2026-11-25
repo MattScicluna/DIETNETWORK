@@ -35,12 +35,13 @@ command line, `dietnet`, that takes PLINK files in and gives predictions out:
 ## Install
 
 ```bash
-git clone https://github.com/MattScicluna/DIETNETWORK && cd DIETNETWORK
-uv sync --frozen          # or: pip install -e .
-uv run dietnet info       # versions; confirms the upstream code is unmodified
+pip install dietnetwork
+dietnet info       # versions; confirms the upstream code is unmodified
 ```
 
-Tested on Python 3.10–3.12 (Linux and macOS). A GPU is optional; CPU is enough for prediction.
+Needs Python 3.10 to 3.13, and is tested on Linux (all four) and macOS (3.12). A GPU is
+optional; CPU is enough for prediction. See [Installation](https://mattscicluna.github.io/DIETNETWORK/install/)
+for the development version.
 
 ## Predict with the published models
 
@@ -50,7 +51,7 @@ dietnet predict --model models/packages --plink mycohort --out predictions.tsv \
                 --work-dir "$SCRATCH/dietnet"    # where the matched cohort copy goes
 ```
 
-`mycohort.bed/.bim/.fam` can hold any SNP set. The output reports how many of
+`mycohort.bed/.bim/.fam` can hold any SNP set, with positions on GRCh38. The output reports how many of
 the model's 229,986 SNPs were found; the paper suggests not relying on
 predictions with fewer than 1,000. `predictions.tsv` has one row per sample:
 
@@ -67,13 +68,14 @@ to use a subset of models.
 On a cluster, split the two stages: `dietnet match` (CPU and I/O: reads the
 cohort and writes the matched copy to `--work-dir`) as one job, then
 `dietnet predict` with the same `--work-dir` on a GPU, which finds the matched
-copy and only runs the models. For UK Biobank (486,748 × 169,829), matching
-takes about 20 minutes on 8 CPUs.
+copy and only runs the models. The docs' [Scaling](https://mattscicluna.github.io/DIETNETWORK/scaling/) page
+has the times measured on UK Biobank. The matched copy holds the cohort's genotypes: keep it
+where the cohort is.
 
 ## Train your own
 
 ```bash
-dietnet create-dataset      --plink panel --labels labels.tsv --out dataset.h5
+dietnet create-dataset      --plink panel --labels labels.tsv --out dataset.h5 --int8
 dietnet partition           --dataset dataset.h5 --out partition.npz          # 5 folds, labels balanced
 dietnet generate-embedding  --dataset dataset.h5 --partition partition.npz --out embedding.npz
 dietnet compute-input-stats --dataset dataset.h5 --partition partition.npz --out stats.npz

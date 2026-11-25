@@ -1,202 +1,167 @@
 # SNP features for the auxiliary network
 
-The auxiliary network turns per-SNP features into the main network's first
-layer. The published model uses each SNP's genotype frequencies per population
-(`dietnet generate-embedding`). Upstream's model reads its auxiliary input from
-`embedding.npz`: a SNPs × features matrix, one per fold (3-D) or shared by all
-folds (2-D), whose columns it L2-normalises itself. Anything that can be written
-as such a matrix can feed the model, without changing upstream's code.
+Here we describe how to change the features that the auxiliary network uses to compute the weights of each SNP.
+For SNP \(j\), these features are a vector \(e_j\), and the network's first layer has weights
 
-`dietnet build-embedding` writes one from *blocks* described in a YAML spec:
+\[
+W_{jk} = f_k(e_j),
+\]
+
+where \(f\) is the auxiliary network and \(k\) is a hidden unit (see [Training](training.md#free-snp-weights)).
+In the published models, \(e_j\) holds the genotype frequencies of SNP \(j\) in each population.
+Any other numbers that describe a SNP can be used instead, or added to them.
+
+## Building the features
+
+The features are described in a YAML file as a list of blocks, and \(e_j\) is the blocks placed side by side.
+For example, this file adds 64 features made from a table of scores to the published ones, and 64 random features as a control:
 
 ```yaml
 # features.yaml
 blocks:
-  - provider: class_genotype_freq      # the published features (upstream's script)
-  - provider: precomputed              # any per-SNP table: chrom, pos, ref, alt, features...
+  - provider: class_genotype_freq      # genotype frequencies in each population
+  - provider: precomputed              # a table with one row per SNP
     path: scores.tsv
-    orient: effect                     # ALT-vs-REF values: flipped where A1 is REF
-    pca: 64                            # keep this block to 64 columns
-  - provider: random                   # control: same width, no information
+    orient: effect
+    pca: 64
+  - provider: random
     columns: 64
 ```
+
+`build-embedding` writes the features to a file, which `train` reads in place of the one from `generate-embedding`:
 
 ```bash
 dietnet build-embedding --dataset dataset.h5 --partition partition.npz \
                         --spec features.yaml --out embedding.npz
+dietnet train --embedding embedding.npz ...
 ```
 
-Then train with `--embedding embedding.npz` as usual. The command prints the
-columns each block occupies, and writes `embedding.npz.json` beside the matrix
-describing every block and column; `train` copies that description into each
-package's `metadata.json` (as `embedding`), so a package records the features
-it was trained on.
+It also writes a description of every block to `embedding.npz.json`.
+`train` copies this description into each model package, so a package records the features it was trained on.
 
-## Providers
+## Genotype frequencies
 
-`class_genotype_freq`
-:   Genotype frequencies per class and fold: upstream's `generate_embedding.py`,
-    run unmodified. Alone, the result is exactly what
-    `dietnet generate-embedding` writes. Takes `ncpus`.
+`class_genotype_freq` gives the features of the published models: the frequencies of genotypes 0, 1 and 2 in each class, computed from the training samples of each fold.
+It needs a dataset made with `create-dataset --int8`.
 
-`genotype_freq`
-:   Genotype frequencies per fold over all its training samples, classes
-    pooled: upstream's definition (`count(genotype == g) / n`, missing
-    genotypes counted in `n`) without the split by class. It equals the
-    per-class frequencies averaged with class sizes as weights. A regression
-    task (height, say) has no classes, so this is its baseline. It reads the
-    genotypes a block of samples at a time from a genotype store (`inputs:`,
-    as for `train`; `block:` samples per read), so it scales to a biobank.
+`genotype_freq` gives the frequencies over all the training samples, without classes.
+Use it for a quantitative trait such as height, which has no classes.
+It reads the packed genotypes a block of samples at a time, so it works on a biobank.
 
-    With `classes:` (a TSV of sample id and class, as for `--labels`), the
-    frequencies are per class instead, with the same values and columns as
-    `class_genotype_freq`, but streamed, and with classes that need not be the
-    dataset's: deciles of a quantitative trait, for example, which give each
-    SNP's frequencies along the trait's range. Each class must have training
-    samples in every fold.
+`genotype_freq` can also use classes, from a file of sample ids and classes in the format of `--labels`:
 
-`precomputed`
-:   A table with `chrom`, `pos`, `ref`, `alt` and numeric feature columns (TSV,
-    optionally gzipped, or parquet, which needs `pyarrow` installed), matched to the dataset's SNPs by position
-    and alleles, on either strand. `columns:` picks feature columns (default:
-    all the others); `name:` prefixes them (default: the file's stem).
-    `path:` is relative to the directory `dietnet` runs in.
-    Missing values (NaN) are refused: fill or drop them first.
+```yaml
+  - provider: genotype_freq
+    classes: labels.tsv
+```
 
-    - `orient: effect`: each value describes ALT relative to REF, so it is
-      negated where the dataset counts REF. plink 1.9 makes the minor allele
-      A1, which is REF for a quarter of the 1KGP SNPs. A/T and C/G SNPs fit
-      both orientations, so their sign cannot be known and they are treated as
-      missing.
-    - `orient: none` (the default): values are used as they are.
+With the labels of the dataset, the result equals that of `class_genotype_freq`, without needing `--int8`.
+The classes can also be new ones, such as the deciles of a quantitative trait, as long as each class has training samples in every fold.
 
-    SNPs the table lacks get zeros and are flagged in an added
-    `<name>:missing` column.
+## A table of your own
 
-    **One table per fold.** A `path` containing `{fold}` names one table per
-    fold of the partition, `{fold}` replaced by 0, 1, ...: statistics that must
-    come from each fold's training samples only, such as a GWAS. Each table is
-    read, matched and oriented as above, and the block becomes per fold
-    (folds x SNPs x features), so it mixes with `genotype_freq` blocks and
-    fold-independent ones. The tables must have the same feature columns and
-    cover the same SNPs (otherwise the `missing` column would be all zeros in
-    some fold); a missing fold's table is an error that names it. `name:`
-    defaults to the stem with `{fold}` removed.
+`precomputed` reads a table with the columns `chrom`, `pos`, `ref` and `alt`, followed by numeric features.
+The table can be a TSV file, possibly gzipped, or a parquet file (which needs `pyarrow`).
+Its SNPs are matched to those of the dataset by position and alleles, on either strand.
+`path:` is relative to the directory in which `dietnet` runs, and `columns:` selects some of the features.
 
-    ```yaml
-    - provider: precomputed
-      path: features/gwas_height_fold{fold}.tsv   # gwas_height_fold0.tsv, ...
-      name: gwas
-      orient: effect
-    ```
+**Set `orient: effect` if the values describe the effect of the ALT allele relative to REF**, as in a GWAS.
+PLINK counts the minor allele, which is REF for a quarter of the 1KGP SNPs, and the sign of these SNPs is then reversed.
+The sign cannot be known for A/T and C/G SNPs, so they are treated as missing.
+With `orient: none`, the default, the values are used as they are.
 
-`random`
-:   `columns:` standard-normal columns (`seed:`, default 0): the control for
-    "more columns" rather than "more information".
+SNPs that are not in the table get zeros, and a column named `<name>:missing` marks them, where `name:` defaults to the name of the file.
+If `pca:` is used, this column is one of those reduced.
+Missing values in the table are an error: fill or remove them first.
 
-`shuffled`
-:   Another block with its SNP rows permuted. `of:` is that block's index in
-    the list (0 for the first), `seed:` the permutation's seed: the control for
-    "this information" rather than "information of this shape".
+**A table for each fold.** Features such as GWAS results must come from the training samples of each fold only, since a model would otherwise be trained on information about its own test samples.
+Write one table per fold, and put `{fold}` in the path:
 
-    Every block goes into the matrix unless it has `include: false`: then it
-    is built, so a later `shuffled` block can copy it, and left out. That
-    gives a shuffled control without the original beside it:
+```yaml
+  - provider: precomputed
+    path: features/gwas_height_fold{fold}.tsv   # gwas_height_fold0.tsv, ...
+    name: gwas
+    orient: effect
+```
 
-    ```yaml
-    blocks:
-      - provider: genotype_freq
-      - provider: precomputed          # built, not used ...
-        path: alphagenome.tsv
-        orient: effect
-        pca: 64
-        include: false
-      - provider: shuffled             # ... except shuffled
-        of: 1
-    ```
+The tables must have the same features and cover the same SNPs.
 
-## Transforms
+## Controls
 
-Applied to a block after its provider:
+A model with more features can improve for two reasons: the features are informative, or there are simply more of them.
+Two blocks help to tell these apart:
 
-- `center: true` subtracts each column's mean over SNPs.
-- `pca: k` keeps the first k principal components over SNPs, per fold for a
-  per-fold block.
-- `standardize: true`, with `pca`, scales each column to unit variance before the
-  components, so that large-valued columns do not decide them.
+- `random` adds `columns:` columns of random numbers, which carry no information.
+- `shuffled` copies an earlier block and permutes its SNPs, so that each SNP gets the features of another. `of:` is the position of that block in the list, counting from 0.
 
-Upstream's per-column L2 normalisation undoes any per-column scaling of the columns it
-receives, so these are the transforms that matter: centring, and controlling how many
-columns, and so how much weight, a block brings.
+To train on the shuffled copy without the original, add `include: false` to the original.
+It is then built, so that it can be copied, but left out of the features:
 
-A fold-independent block is repeated for every fold when combined with a
-per-fold one. Every column must vary: an all-zero column would be divided by a
-zero norm inside the model and turn it to NaN, so building refuses one.
+```yaml
+blocks:
+  - provider: genotype_freq
+  - provider: precomputed          # built but not used
+    path: alphagenome.tsv
+    orient: effect
+    pca: 64
+    include: false
+  - provider: shuffled             # its shuffled copy
+    of: 1
+```
+
+Compare also with the MLP, which uses no SNP features (`dietnet train --model mlp`).
+
+## Reducing a block
+
+The network divides each feature by its norm over the SNPs, so all features enter with the same scale.
+A block with many features therefore counts for more than a block with few.
+Each block can be reduced before it is added:
+
+- `pca: 64` keeps its first 64 principal components.
+- `standardize: true`, with `pca`, first scales each feature to unit variance, so that features with large values do not decide the components.
+- `center: true` subtracts the mean of each feature over the SNPs.
+
+If one block differs between folds and another does not, the second is repeated for every fold.
+A feature that is zero for every SNP is refused, since dividing it by its norm would turn the model to NaN.
 
 ## AlphaGenome variant effects
 
-[AlphaGenome](https://github.com/google-deepmind/alphagenome) predicts many
-genomic tracks from DNA sequence, and scores a variant by how its ALT allele
-changes them relative to REF. `dietnet alphagenome` scores every SNP of a
-dataset into a table for the `precomputed` provider.
+[AlphaGenome](https://github.com/google-deepmind/alphagenome) predicts thousands of genomic tracks (such as gene expression and chromatin accessibility) from DNA sequence.
+It scores a variant by how much its ALT allele changes each track relative to REF.
+`dietnet alphagenome` scores every SNP of a dataset and writes a table for `precomputed`.
 
 !!! warning "This sends your variants to Google"
-    Scoring goes through Google DeepMind's **hosted** AlphaGenome API: the
-    chromosome, position, REF and ALT of every SNP in the dataset are sent to
-    it. No genotypes or sample ids are sent, but check that sharing the variant
-    list is allowed for your data. The API needs a personal key, and its terms
-    of use are non-commercial; read them before you use it.
+    The chromosome, position, REF and ALT of every SNP are sent to Google DeepMind's hosted AlphaGenome service.
+    No genotypes or sample ids are sent, but check that sharing the list of variants is allowed for your data.
+    The service needs a personal key, and its terms of use are non-commercial.
 
 ```bash
-uv sync --frozen --extra alphagenome      # or: pip install -e '.[alphagenome]'
+pip install 'dietnetwork[alphagenome]'
 export ALPHAGENOME_API_KEY=...            # never in a file or config
 dietnet alphagenome --dataset dataset.h5 --out alphagenome.tsv
-dietnet alphagenome --bim cohort.bim --out alphagenome.tsv   # SNP list only, no genotypes
 ```
 
-`--bim` reads only the SNP ids, so a cohort's variant list can be scored on a
-machine that can reach the API while its genotypes stay where they are. The ids
-must really be `chr:pos:REF:ALT` with REF the GRCh38 reference base: some
-pipelines write `chr:pos:A1:A2` or put REF in A2 after `bcftools +fixref`, and
-scoring those as written asks about the reverse mutation. Check a sample of
-positions against the reference before a long run.
-
-The key is read only from `ALPHAGENOME_API_KEY`. Each output row is a SNP
-(`chrom`, `pos`, `ref`, `alt`) and one column per track,
-`<output_type>|<track_name>`, holding the signed ALT − REF `raw_score`.
-Gene-level scorers report a score per nearby gene; the gene with the largest
-effect on the track is kept. A variant with no score for a track (no gene in
-range) gets 0.
-
-| option | default | |
-|---|---|---|
-| `--scorers` | `ATAC,DNASE,CHIP_TF,CHIP_HISTONE,CAGE,RNA_SEQ` | AlphaGenome's recommended scorers, by name |
-| `--sequence-length` | `1MB` | context around each variant: `16KB`, `100KB`, `500KB` or `1MB` |
-| `--chunk` | 200 | SNPs per saved part |
-| `--max-workers` | 5 | parallel API requests |
-
-**Resumable.** Each chunk is written to `alphagenome.tsv.parts/` as soon as it
-arrives. Hundreds of thousands of API calls will be interrupted at some point;
-rerun the same command and only the SNPs no part holds yet are scored. The
-final table is assembled from the parts in the dataset's SNP order.
-
-**SNP ids must be `chr:pos:REF:ALT` on GRCh38**, as in the 1KGP data. A
-`.bim`'s A1/A2 say which allele is counted, not which is the reference, so REF
-and ALT have to come from the id; the command stops if they cannot.
-
-Use it as a block:
+The table can then be used as a block:
 
 ```yaml
   - provider: precomputed
     path: alphagenome.tsv
-    orient: effect     # flipped where the dataset counts REF (a quarter of the 1KGP SNPs)
-    pca: 64            # thousands of tracks -> 64 columns
+    orient: effect
+    pca: 64            # thousands of tracks -> 64 features
 ```
 
-For an experiment, compare it against the same spec with a `random` block of
-the same width, and with a `shuffled` copy of the AlphaGenome block, and
-against the MLP baseline (`dietnet train --model mlp`).
+Each row is a SNP, and each feature is the signed score of one track, ALT minus REF.
+Where a track has a score for each nearby gene, the one with the largest magnitude is kept.
+A SNP without a score for a track, such as one far from any gene, gets 0.
 
-!!! note
-    The AlphaGenome step is tested against a stand-in for the API and against
-    the real client's types.
+**SNP ids must be `chr:pos:REF:ALT` on GRCh38**, with REF the reference base.
+The alleles in a `.bim` say which one is counted, not which one is the reference, so REF and ALT have to come from the id.
+The command stops if the ids do not have this form, but it cannot tell whether REF is correct: some pipelines write `chr:pos:A1:A2`, and the scores would then describe the reverse mutation.
+Check some positions against the reference genome before a long run.
+
+**A long run can be interrupted.** The scores are saved to `alphagenome.tsv.parts/` as they arrive, and running the same command again scores only the remaining SNPs.
+
+**If the genotypes cannot leave their machine**, score the list of SNPs on another one, with `--bim cohort.bim` in place of `--dataset`.
+Only the SNP ids are read.
+
+The [command line reference](cli.md#dietnet-alphagenome) lists the options, such as which tracks to score.
