@@ -73,4 +73,5 @@ dietnet predict --model models/packages --plink mycohort --work-dir work \
 
 `match` saves the genotypes of the models' SNPs in `work`, and `predict` reuses them.
 For UK Biobank (486,748 individuals), `match` took 4.5 minutes on 8 CPUs and `predict` about 12 minutes on one A100.
+That cohort had only 5,810 of the models' SNPs, so `match` can take longer on yours.
 See [scaling](scaling.md) for the SLURM jobs.
