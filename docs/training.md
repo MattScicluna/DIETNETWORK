@@ -126,7 +126,7 @@ The options that change the model are:
 - `--normalize/--no-normalize` (default on): standardize the inputs with the fold's means and standard deviations. The choice is recorded in the package and applied again at prediction.
 - `--task regression`: predict a number instead of a class. See [Regression](#regression).
 - `--model mlp`: train without the auxiliary network. See [The MLP baseline](#the-mlp-baseline).
-- `--free-snp-weights`: let SNPs depart from what the auxiliary network predicts. See [Free SNP weights](#free-snp-weights).
+- `--free-snp-weights`: let each SNP correct the weights that the auxiliary network predicts for it. See [Free SNP weights](#free-snp-weights).
 
 The [command line reference](cli.md#dietnet-train) lists every option.
 
@@ -167,54 +167,58 @@ The `predictions.tsv` of a regression ensemble has three columns: `sample`, `pre
 ## Free SNP weights
 
 In a Diet Network, the first layer's weights are not learned directly.
-Instead, the auxiliary network computes the weights of SNP j from that SNP's features, `W_j = aux(features_j)`: a column with one weight per hidden unit (100 by default).
+Instead, the auxiliary network computes the weights of SNP j from that SNP's features, `W_j = aux(features_j)`: one weight for each hidden unit of the first layer (100 in the published config).
 This keeps the model small.
 For the published models, learning the first layer directly would mean fitting about 23 million weights (229,986 SNPs × 100 hidden units) with a dataset of 2,322 samples.
 
-However, it also ties every SNP to what its features say.
-Two SNPs with similar features get similar weights, even when one of them only tags the other through linkage disequilibrium.
+However, it also means that a SNP's weights can only reflect its features.
+Two SNPs with similar features get similar weights, even when only one of them affects the trait and the other is merely correlated with it (linkage disequilibrium).
 
-Free SNP weights loosen this tie by adding a term that each SNP can learn for itself:
+Free SNP weights address this by giving each SNP a correction that it learns for itself:
 
     W_j = aux(features_j) + delta_j
 
-They are turned on by `--free-snp-weights LAMBDA`, which needs `--engine dietnet` because upstream's `train.py` has no such term:
+Here `delta_j` is the correction for SNP j: one number per hidden unit, added to the weights that the auxiliary network predicts for that SNP.
+
+The corrections are turned on by `--free-snp-weights LAMBDA`, which needs `--engine dietnet` because upstream's `train.py` does not include them:
 
 ```bash
 dietnet train --engine dietnet --free-snp-weights 1 ...      # LAMBDA = 1
 ```
 
-`delta` has one entry per first-layer weight, starts at zero and has its own Adam optimizer (`--free-snp-lr`).
-After each update, a group-lasso proximal step shrinks each SNP's column as a whole, `delta_j <- delta_j * max(0, 1 - lr * LAMBDA / ||delta_j||)`, and a column that is short enough becomes exactly zero.
+All corrections start at zero and have their own Adam optimizer (`--free-snp-lr`).
+After each update, a group-lasso penalty shrinks the numbers in a SNP's correction together, `delta_j <- delta_j * max(0, 1 - lr * LAMBDA / ||delta_j||)`.
+If the correction is small (its norm `||delta_j||` is at most `lr * LAMBDA`), all of its numbers become exactly zero.
+That SNP then uses the auxiliary network's weights unchanged.
 The penalty therefore pulls a SNP's weights toward what the auxiliary network predicts, not toward zero.
-A SNP whose `delta_j` is zero is left entirely to the auxiliary network.
-Packages carry `delta` (package format 3), and `predict` applies it.
+Packages carry the corrections (as `delta`, package format 3), and `predict` applies them.
 
 ### Choosing LAMBDA
 
-LAMBDA sets how far SNPs may depart from the auxiliary network.
+LAMBDA is the strength of the penalty, so it sets how many SNPs keep a correction and how large those corrections are.
 
-When LAMBDA is large, most columns stay at zero and the model is close to the plain Diet Network.
-When it is small, every SNP can move away from what its features predict.
-The model then fits the SNP effects jointly, as penalized regression does, with the auxiliary network acting as a prior.
-When it is too small, the model overfits, and a best epoch that comes early is a sign of this.
+When LAMBDA is large, most SNPs have no correction.
+They use the weights that the auxiliary network predicts, so the model is close to the plain Diet Network.
+When LAMBDA is small, most SNPs keep a correction.
+Their weights are then fitted to the data jointly, as in penalized regression, and the auxiliary network acts as a prior: it supplies the weights that the SNPs are pulled toward.
+When LAMBDA is too small, the corrections overfit the training samples, and a best epoch that comes early is a sign of this.
 
 Useful values are of order 0.1 to 10, rather than the small values usual for a lasso.
-This is because Adam moves each entry by about the learning rate whatever the gradient, so LAMBDA is relative to the learning rate.
+This is because Adam changes each number in a correction by about the learning rate at every update, whatever the size of the gradient, so LAMBDA is relative to the learning rate.
 Choose it on the validation samples.
 
 ### Penalizing some SNPs more than others
 
-If there is prior evidence about which SNPs are causal, from functional annotations for example, the penalty can reflect it.
-`--snp-penalty-weights WEIGHTS.npy` multiplies LAMBDA by a separate weight for each SNP, in the dataset's SNP order:
+If there is prior evidence about which SNPs are causal, from functional annotations for example, the penalty can be made smaller for those SNPs.
+`--snp-penalty-weights WEIGHTS.npy` gives one multiplier per SNP, in the dataset's SNP order, and the penalty on a SNP's correction becomes LAMBDA times its multiplier:
 
-| weight | effect on the SNP |
+| multiplier | effect on the SNP's correction |
 |---|---|
 | 0 | not penalized |
-| below 1 | departs from the auxiliary network more easily |
-| 1 | unchanged |
-| above 1 | held closer to the auxiliary network |
+| below 1 | penalized less, so it is more likely to be kept |
+| 1 | penalized by LAMBDA, as without the option |
+| above 1 | penalized more, so it is more likely to be zero |
 
 This is the adaptive group lasso.
-Annotations can then decide which SNPs the free weights may pick, in the same way that they decide the auxiliary network's weights.
+Annotations can then be used in two places: as features, they shape the weights that the auxiliary network predicts, and as multipliers, they shape which SNPs keep a correction.
 Packages record the file's path and SHA-256.
