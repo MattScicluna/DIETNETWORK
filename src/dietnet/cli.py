@@ -298,23 +298,15 @@ def compute_input_stats(dataset_path, partition_path, out):
     type=click.Choice(["auto", "ram", "memmap", "packed"]),
     default="auto",
     show_default=True,
-    help="Where training reads genotypes: 'ram' copies all of them into memory first "
-    "(upstream), 'memmap' reads each batch from the dataset file, 'packed' from its 2-bit "
+    help="Where training reads genotypes: 'ram' copies all of them into memory first, "
+    "'memmap' reads each batch from the dataset file, 'packed' from its 2-bit "
     "copy (pack-genotypes). Same model; 'auto' uses the packed copy if there is one, else "
     "memory-maps above 2 GiB.",
 )
 @click.option(
-    "--loader",
-    type=click.Choice(["fast", "upstream"]),
-    default="fast",
-    show_default=True,
-    help="'fast' reads each batch in one call with loader workers and fills missing values "
-    "in one operation; 'upstream' leaves train.py's loader alone. Same model.",
-)
-@click.option(
     "--workers",
     type=click.IntRange(min=0),
-    help="Loader processes for --loader fast. Default: the CPUs available, less one, at most 8.",
+    help="Loader processes. Default: the CPUs available, less one, at most 8.",
 )
 @click.option(
     "--gpus",
@@ -322,23 +314,14 @@ def compute_input_stats(dataset_path, partition_path, out):
     default=1,
     show_default=True,
     help="Above 1, train each model data-parallel over this many GPUs (one process each; "
-    "CPU processes where there are no GPUs): upstream's model and epoch logic, the config's "
-    "batch_size split across them. Not bit-identical to train.py.",
-)
-@click.option(
-    "--engine",
-    type=click.Choice(["upstream", "dietnet"]),
-    help="'upstream': train.py itself, unmodified (bit-identical model). 'dietnet': upstream's "
-    "model and epoch logic in dietnet's own loop, packed genotypes decoded on the GPU, without "
-    "train.py's per-batch bookkeeping (~20x faster training pass; not bit-identical). Default: "
-    "'upstream' on one GPU, 'dietnet' for --gpus > 1.",
+    "CPU processes where there are no GPUs), the config's batch_size split across them.",
 )
 @click.option(
     "--bn-recalibrate",
     type=click.IntRange(min=0),
     default=0,
     show_default=True,
-    help="Engine 'dietnet' only: before each validation, recompute the batch-norm statistics "
+    help="Before each validation, recompute the batch-norm statistics "
     "on this many training samples without dropout (0: off). Upstream's fat layer is "
     "batch-normalised right after input dropout, so its training statistics misfit evaluation.",
 )
@@ -347,7 +330,7 @@ def compute_input_stats(dataset_path, partition_path, out):
     type=click.FloatRange(0, 1, min_open=True),
     default=1.0,
     show_default=True,
-    help="Engine 'dietnet', Diet Network only: train each batch on this share of the SNPs, "
+    help="Diet Network only: train each batch on this share of the SNPs, "
     "the same for the whole batch, in place of per-sample input dropout (1: off). The "
     "auxiliary network and the fat layer then do that share of the work; evaluation uses "
     "every SNP. 1 - input_dropout keeps the dropout rate.",
@@ -357,7 +340,7 @@ def compute_input_stats(dataset_path, partition_path, out):
     type=click.IntRange(min=0),
     default=0,
     show_default=True,
-    help="Engine 'dietnet' only: read training rows in contiguous chunks of this size into "
+    help="Read training rows in contiguous chunks of this size into "
     "shuffled in-memory buffers, not batches of random rows, so the genotype file need not "
     "fit in the page cache (0: off).",
 )
@@ -381,7 +364,7 @@ def compute_input_stats(dataset_path, partition_path, out):
     type=click.FloatRange(min=0),
     default=0.0,
     show_default=True,
-    help="Engine 'dietnet', Diet Network only: add free per-SNP fat-layer weights to the "
+    help="Diet Network only: add free per-SNP fat-layer weights to the "
     "auxiliary network's, under a group-lasso penalty of this strength (one group per SNP), "
     "so the model can weigh SNPs jointly, as a penalised regression does (0: off).",
 )
@@ -402,7 +385,7 @@ def compute_input_stats(dataset_path, partition_path, out):
     type=click.IntRange(min=0),
     default=0,
     show_default=True,
-    help="Engine 'dietnet': validate each epoch (and stop early) on this many validation "
+    help="Validate each epoch (and stop early) on this many validation "
     "samples, a fixed random subset; the test set is evaluated whole (0: all).",
 )
 def train(
@@ -418,10 +401,8 @@ def train(
     normalize,
     model,
     inputs,
-    loader,
     workers,
     gpus,
-    engine,
     bn_recalibrate,
     snp_sample,
     chunk_rows,
@@ -441,7 +422,7 @@ def train(
             input_stats=input_stats, config=config, exp_dir=exp_dir, seeds=seeds,
             folds=folds, task=task, normalize=normalize,
             model={"dietnet": "Dietnet", "mlp": "Mlp"}[model],
-            inputs=inputs, loader=loader, workers=workers, gpus=gpus, engine=engine,
+            inputs=inputs, workers=workers, gpus=gpus,
             bn_recalibrate=bn_recalibrate, snp_sample=snp_sample, chunk_rows=chunk_rows,
             chunks_per_buffer=chunks_per_buffer, snp_blocks=snp_blocks,
             free_snp_weights=free_snp_weights, free_snp_lr=free_snp_lr,

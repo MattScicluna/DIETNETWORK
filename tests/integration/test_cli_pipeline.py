@@ -137,9 +137,9 @@ def test_regression_end_to_end(tmp_path, synthetic):
     assert "mean held-out r:" in report and "R^2" in report
 
 
-def test_regression_on_pooled_frequencies_with_the_dietnet_engine(tmp_path, synthetic):
+def test_regression_on_pooled_frequencies(tmp_path, synthetic):
     """The height setup: a trait with no classes, the auxiliary network fed genotype
-    frequencies pooled over classes, trained by the dietnet engine."""
+    frequencies pooled over classes, as a model is trained."""
     root = tmp_path / "reg"
     train_pipeline(root, synthetic, folds="0", task="regression")  # dataset, partition, stats
     (root / "spec.yaml").write_text(yaml.safe_dump({"blocks": [{"provider": "genotype_freq"}]}))
@@ -147,7 +147,6 @@ def test_regression_on_pooled_frequencies_with_the_dietnet_engine(tmp_path, synt
             spec=root / "spec.yaml", out=root / "pooled.npz")  # fmt: skip
     dietnet(
         "train",
-        "--engine=dietnet",
         dataset=root / "dataset.h5",
         partition=root / "partition.npz",
         embedding=root / "pooled.npz",

@@ -14,7 +14,7 @@ dietnet --version
 | [`build-embedding`](#dietnet-build-embedding) | the auxiliary network's input from several feature sources |
 | [`alphagenome`](#dietnet-alphagenome) | AlphaGenome variant effects per SNP, for `build-embedding` |
 | [`compute-input-stats`](#dietnet-compute-input-stats) | per-fold SNP means and SDs (upstream `compute_input_features_statistics.py`) |
-| [`train`](#dietnet-train) | upstream `train.py` per (seed, fold) → model packages |
+| [`train`](#dietnet-train) | train one model per (seed, fold) → model packages |
 | [`match`](#dietnet-match) | a cohort on the models' SNPs, ahead of `predict` |
 | [`predict`](#dietnet-predict) | a cohort through every selected model, combined |
 | [`check`](#dietnet-check) | accuracy against labels, or each package's held-out accuracy |
@@ -30,7 +30,7 @@ comma-separated values (`--seeds 78,79,80`) or the flag repeated
 Build upstream's HDF5 dataset from PLINK, without the text round-trip
 ([schema](formats.md#the-hdf5-dataset)), and its 2-bit genotype copy
 (`<dataset>.packed.bin`, a quarter of the bytes, with a `.packed.json` recording what it
-was built from), which training from the packed store, dietnet's statistics engine and
+was built from), which training from the packed store, the per-fold steps and
 `build-embedding` read. The copy is laid out in 64 blocks of SNPs, so training that keeps
 a share of 64 SNP blocks per buffer reads only those. The `.h5` holds the labels, the SNP
 table and the shape of `inputs`, and the copy holds the genotypes. At least one
@@ -138,7 +138,7 @@ samples at a time.
 
 ## `dietnet train`
 
-Train each (seed, fold) with upstream `train.py`; package the results under
+Train each (seed, fold); package the results under
 `EXP_DIR/packages/seed_<seed>/fold_<fold>/`. See [training](training.md#train).
 
 | option | | default |
@@ -155,18 +155,16 @@ Train each (seed, fold) with upstream `train.py`; package the results under
 | `--normalize / --no-normalize` | standardise inputs with the fold's means and SDs | normalize |
 | `--model` | `dietnet`, upstream's Diet Network, or `mlp`, its MLP baseline (no auxiliary network) | dietnet |
 | `--inputs` | where training reads genotypes: `ram` copies them all into memory first (upstream), `memmap` reads each batch from the dataset file, `packed` from its 2-bit copy (`pack-genotypes`); same model in every case. `auto` uses the packed copy if there is one, else memory-maps above 2 GiB | auto |
-| `--loader` | `fast` reads each batch in one call with loader workers and fills missing values in one operation; `upstream` leaves train.py's loader alone. Same model | fast |
-| `--workers INTEGER` | loader processes for `--loader fast` | the CPUs available, less one, at most 8 |
-| `--gpus INTEGER` | above 1, train each model data-parallel over this many GPUs on one node (CPU processes where there are none): upstream's model and epoch logic, the config's `batch_size` split across them; not bit-identical to train.py, see Scaling | 1 |
-| `--engine` | `upstream`: train.py itself, unmodified (bit-identical model); `dietnet`: upstream's model and epoch logic in dietnet's own loop, packed genotypes decoded on the GPU, without train.py's per-batch bookkeeping (much faster; not bit-identical) | `upstream` on one GPU, `dietnet` for `--gpus` > 1 |
-| `--bn-recalibrate` | engine `dietnet` only: before each validation, recompute the batch-norm statistics on this many training samples without dropout. Upstream batch-normalises the fat layer right after input dropout, so the statistics learned in training misfit evaluation | 0 (off) |
-| `--snp-sample` | engine `dietnet`, Diet Network only: each training batch uses this share of the SNPs, the same for the whole batch, scaled up to keep the fat layer's expected input, in place of per-sample input dropout. The dropped SNPs are skipped, so the auxiliary network and the fat layer do that share of the work; evaluation uses every SNP. `1 - input_dropout` keeps the dropout rate | 1 (off) |
-| `--chunk-rows` | engine `dietnet` only: read training rows in contiguous chunks of this size into shuffled in-memory buffers, not batches of random rows, so the genotype file need not fit in the page cache | 0 (off) |
+| `--workers INTEGER` | loader processes | the CPUs available, less one, at most 8 |
+| `--gpus INTEGER` | above 1, train each model data-parallel over this many GPUs on one node (CPU processes where there are none), the config's `batch_size` split across them; see Scaling | 1 |
+| `--bn-recalibrate` | before each validation, recompute the batch-norm statistics on this many training samples without dropout. Upstream batch-normalises the fat layer right after input dropout, so the statistics learned in training misfit evaluation | 0 (off) |
+| `--snp-sample` | Diet Network only: each training batch uses this share of the SNPs, the same for the whole batch, scaled up to keep the fat layer's expected input, in place of per-sample input dropout. The dropped SNPs are skipped, so the auxiliary network and the fat layer do that share of the work; evaluation uses every SNP. `1 - input_dropout` keeps the dropout rate | 1 (off) |
+| `--chunk-rows` | read training rows in contiguous chunks of this size into shuffled in-memory buffers, not batches of random rows, so the genotype file need not fit in the page cache | 0 (off) |
 | `--chunks-per-buffer` | with `--chunk-rows`: random chunks read into each buffer | 4 |
-| `--free-snp-weights` | engine `dietnet`, Diet Network only: each SNP's fat-layer weights become the auxiliary network's plus a free term, trained under a group-lasso penalty of this strength (one group per SNP, a proximal step after each update), so the model can weigh SNPs jointly, as a penalised regression does. Packages carry the free weights and `predict` applies them | 0 (off) |
+| `--free-snp-weights` | Diet Network only: each SNP's fat-layer weights become the auxiliary network's plus a free term, trained under a group-lasso penalty of this strength (one group per SNP, a proximal step after each update), so the model can weigh SNPs jointly, as a penalised regression does. Packages carry the free weights and `predict` applies them | 0 (off) |
 | `--free-snp-lr` | with `--free-snp-weights`: their Adam learning rate | the config's `lr_main` |
 | `--snp-penalty-weights` | with `--free-snp-weights`: a `.npy` vector of per-SNP multipliers of the penalty, in the dataset's SNP order (1: unchanged, below 1: shrink the SNP less, 0: not at all), for example from a prior on which SNPs are causal. Packages record its path and checksum | none (every SNP 1) |
-| `--valid-subset N` | engine `dietnet`: validate each epoch, and stop early, on N validation samples, a fixed random subset; the test set is still evaluated whole | 0 (all) |
+| `--valid-subset N` | validate each epoch, and stop early, on N validation samples, a fixed random subset; the test set is still evaluated whole | 0 (all) |
 | `--snp-blocks` | with `--chunk-rows` and `--snp-sample`: cut the SNPs into this many contiguous blocks and keep a `--snp-sample` share of the blocks per buffer, not random SNPs per batch | 0 (off) |
 
 ## `dietnet match`

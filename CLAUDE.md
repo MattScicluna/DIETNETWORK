@@ -36,7 +36,7 @@ and listed in the manifest; nothing unused lives in `src/` either.
   dataset.
 - `package.py`: model packages; loads via upstream's `DietNetworkHandler`,
   strictly.
-- `training.py`: drives upstream `train.py` per (seed, fold) and packages the
+- `training.py`: runs `parallel.py` per (seed, fold) and packages the
   results.
 - `predict.py`: memory-mapped matched cohort and upstream's `indep_test_step`
   for every model; ensemble table.

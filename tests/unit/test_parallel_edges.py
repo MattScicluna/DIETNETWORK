@@ -106,7 +106,7 @@ def test_the_mlp_trains_from_chunks_unnormalised_and_stops_early(
     parallel.main(argv)
 
     out = capsys.readouterr().out
-    assert "data-parallel training on 1 CPU processes; global batch 32" in out
+    assert "training on 1 CPU processes; global batch 32" in out
     assert "batch-norm statistics recomputed on 20 training samples" in out
     assert "Epoch 1:" in out and "Epoch 2:" not in out
     assert "Early stopping, exiting training loop" in out

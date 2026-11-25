@@ -39,7 +39,7 @@ results and the commands that reproduce it are in the docs' tutorial
 
 ## Speed
 
-- Training: `--engine dietnet --inputs packed`, one model per A100, the 2-bit
+- Training: `--inputs packed`, one model per A100, the 2-bit
   copy staged to the node's disk (~50 GB; the `.h5` stays on Lustre, linked,
   since training reads only labels from it).
 - `stats.sbatch` runs the five folds side by side,

@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Time per epoch of upstream's train.py by how it is fed: genotype store (RAM,
-# memory map, packed copy), loader (upstream's or fast, with workers), and data
+# Time per epoch of training by genotype store (RAM, memory map, packed copy) and data
 # on network storage or staged to the node's local disk.
 # BENCH_DIR comes from benchmarks/make_train_bench.py + `dietnet partition`
 # (with int8 genotypes for the int8 stores; its packed copy for INPUTS=packed).
 #
-#   BENCH_DIR=/path/bench DIETNET_VENV=/path/.venv INPUTS=packed LOADER=fast WORKERS=7 \
+#   BENCH_DIR=/path/bench DIETNET_VENV=/path/.venv INPUTS=packed WORKERS=7 \
 #   STAGE=1 sbatch --account=ACCOUNT --mem=32G benchmarks/slurm/bench_train_inputs.sbatch
 #
-# INPUTS: ram | memmap | packed.  LOADER: upstream (default) | fast.
+# INPUTS: ram | memmap | packed.
 # STAGE=1 copies the dataset (and its packed copy) to $SLURM_TMPDIR first.
 #SBATCH --job-name=dietnet_bench_train
 #SBATCH --cpus-per-task=8
@@ -19,12 +18,11 @@
 
 set -euo pipefail
 : "${BENCH_DIR:?}" "${DIETNET_VENV:?}" "${INPUTS:?}"
-LOADER="${LOADER:-upstream}"
 TIME="$(type -P time)"
-RUN="$BENCH_DIR/run_${INPUTS}_${LOADER}_stage${STAGE:-0}_${SLURM_JOB_ID}"
+RUN="$BENCH_DIR/run_${INPUTS}_stage${STAGE:-0}_${SLURM_JOB_ID}"
 mkdir -p "$RUN"
 
-echo "node $(hostname), inputs $INPUTS, loader $LOADER (workers ${WORKERS:-default})," \
+echo "node $(hostname), inputs $INPUTS (workers ${WORKERS:-default})," \
     "stage ${STAGE:-0}, mem ${SLURM_MEM_PER_NODE:-?} MB"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 DATASET="$BENCH_DIR/dataset.h5"
@@ -60,12 +58,10 @@ EXTRA=()
 [ -n "${WORKERS:-}" ] && EXTRA+=(--workers "$WORKERS")
 # GPUS > 1: data-parallel (request as many GPUs, e.g. --gres=gpu:a100:4).
 [ -n "${GPUS:-}" ] && EXTRA+=(--gpus "$GPUS")
-# ENGINE: upstream (train.py) | dietnet (the data-parallel loop, any number of GPUs).
-[ -n "${ENGINE:-}" ] && EXTRA+=(--engine "$ENGINE")
 "$TIME" -v "$DIETNET_VENV/bin/dietnet" train --dataset "$DATASET" \
     --partition "$BENCH_DIR/partition.npz" --embedding "$BENCH_DIR/embedding.npz" \
     --input-stats "$BENCH_DIR/stats.npz" --config "$RUN/config.yaml" --exp-dir "$RUN/exp" \
-    --seeds 78 --folds 0 --inputs "$INPUTS" --loader "$LOADER" "${EXTRA[@]}" \
+    --seeds 78 --folds 0 --inputs "$INPUTS" "${EXTRA[@]}" \
     2> "$RUN/time.txt" || true
 grep -E "Elapsed \(wall|Maximum resident" "$RUN/time.txt"
 grep -h -E "^dietnet:|Loaded data in|Epoch [0-9]+|Train step time|Epoch execution time|Traceback|Error" \

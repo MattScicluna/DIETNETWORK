@@ -87,35 +87,25 @@ UNCHECKED = dict(
 @pytest.mark.parametrize(
     "options, message",
     [
-        (dict(engine="torch"), "engine must be 'upstream' or 'dietnet', not 'torch'"),
-        (dict(loader="slow"), "loader must be 'fast' or 'upstream', not 'slow'"),
         (dict(gpus=0), "gpus must be at least 1"),
-        (dict(gpus=2, engine="upstream"), "engine 'upstream' is train.py's own loop"),
-        (dict(bn_recalibrate=10), "--bn-recalibrate needs engine 'dietnet'"),
         (dict(snp_sample=0.0), r"snp_sample must be in \(0, 1\], not 0.0"),
-        (dict(snp_sample=1.5, engine="dietnet"), r"snp_sample must be in \(0, 1\], not 1.5"),
-        (dict(snp_sample=0.5), "--snp-sample needs engine 'dietnet' and the Diet Network"),
+        (dict(snp_sample=1.5), r"snp_sample must be in \(0, 1\], not 1.5"),
         (
-            dict(snp_sample=0.5, engine="dietnet", model="Mlp", embedding=None),
-            "--snp-sample needs engine 'dietnet' and the Diet Network",
+            dict(snp_sample=0.5, model="Mlp", embedding=None),
+            "--snp-sample needs the Diet Network",
         ),
-        (dict(chunk_rows=64), "--chunk-rows needs engine 'dietnet'"),
-        (dict(free_snp_weights=-1.0, engine="dietnet"), "free_snp_weights must be >= 0, not -1.0"),
-        (dict(free_snp_weights=0.1), "--free-snp-weights needs engine 'dietnet'"),
+        (dict(free_snp_weights=-1.0), "free_snp_weights must be >= 0, not -1.0"),
         (
-            dict(free_snp_weights=0.1, engine="dietnet", model="Mlp", embedding=None),
-            "--free-snp-weights needs engine 'dietnet' and the Diet Network",
+            dict(free_snp_weights=0.1, model="Mlp", embedding=None),
+            "--free-snp-weights needs the Diet Network",
         ),
         (
-            dict(snp_penalty_weights="w.npy", engine="dietnet"),
+            dict(snp_penalty_weights="w.npy"),
             "--snp-penalty-weights needs --free-snp-weights",
         ),
-        (dict(valid_subset=100), "--valid-subset needs engine 'dietnet'"),
-        (dict(snp_blocks=8, engine="dietnet", snp_sample=0.5), "--snp-blocks needs --chunk-rows"),
-        (dict(snp_blocks=8, engine="dietnet", chunk_rows=64), "--snp-blocks needs --chunk-rows"),
-        (dict(engine="dietnet", loader="upstream"), "--loader upstream applies to engine"),
-        # Several GPUs choose the dietnet engine, which has no upstream loader.
-        (dict(gpus=2, loader="upstream"), "--loader upstream applies to engine 'upstream'"),
+        (dict(valid_subset=-1), "--valid-subset needs a positive size"),
+        (dict(snp_blocks=8, snp_sample=0.5), "--snp-blocks needs --chunk-rows"),
+        (dict(snp_blocks=8, chunk_rows=64), "--snp-blocks needs --chunk-rows"),
         (dict(model="Resnet"), r"model must be one of \['Dietnet', 'Mlp'\]"),
     ],
 )
@@ -158,7 +148,7 @@ def test_the_free_weights_learning_rate_is_passed_only_when_set(inputs, monkeypa
     monkeypatch.setattr(training, "_run_parallel", launch)
     with pytest.raises(_Stop):
         training.train(
-            **inputs, engine="dietnet", inputs="ram", workers=0, free_snp_weights=1e-3,
+            **inputs, inputs="ram", workers=0, free_snp_weights=1e-3,
             free_snp_lr=lr,
         )  # fmt: skip
 
@@ -277,7 +267,7 @@ def test_penalty_weights_are_checked_hashed_and_passed(inputs, monkeypatch, tmp_
     wrong = tmp_path / "wrong.npy"
     np.save(wrong, np.ones(n_snps + 1))
     with pytest.raises(ValueError, match="penalty weights, expected"):
-        training.train(**inputs, engine="dietnet", free_snp_weights=1e-3,
+        training.train(**inputs, free_snp_weights=1e-3,
                        snp_penalty_weights=wrong)  # fmt: skip
 
     seen = []
@@ -290,7 +280,7 @@ def test_penalty_weights_are_checked_hashed_and_passed(inputs, monkeypatch, tmp_
     weights = tmp_path / "weights.npy"
     np.save(weights, np.ones(n_snps))
     with pytest.raises(_Stop):
-        training.train(**inputs, engine="dietnet", inputs="ram", workers=0,
+        training.train(**inputs, inputs="ram", workers=0,
                        free_snp_weights=1e-3, snp_penalty_weights=weights)  # fmt: skip
     ((args,),) = [seen]
     assert args[args.index("--snp-penalty-weights") + 1] == weights.resolve()

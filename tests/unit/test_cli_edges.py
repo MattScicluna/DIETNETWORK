@@ -115,9 +115,9 @@ def test_train_reports_inconsistent_options(trained_root, tmp_path):
                  "--embedding", trained_root / "embedding.npz",
                  "--input-stats", trained_root / "stats.npz",
                  "--config", trained_root / "config.yaml", "--exp-dir", tmp_path / "exp",
-                 "--seeds", 1, "--folds", 0, "--engine", "upstream", "--gpus", 2)  # fmt: skip
+                 "--seeds", 1, "--folds", 0, "--model", "mlp", "--snp-sample", 0.5)  # fmt: skip
     assert result.exit_code == 1
-    assert "engine 'upstream' is train.py's own loop, on one GPU" in result.output
+    assert "--snp-sample needs the Diet Network" in result.output
     assert not (tmp_path / "exp").exists()
 
 

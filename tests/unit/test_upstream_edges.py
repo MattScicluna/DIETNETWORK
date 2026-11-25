@@ -1,16 +1,13 @@
-"""Edge cases of dietnet.upstream and dietnet._launch: finding upstream's code, the
-manifest check, failing scripts, and the launcher's stand-ins for upstream's classes."""
+"""Edge cases of dietnet.upstream: finding upstream's code, the manifest check and failing
+scripts."""
 
 from __future__ import annotations
 
 import hashlib
 
-import h5py
 import pytest
-import torch
-from support import DATASETS
 
-from dietnet import _launch, genotypes, upstream
+from dietnet import upstream
 
 
 def _train_dir(base):
@@ -114,55 +111,3 @@ def test_a_failing_script_without_a_log_raises_with_its_status(scripts, capfd):
         upstream.run("fail.py", [])
     assert "line 39" in capfd.readouterr().out
     assert upstream.run("ok.py", []) is None
-
-
-@pytest.fixture
-def helpers(monkeypatch):
-    """Upstream's dataset_utils, with what the launcher replaces restored afterwards."""
-    du = upstream.modules().dataset_utils
-    monkeypatch.setattr(du, "FoldDataset", du.FoldDataset)
-    monkeypatch.setattr(du, "replace_missing_values", du.replace_missing_values)
-    monkeypatch.setattr(torch.utils.data, "DataLoader", torch.utils.data.DataLoader)
-    return du
-
-
-def test_the_fast_loader_leaves_other_datasets_alone(helpers):
-    """train.py's DataLoader, once replaced, changes only datasets that read whole
-    batches; any other keeps torch's defaults."""
-    _launch._fast_loader(2)
-
-    plain = torch.utils.data.DataLoader(list(range(6)), batch_size=2)
-    assert plain.num_workers == 0
-    assert [batch.tolist() for batch in plain] == [[0, 1], [2, 3], [4, 5]]
-
-    class Batched(torch.utils.data.Dataset):
-        def __len__(self):
-            return 4
-
-        def __getitems__(self, indices):
-            return list(indices)
-
-    batched = torch.utils.data.DataLoader(Batched(), batch_size=2)
-    assert batched.num_workers == 2
-    assert batched.collate_fn(["as", "is"]) == ["as", "is"]
-    assert helpers.replace_missing_values is _launch._fill_missing
-
-
-def test_the_store_launcher_passes_other_file_attributes_through(helpers):
-    """The opened dataset train.py sees has an empty ``inputs`` but is otherwise the
-    file: its attributes and other datasets are the real ones."""
-    path = DATASETS["synthetic"].upstream_hdf5
-    _launch._store_train_inputs("memmap")
-
-    helpers.FoldDataset.dataset_file = str(path)
-    helpers.FoldDataset.f = h5py.File(path, "r")
-    try:
-        f = helpers.FoldDataset.f
-        assert f.filename == str(path)
-        assert set(f.keys()) >= {"inputs", "samples", "class_labels"}
-        assert f["inputs"].shape == (0, 500)
-        assert f["samples"].shape == (200,)
-        helpers.FoldDataset.data_x = None  # replaced by the store, whatever is assigned
-        assert isinstance(helpers.FoldDataset.data_x, genotypes.MemmapStore)
-    finally:
-        helpers.FoldDataset.f.close()

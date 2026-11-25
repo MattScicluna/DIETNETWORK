@@ -7,7 +7,7 @@ work splits along the hardware it needs:
 |---|---|---|
 | `match` | CPU and I/O | reads the `.bed` once, a block of samples at a time (1 GiB per block), and writes the matched cohort as contiguous runs of rows |
 | `predict` | a GPU, ideally | memory-maps the matched cohort and reads each batch of samples once for every model |
-| `train` | a GPU | upstream's `train.py`, which loads the training set into memory |
+| `train` | a GPU | reads the training set from the packed file, a batch at a time |
 
 Measured on UK Biobank (486,748 samples) on Narval:
 
@@ -77,24 +77,13 @@ bytes) in memory. The outcome is contiguous HDF5.
 
 ## Training on a biobank
 
-Upstream's train.py copies every genotype into RAM before training (~83 GB for
-UK Biobank's 486,748 × 169,829), then reads one sample per Python call in one
-process and fills missing values in a Python loop over each batch. On an A100
-that left the GPU ~87% idle even with everything in memory. dietnet offers two
-ways around it:
-
-- **`--engine upstream`** (the default on one GPU): train.py itself,
-  unmodified, fed from a genotype store (`--inputs memmap|packed`) by the fast
-  loader (`--loader fast`, the default: whole batches per read, loader workers,
-  one vectorised missing-value fill). The model is **bit-identical** to
-  train.py left alone, and it needs ~5 GB instead of the whole matrix.
-- **`--engine dietnet`**: upstream's model, loss, optimisers and epoch logic
-  (baseline, annealing, best-model rule, patience, the test pass, the same
-  result files) in a loop of dietnet's own, which reads the packed 2-bit copy
-  and decodes it on the GPU, and skips train.py's per-batch bookkeeping and
-  its evaluation pass over the training set. Optionally data-parallel
-  (`--gpus N`). Not bit-identical to train.py, so it is checked on held-out
-  accuracy.
+The published `train.py` copies every genotype into memory before training (~83 GB for
+UK Biobank's 486,748 × 169,829), then reads one sample per Python call in one process. On an
+A100 that left the GPU ~87% idle. `dietnet train` uses the same network, loss, optimizers and
+epoch logic (baseline, annealing, best-model rule, patience, the test pass, the same result
+files), but reads whole batches of packed genotypes, decodes them on the GPU, and skips the
+published loop's evaluation pass over the training set. Optionally it is data-parallel
+(`--gpus N`). It is not bit-identical to `train.py`, so it is checked on held-out accuracy.
 
 ### Benchmarks
 
@@ -103,15 +92,15 @@ Simulated genotypes of UK Biobank's shape (292,048 training samples ×
 local NVMe unless stated (`benchmarks/slurm/bench_train_inputs.sbatch`, Mila,
 2026-10-27):
 
-| engine | genotypes | GPUs | batch | memory used | before training | whole epoch |
+| loop | genotypes | GPUs | batch | memory used | before training | whole epoch |
 |---|---|---|---|---|---|---|
-| upstream, as published | RAM | 1 | 138 | 82 GB | 346 s load | 65–80 s |
-| upstream | memmap, network storage | 1 | 138 | — | — | 2,923 s |
-| upstream | memmap | 1 | 138 | 4.4 GB | 217 s staging | 131 s |
-| upstream, fast loader | packed | 1 | 138 | 5.3 GB | 280 s staging | 82 s |
-| **dietnet** | packed | 1 | 138 | 8.3 GB | 244 s staging | **13.5–14 s** |
-| **dietnet** | packed | 1 | 2,048 | 8.6 GB | 244 s staging | **8.9–9.5 s** |
-| dietnet | packed | 4 | 2,048 | 5.8 GB | 217 s staging | 7.8–8.6 s |
+| published | RAM | 1 | 138 | 82 GB | 346 s load | 65–80 s |
+| published | memmap, network storage | 1 | 138 | — | — | 2,923 s |
+| published | memmap | 1 | 138 | 4.4 GB | 217 s staging | 131 s |
+| published, fast loader | packed | 1 | 138 | 5.3 GB | 280 s staging | 82 s |
+| **`dietnet train`** | packed | 1 | 138 | 8.3 GB | 244 s staging | **13.5–14 s** |
+| **`dietnet train`** | packed | 1 | 2,048 | 8.6 GB | 244 s staging | **8.9–9.5 s** |
+| `dietnet train` | packed | 4 | 2,048 | 5.8 GB | 217 s staging | 7.8–8.6 s |
 
 Training throughput by data path, upstream's model, samples/s
 (`benchmarks/bench_train_throughput.py`):
@@ -125,8 +114,8 @@ What they say:
 
 - Network storage is unusable for training; stage the dataset (and its packed
   copy, with `cp --preserve=timestamps`; `cp -p` fails on Narval's node disk) to `$SLURM_TMPDIR` first. Staging ~100 GB takes 3–5 min.
-- The dietnet engine at the published batch size is 5–6× faster per epoch than
-  upstream in RAM, in a tenth of the memory. At ~1,000–2,000 epochs per model
+- At the published batch size, the epoch is 5–6× faster than the published loop in RAM, in a
+  tenth of the memory. At ~1,000–2,000 epochs per model
   that is hours, not days.
 - On one node, more GPUs barely help: the epoch is bound by reading the packed
   rows (~50,000 samples/s from 8 CPUs). For an ensemble, train **one model per
@@ -162,7 +151,7 @@ before using it for the ensemble.
 dietnet create-dataset --plink cohort --labels labels.tsv --out dataset.h5   # CPU job
 # then, per (seed, fold), one GPU job (8 CPUs, 32 GB):
 cp --preserve=timestamps dataset.h5 dataset.h5.packed.* "$SLURM_TMPDIR/"
-dietnet train --dataset "$SLURM_TMPDIR/dataset.h5" ... --engine dietnet --inputs packed \
+dietnet train --dataset "$SLURM_TMPDIR/dataset.h5" ... --inputs packed \
     --seeds 78 --folds 0
 ```
 

@@ -1,7 +1,7 @@
-"""Data-parallel training over several GPUs: upstream's model, in a DDP loop.
+"""Training: upstream's model and epoch logic, in a loop of its own.
 
-``dietnet train --gpus N`` (N > 1) runs this under ``torchrun``, one process
-per GPU. What it shares with upstream's train.py, and what it does not:
+``dietnet train`` runs this, one process per GPU (or CPU processes), meeting at
+127.0.0.1. What it shares with upstream's train.py, and what it does not:
 
 - The same model, loss and optimisers: upstream's model and task handlers,
   built as train.py builds them; DDP averages the gradients across GPUs before
@@ -42,7 +42,16 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import BatchSampler, DataLoader, DistributedSampler, SequentialSampler
 
 from dietnet import genotypes, hybrid, upstream
-from dietnet._launch import _fill_missing
+
+
+def _fill_missing(x, per_feature_mean):
+    """``du.replace_missing_values``, vectorised: missing (-1) becomes the SNP mean.
+
+    Upstream computes ``mask*x + (~mask)*mean`` row by row in Python, a few GPU
+    kernels per sample. One ``where`` gives the same values, in place as upstream.
+    """
+    x.copy_(torch.where(x >= 0, x, per_feature_mean))
+
 
 EVAL_BATCH = 2048
 TRAIN_GAP = 8  # chunked training reads span gaps of up to this many rows (~1.7x the bytes)
@@ -259,7 +268,7 @@ class ChunkBuffers(torch.utils.data.Dataset):
 
 def _args(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    # train.py's names, so dietnet.training builds both command lines alike.
+    # train.py's names, kept.
     p.add_argument("--exp-path", required=True)
     p.add_argument("--exp-name", required=True)
     p.add_argument("--config", required=True)
@@ -525,7 +534,7 @@ def main(argv=None) -> None:  # noqa: C901 - one training run, in train.py's ord
     best_path, last_path = results / "best_model.pt", results / "last_model.pt"
     if lead:
         results.mkdir(parents=True, exist_ok=True)
-    say(f"dietnet: data-parallel training on {world} {'GPUs' if cuda else 'CPU processes'}; "
+    say(f"dietnet: training on {world} {'GPUs' if cuda else 'CPU processes'}; "
         f"global batch {batch_size} ({per_rank} per process), {args.inputs} store, "
         f"{args.workers} loader workers")  # fmt: skip
 

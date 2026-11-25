@@ -101,7 +101,7 @@ To replace or extend the embedding, see [SNP features](features.md).
 ### `train`
 
 `train` fits one model for every combination of `--seeds` and `--folds`.
-By default, it runs the [published code](parity.md), with the same training loop, early stopping and choice of best checkpoint.
+The network, loss, early stopping and choice of best epoch are those of the [published code](parity.md), but the batches are read in another order, so the weights are not bit-identical to those of a model trained with it.
 Values are comma-separated (`--seeds 78,79,80`), or the flag is repeated.
 
 Each finished model becomes a [package](formats.md#model-packages) in `exp/packages/seed_<seed>/fold_<fold>/`, with its held-out predictions in `test_predictions.tsv`.
@@ -182,11 +182,9 @@ The option's value is \(\lambda\), and \(v_j\) is 1 unless it is [set for each S
 The group lasso can set all the values in \(\delta_j\) to zero together, and the weights of that SNP are then exactly those of the standard Diet Network.
 
 ```bash
-dietnet train --engine dietnet --free-snp-weights 0.3 ...    # lambda = 0.3
+dietnet train --free-snp-weights 0.3 ...    # lambda = 0.3
 ```
 
-The flag `--engine dietnet` selects the training loop of this package instead of the published one, which does not have \(\delta\).
-It trains the same network and is [faster](scaling.md#training-on-a-biobank), but the results are not bit-identical.
 Packages store \(\delta\) (package format 3), and `predict` uses it.
 
 ### Choosing lambda

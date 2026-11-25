@@ -87,7 +87,7 @@ def run(name: str, args: list, log: Path | None = None, env: dict | None = None)
     """Run upstream script ``name`` with ``args``, as its README does.
 
     ``env``: extra environment variables for the script's process (e.g.
-    :data:`dietnet._launch.MEMMAP_ENV`).
+    an option of the script).
 
     The working directory is the script's own, for its ``import helpers``.
     PYTHONHASHSEED is fixed because partition_data.py iterates over ``set(labels)``:

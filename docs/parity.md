@@ -8,10 +8,11 @@ never a tolerance to loosen.
 
 ## Upstream's code, unmodified
 
-`Dietnet_train_and_evaluate/` holds only the upstream files the CLI runs (four
-scripts and the `helpers` package they import), byte for byte as they are at
-HussinLab/DIETNETWORK commit `5481556e`. The rest of upstream (deprecated code,
-experiments, its own inference scripts) is not kept.
+`Dietnet_train_and_evaluate/` holds upstream's scripts and the `helpers` package they import,
+byte for byte as they are at HussinLab/DIETNETWORK commit `5481556e`. `dietnet` runs
+`partition_data.py`, and uses the model and helper modules. `train.py`, `generate_embedding.py`
+and `compute_input_features_statistics.py` are run by the tests only. The rest of upstream
+(deprecated code, experiments, its own inference scripts) is not kept.
 
 `src/dietnet/upstream_manifest.json` records the commit, a SHA-256 for every
 kept file, and the list of removed ones. `tests/unit/test_upstream_unchanged.py`
@@ -23,11 +24,9 @@ installed copy.
 Where upstream's behaviour has to differ, it is changed *around* the call, never
 in the file:
 
-- **torch's safe loader.** `train.py` saves numpy scalars in its checkpoint
-  and reloads it with a bare `torch.load`, which torch ≥ 2.6 refuses.
-  `dietnet._launch` allowlists exactly those numpy types (keeping
-  `weights_only=True`, the remedy torch's own error message gives) and then
-  runs the script unmodified.
+- **torch's safe loader.** Upstream's scripts reload checkpoints with a bare `torch.load`, which
+  torch ≥ 2.6 refuses for the numpy scalars they hold. `dietnet._launch` allowlists exactly
+  those numpy types (keeping `weights_only=True`) and then runs the script unmodified.
 - **Hash seed.** `partition_data.py` iterates `set(labels)`, so the order of
   samples within a fold, and with it training under a fixed seed, depends on
   Python's per-process hash seed. Every upstream script runs with
@@ -89,8 +88,9 @@ Some checks have no upstream counterpart:
 - **The pipeline end to end** (`tests/integration/`): every command on both
   fixtures through the CLI, with accuracy floors, regression, the recorded
   preprocessing and strict loading.
-- **Retraining** the 15 published models with `dietnet train`, on the
-  published split and configs: held-out accuracy 0.9282 against the published
+- **Training** differs from upstream's `train.py` on purpose: see [Scaling](scaling.md). Training
+  the 15 published models with upstream's `train.py`, on the
+  published split and configs, gave held-out accuracy 0.9282 against the published
   0.9214, and 96.1% agreement with the published model of the same (seed,
   fold). Weights are not identical (GPU nondeterminism, a newer torch); see
   `reproduction/README.md`.
