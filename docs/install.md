@@ -12,7 +12,7 @@ To check the installation, run `dietnet info`:
 
 ```text
 $ dietnet info
-dietnet 0.5.0
+dietnet 0.6.0
 upstream HussinLab/DIETNETWORK 5481556e472140c6d3a67363c1286f22109fb1ce at ...
 upstream files: identical to the pinned commit
 torch 2.15.0, cuda available: False

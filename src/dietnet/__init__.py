@@ -8,4 +8,4 @@ matching of new cohorts, portable model packages, ensembles, training and
 inference at biobank scale, and a command line around all of it.
 """
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

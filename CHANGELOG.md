@@ -7,15 +7,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-25
+
+One training loop, genotypes read from the packed file everywhere, and documentation
+rewritten for clarity.
+
 ### Changed
 
+- `train` has one training loop, the one that was `--engine dietnet`. Its batches differ
+  from upstream's `train.py`, so models are no longer bit-identical to it; the network,
+  loss, early stopping and choice of best epoch are the same.
 - `generate-embedding` and the `class_genotype_freq` features are computed from the packed
   genotypes, a block of samples at a time: the same numbers as upstream's script.
 - `compute-input-stats` always streams: means identical to upstream's script, SDs to
   floating-point rounding.
-- `train` has one training loop, the one that was `--engine dietnet`. Its batches differ
-  from upstream's `train.py`, so models are no longer bit-identical to it; the network,
-  loss, early stopping and choice of best epoch are the same.
+- Docs: every page rewritten for a reader who has not seen the code. They describe what each
+  command does rather than the published scripts behind it, the training page gives the
+  formula of free SNP weights (rendered with MathJax), the API page maps each command to its
+  function, and the parity page says what differs from the published code on purpose.
+- Docs: the height and BMI flags include `--chunk-rows 2048`, without which `train` refuses
+  `--snp-blocks`.
 
 ### Removed
 
